@@ -1125,16 +1125,22 @@ func isDashString(v object.Value) bool {
 	return ok && s.Str() == "-"
 }
 
-// rbWarn emits an MRI rb_warn-style warning line to the current $stderr, but only
-// when $VERBOSE is non-nil (false or true) — the gate rb_warn applies. Writing to
-// curStderr (rather than Kernel#warn) keeps the warning off stdout while still
-// honouring a $stderr reassigned to a StringIO (mspec's `complain` matcher). Used
-// for the encoding options that IO.new silently overrides.
+// rbWarn emits an MRI rb_warn-style warning line, but only when $VERBOSE is
+// non-nil (false or true) — the gate rb_warn applies. Used for the encoding
+// options that IO.new silently overrides.
+//
+// It goes through writeWarningStr (error.c rb_write_warning_str → Warning.warn),
+// like every other rb_warn here. It used to write to curStderr() instead, and the
+// comment that justified it — "still honouring a $stderr reassigned to a StringIO
+// (mspec's `complain` matcher)" — names the reason the defect survived: a StringIO
+// IS an *IOObj in rbgo, so it satisfied the type assertion curStderr() makes and
+// the harness's own double could never show the warning being dropped for a
+// $stderr that merely answers #write.
 func (vm *VM) rbWarn(format string, a ...any) {
 	if object.IsNil(vm.globals["$VERBOSE"]) {
 		return
 	}
-	vm.curStderr().writeStr(fmt.Sprintf(format, a...) + "\n")
+	vm.writeWarningStr(fmt.Sprintf(format, a...) + "\n")
 }
 
 // ioOptEncoding returns the canonical encoding name selected by the :encoding /

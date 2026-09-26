@@ -537,7 +537,14 @@ func (vm *VM) registerIO() {
 			if !object.IsNil(uplevel) {
 				b.WriteString(vm.warnUplevelPrefix(lev))
 			}
-			write := func(s string) { b.WriteString(s) }
+			// Kernel#warn assembles ONE message through rb_io_puts's line shaping and
+			// then hands it to Warning.warn, so the pieces rb_io_writev would have
+			// written separately are simply appended to the same buffer here.
+			write := func(ss ...string) {
+				for _, s := range ss {
+					b.WriteString(s)
+				}
+			}
 			for _, a := range pos {
 				vm.ioPutsValueRec(write, a, nil)
 			}
@@ -570,17 +577,10 @@ func (vm *VM) registerIO() {
 				return object.NilV
 			}
 		}
-		// error.c rb_warn_category consults rb_warning_warn_arity(): a Warning.warn
-		// that takes exactly one argument is called WITHOUT the category keyword,
-		// so a program that overrides it with `def Warning.warn(message)` is not
-		// handed an argument it cannot take.
-		msg := object.NewString(b.String())
-		if m := vm.resolveClassMethod(vm.consts["Warning"].(*RClass), "warn"); m != nil && methodArity(m) == 1 {
-			return vm.send(vm.consts["Warning"], "warn", []object.Value{msg}, nil)
-		}
-		kw := object.NewHash()
-		kw.Set(object.SymVal("category"), category)
-		return vm.send(vm.consts["Warning"], "warn", []object.Value{msg, kw}, nil)
+		// Dispatch through warningWarn, the one place that performs a Warning.warn
+		// call (and applies error.c rb_warn_category's arity rule) — the same door
+		// every internal rb_warn now uses via writeWarningStr.
+		return vm.warningWarn(object.NewString(b.String()), category)
 	})
 
 	// File streams: File.open returns a buffered, file-backed IO carrying the
@@ -1286,6 +1286,13 @@ func ioFlush(o *IOObj) {
 
 // curStdout / curStderr / curStdin return the IO currently bound to the global,
 // falling back to the raw VM writer when a host rebinds it to a non-IO value.
+//
+// These answer an *IOObj, so they are for the callers that genuinely need a
+// stream OBJECT (Rack's rack.errors, Puma's log sink, an ARGF delegate). They are
+// NOT the way to emit output: $stdout and $stderr are duck-typed in MRI and hold
+// any object answering #write (see stdoutValue / stderrValue below), so a write
+// dispatched off an *IOObj obtained here silently ignores such a binding. Emit
+// through ioWrite / ioWritev / writeWarningStr instead.
 func (vm *VM) curStdout() *IOObj { return vm.curIO("$stdout", vm.out, "STDOUT") }
 func (vm *VM) curStderr() *IOObj { return vm.curIO("$stderr", vm.errOut, "STDERR") }
 
@@ -1294,6 +1301,170 @@ func (vm *VM) curIO(global string, w io.Writer, label string) *IOObj {
 		return o
 	}
 	return &IOObj{cls: vm.consts["IO"].(*RClass), w: w, label: label}
+}
+
+// stdoutValue and stderrValue answer the OBJECT $stdout / $stderr is bound to —
+// io.c's rb_ractor_stdout / rb_ractor_stderr, read by stdout_getter (io.c:9222)
+// and stderr_getter (io.c:9236) at v3_4_0. That object need not be an IO, and in
+// general promises exactly one method: the setters stdout_setter (io.c:9215) and
+// stderr_setter (io.c:9228) both begin
+//
+//	must_respond_to(id_write, val, id);
+//
+// which admits ANY object answering #write and rejects the rest with
+//
+//	TypeError: $stderr must have write method, Mute given
+//
+// So the standard streams are duck-typed at the language level, and every write
+// below dispatches #write rather than assuming a stream object.
+func (vm *VM) stdoutValue() object.Value { return vm.stdSink("$stdout", vm.curStdout) }
+func (vm *VM) stderrValue() object.Value { return vm.stdSink("$stderr", vm.curStderr) }
+
+// stdSink resolves one of the two output globals to the object a write should be
+// dispatched to, with one non-MRI fallback: a value that does NOT answer #write
+// resolves to the underlying stream instead. MRI cannot reach that state through
+// assignment (must_respond_to refuses), but it can be reached by removing the
+// method afterwards — `$stdout = o; class << o; undef_method :write; end` — where
+// MRI raises NoMethodError and rbgo keeps writing, so a Go host embedding the VM
+// is not killed by a program mutating its own stream. That is an implementation
+// choice, not a differential case.
+func (vm *VM) stdSink(global string, fallback func() *IOObj) object.Value {
+	if v, ok := vm.globals[global]; ok && v != nil && vm.respondsToDynamic(v, "write") {
+		return v
+	}
+	return fallback()
+}
+
+// ioWrite is io.c's rb_io_write (v3_4_0, io.c:2296) — in full:
+//
+//	VALUE rb_io_write(VALUE io, VALUE str) { return rb_funcallv(io, id_write, 1, &str); }
+//
+// It is UNCONDITIONALLY a dynamic #write send. There is no fast path for a real
+// IO at this level, and no caller of it chooses one: the fast path lives one
+// level DOWN, inside IO#write's own C body (io_writev, io.c:2220), which is
+// reached only because method lookup on a real IO lands there — and io_writev
+// itself ends in `rb_funcallv(io, id_write, argc, argv)` the moment
+// rb_io_check_io reports the receiver is not an IO ("port is not IO, call write
+// method for it", io.c:2231). That is why this, and not a test at each call site,
+// is where rbgo dispatches: the rule has exactly one home.
+func (vm *VM) ioWrite(sink object.Value, s string) {
+	vm.send(sink, "write", []object.Value{object.NewString(s)}, nil)
+}
+
+// ioWritev is io.c's rb_io_writev (v3_4_0, io.c:2302), the multi-piece form that
+// rb_io_puts (io.c:8959) and rb_p_write (io.c:9018) use. The piece count is
+// OBSERVABLE to a duck-typed stream, and MRI splits on the receiver's #write
+// ARITY, not on the piece count alone:
+//
+//	if (argc > 1 && rb_obj_method_arity(io, id_write) == 1) { … one call per piece … }
+//	return rb_funcallv(io, id_write, argc, argv);
+//
+// So `puts "hi"` on a `def write(*a)` stream sees write("hi", "\n") — TWO
+// arguments — while a `def write(x)` stream sees write("hi") then write("\n").
+// Joining the pieces into one "hi\n" argument, as this file used to, is visible
+// to any stream that records what it was handed.
+//
+// It takes at least one piece, and deliberately carries no guard for zero: MRI's
+// rb_io_writev is never reached with argc 0 either (rb_io_puts always builds n >= 1,
+// and its no-argument case goes through rb_io_write), so a guard here would be a
+// branch no test could reach honestly.
+func (vm *VM) ioWritev(sink object.Value, strs ...string) {
+	if len(strs) > 1 && vm.writeArityIsOne(sink) {
+		vm.warnOutdatedWrite(sink)
+		for _, s := range strs {
+			vm.ioWrite(sink, s)
+		}
+		return
+	}
+	args := make([]object.Value, len(strs))
+	for i, s := range strs {
+		args[i] = object.NewString(s)
+	}
+	vm.send(sink, "write", args, nil)
+}
+
+// writeArityIsOne reports whether sink's #write takes exactly one argument —
+// rb_obj_method_arity(io, id_write) == 1 in rb_io_writev. A splat or an optional
+// parameter gives a negative arity, which is not "one", so only a strictly
+// single-argument #write triggers the split.
+func (vm *VM) writeArityIsOne(sink object.Value) bool {
+	m := vm.findMethod(sink, "write")
+	return m != nil && methodArity(m) == 1
+}
+
+// warnOutdatedWrite emits rb_io_writev's deprecation notice (io.c:2306-2315) for
+// a stream whose #write accepts only one argument. Its gates are MRI's three:
+//
+//   - the receiver is not the current $stderr — warning ABOUT $stderr would
+//     re-enter the stream being complained about;
+//   - $VERBOSE is TRUE: rb_category_warning "reports only in verbose mode"
+//     (error.c:420, RTEST(ruby_verbose)), so a false $VERBOSE is not enough,
+//     unlike rb_warn's !NIL_P test;
+//   - the :deprecated category is enabled, which it is NOT by default in Ruby 3+,
+//     which is why this line is almost never seen.
+//
+// The separator names how #write was reached: '.' with the OBJECT itself when it
+// lives on the object's singleton, '#' with the class otherwise
+// (RCLASS_SINGLETON_P(klass) ? (klass = io, '.') : '#').
+//
+// The name is rendered with INSPECT, not #to_s. The directive is `%+"PRIsVALUE"`
+// and the '+' flag means rb_inspect, which is observable: an object carrying
+// @marker and its own #to_s is named `#<Object:0x… @marker=42>` by MRI, not by
+// whatever that #to_s returns. Measured — the first version of this function used
+// #to_s and printed the overridden value.
+func (vm *VM) warnOutdatedWrite(sink object.Value) {
+	if sink == vm.stderrValue() || vm.gvar("$VERBOSE") != object.True {
+		return
+	}
+	if !vm.send(vm.consts["Warning"], "[]", []object.Value{object.SymVal("deprecated")}, nil).Truthy() {
+		return
+	}
+	name, sep := vm.moduleToSStr(vm.classOf(sink)), "#"
+	if sc := vm.objSingleton(sink); sc != nil && lookupMethod(sc, "write") != nil {
+		name, sep = vm.pInspect(sink), "."
+	}
+	vm.writeWarningStr(vm.warnUplevelPrefix(0) + name + sep +
+		"write is outdated interface which accepts just one argument\n")
+}
+
+// writeWarningStr is error.c's rb_write_warning_str (v3_4_0, error.c:374):
+//
+//	static void rb_write_warning_str(VALUE str) { rb_warning_warn(rb_mWarning, str); }
+//
+// and rb_warning_warn (error.c:341) is `rb_funcallv(mod, id_warn, 1, &str)` — a
+// DYNAMIC send of Warning.warn. Every interpreter-generated warning ends here:
+// rb_warn (error.c:466), rb_warning (:497), rb_enc_warn (:489), rb_compile_warn
+// and rb_warn_deprecated all funnel through it. Two consequences follow, and
+// rbgo used to get both wrong by writing to curStderr() directly:
+//
+//   - a program that overrides Warning.warn intercepts rbgo's OWN warnings, not
+//     just the ones Kernel#warn raised;
+//   - $stderr is reached only by the DEFAULT Warning.warn, whose body is
+//     `$stderr.write(message)` — an ordinary send, so a $stderr that merely
+//     answers #write collects the warning.
+//
+// This is the single dispatch point for internal warnings, one level above
+// $stderr, so the duck-typing rule is stated once here instead of at each
+// emitter. A StringIO test double cannot witness either consequence: a StringIO
+// IS an *IOObj in rbgo, so it satisfied the old type assertion and collected the
+// warning either way.
+func (vm *VM) writeWarningStr(msg string) {
+	vm.warningWarn(object.NewString(msg), object.NilV)
+}
+
+// warningWarn performs the Warning.warn call itself, applying error.c
+// rb_warn_category's arity rule (error.c:355): rb_warning_warn_arity() asks how
+// many arguments the CURRENT Warning.warn takes, and a one-argument override is
+// called WITHOUT the category keyword, so `def Warning.warn(message)` is never
+// handed an argument it cannot accept.
+func (vm *VM) warningWarn(msg *object.String, category object.Value) object.Value {
+	w := vm.consts["Warning"]
+	if m := vm.resolveClassMethod(w.(*RClass), "warn"); m != nil && methodArity(m) == 1 {
+		return vm.send(w, "warn", []object.Value{msg}, nil)
+	}
+	kw := object.NewHash()
+	kw.Set(object.SymVal("category"), category)
+	return vm.send(w, "warn", []object.Value{msg, kw}, nil)
 }
 
 // ioWriteAll writes every argument to o and returns the total byte count, the
@@ -2635,12 +2806,17 @@ func ioGetsParagraph(o *IOObj, limit int, chomp bool) object.Value {
 
 // ioPuts writes args to self with Kernel#puts semantics (arrays flattened, a
 // trailing newline added unless already present; no args ⇒ a lone newline).
-// Every piece is emitted through self's #write method (via vm.send) rather than
-// the buffer directly, so a stream that overrides #write sees puts's output, as
-// in MRI; each value is also stringified through its (possibly user-defined)
-// #to_s.
+// Every piece is emitted through ioWritev — self's #write, dispatched — rather
+// than the buffer directly, so a stream that overrides #write sees puts's
+// output, as in MRI; each value is also stringified through its (possibly
+// user-defined) #to_s.
+//
+// The line and its terminator go to ioWritev as TWO pieces, because rb_io_puts
+// (io.c:8959) builds `args[]` that way and hands both to rb_io_writev in one
+// call. A stream that records its arguments sees write("hi", "\n"), not
+// write("hi\n").
 func (vm *VM) ioPuts(self object.Value, args []object.Value) {
-	write := func(s string) { vm.send(self, "write", []object.Value{object.NewString(s)}, nil) }
+	write := func(ss ...string) { vm.ioWritev(self, ss...) }
 	if len(args) == 0 {
 		write("\n")
 		return
@@ -2654,10 +2830,10 @@ func (vm *VM) ioPuts(self object.Value, args []object.Value) {
 // self-referential array: puts recurses into nested arrays (each element on its
 // own line), so a member that is its own container is written as "[...]" (as MRI
 // does) rather than looping forever. seen tracks the arrays currently expanding.
-func (vm *VM) ioPutsValueRec(write func(string), v object.Value, seen map[*object.Array]struct{}) {
+func (vm *VM) ioPutsValueRec(write func(...string), v object.Value, seen map[*object.Array]struct{}) {
 	if arr, ok := v.(*object.Array); ok {
 		if _, rec := seen[arr]; rec {
-			write("[...]\n")
+			write("[...]", "\n")
 			return
 		}
 		if seen == nil {
@@ -2681,10 +2857,19 @@ func (vm *VM) ioPutsValueRec(write func(string), v object.Value, seen map[*objec
 			return
 		}
 	}
-	if s := vm.displayStr(v); strings.HasSuffix(s, "\n") {
+	// rb_io_puts (io.c:8979-8990) appends rb_default_rs as a SECOND piece rather
+	// than concatenating it, and builds three shapes, all of which this mirrors:
+	// an EMPTY line writes the separator alone (`args[n++] = rb_default_rs`, n=1);
+	// a line already ending in a newline writes itself alone (n=1); anything else
+	// writes line and separator as two pieces (n=2).
+	s := vm.displayStr(v)
+	switch {
+	case s == "":
+		write("\n")
+	case strings.HasSuffix(s, "\n"):
 		write(s)
-	} else {
-		write(s + "\n")
+	default:
+		write(s, "\n")
 	}
 }
 
