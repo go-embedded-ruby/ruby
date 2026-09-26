@@ -99,6 +99,7 @@ func (vm *VM) registerProcess() {
 	mod.consts["CLOCK_MONOTONIC"] = object.IntValue(clockMonotonic)
 	vm.consts["Process::CLOCK_MONOTONIC"] = object.IntValue(clockMonotonic)
 
+	vm.defineProcessExit(def) // unconditional: Init_process declares these on every platform
 	vm.registerProcessPosix(mod, def)
 	vm.registerProcessResiduals(mod, def)
 }
@@ -302,22 +303,55 @@ func (vm *VM) defineProcessGroups(def func(string, NativeFn)) {
 // anything else goes through signm2signo (which accepts a leading '-' to mean
 // "signal the process group"); every remaining argument is a pid coerced with
 // NUM2PIDT, and the return value is the number of pids signalled.
+//
+// The pid == self arm is the subject of issue #691 and does NOT reach kill(2):
+// rb_f_kill consults the installed disposition and, for a signal Ruby handles
+// itself, enqueues it and runs rb_thread_execute_interrupts() before returning,
+// so the Ruby-level effect (a trap, a SignalException, an Interrupt) happens
+// synchronously inside Process.kill. vm.selfSignal is that arm plus
+// rb_signal_exec; it reports false when MRI would really signal the OS.
 func (vm *VM) defineProcessKill(def func(string, NativeFn)) {
 	def("kill", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		if len(args) < 2 {
 			raise("ArgumentError", "wrong number of arguments (given %d, expected 2+)", len(args))
 		}
 		sig := vm.killSignalNumber(args[0])
+		self := os.Getpid()
 		for _, pv := range args[1:] {
 			pid, send := int(vm.procToInt(pv)), sig
 			if sig < 0 { // killpg(pgid, sig) == kill(-pgid, sig)
 				pid, send = -pid, -sig
+			}
+			// rb_f_kill takes the self arm only for a POSITIVE signal aimed at this
+			// very process; a process-group kill (sig < 0) always goes to the OS.
+			if sig > 0 && pid == self && vm.selfSignal(send) {
+				continue
 			}
 			if err := procKill(pid, send); err != nil {
 				sysFail(err, "")
 			}
 		}
 		return object.IntValue(int64(len(args) - 1))
+	})
+}
+
+// defineProcessExit installs Process.exit, Process.exit! and Process.abort.
+// process.c Init_process declares all three with rb_define_module_function on
+// rb_mProcess, which makes them PUBLIC singleton methods on the module as well
+// as private instance methods — so `Process.exit(5)` is a legal spelling where
+// rbgo previously reached only Kernel's private copies and raised NoMethodError
+// (issue #676's second defect). The bodies are rb_f_exit / rb_f_exit_bang /
+// rb_f_abort, the same functions Kernel's copies name, so they share
+// exitStatusArg's exit_status_code mapping and raiseSystemExit.
+func (vm *VM) defineProcessExit(def func(string, NativeFn)) {
+	def("exit", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		return vm.raiseSystemExit(vm.exitStatusArg(args, 0), "exit")
+	})
+	def("exit!", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		return vm.raiseSystemExit(vm.exitStatusArg(args, 1), "exit")
+	})
+	def("abort", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		return vm.send(vm.main, "abort", args, blk)
 	})
 }
 

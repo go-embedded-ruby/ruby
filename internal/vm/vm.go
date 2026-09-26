@@ -303,6 +303,24 @@ type VM struct {
 	arModels     map[*RClass]*ActiveRecordModel
 	arTableNames map[*RClass]string
 
+	// terminalExit is the SystemExit that ended the run, kept because Run
+	// deliberately returns no error for one (a program that calls exit is not
+	// crashing) while its @status is still the process's exit code. nil until a
+	// SystemExit reaches the top. See TerminalExit.
+	terminalExit *RubyError
+
+	// exitImmediate records that the terminal SystemExit came from Kernel#exit! /
+	// Process.exit!, which process.c rb_f_exit_bang implements with _exit(2) — so
+	// no at_exit handler runs. Set by raiseSystemExitImmediate, read by runAtExit.
+	exitImmediate bool
+
+	// trapList is MRI's vm->trap_list.cmd[] (signal.c trap/trap_handler): the
+	// signal disposition a program installed with Signal.trap / Kernel#trap,
+	// keyed by signal number. An absent key means the signal's default Ruby
+	// action. Process.kill consults it when the target is this process — see
+	// vm.selfSignal, which is rb_f_kill's pid == self arm.
+	trapList map[int]trapCmd
+
 	cBasicObject, cObject, cModule, cClass *RClass
 	cKernel                                *RClass // the Kernel module (included into Object; its methods live on cObject)
 	cRefinement                            *RClass // the Refinement class (a Module subclass; instances are the anonymous modules Module#refine creates)
@@ -1133,6 +1151,13 @@ func (vm *VM) Run(iseq *bytecode.ISeq) (result object.Value, err error) {
 			// error — so a real CLI that ends by calling exit (e.g. Puppet's
 			// exit_on_fail) terminates quietly rather than printing a backtrace.
 			if vm.isSystemExit(rerr.Class) {
+				// ...but the STATUS it carries is the process's exit code, and
+				// discarding it is issue #676: `rbgo -e 'exit 3'` exited 0. Record
+				// the terminal SystemExit so a host that owns a process (the rbgo
+				// CLI) can do what MRI's ruby_run_node -> rb_ec_cleanup does with it,
+				// while an embedded host that has no process still sees a clean
+				// return. See vm.TerminalExit and cmd/rbgo/exit_status.go.
+				vm.terminalExit = &rerr
 				vm.frameNames = vm.frameNames[:0]
 				vm.frameFiles = vm.frameFiles[:0]
 				vm.frameCrefs = vm.frameCrefs[:0]
