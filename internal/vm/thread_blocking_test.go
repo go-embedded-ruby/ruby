@@ -142,6 +142,22 @@ sleep 0.05
 owner.kill
 owner.join
 w.join`, "waiter got it\n"},
+		// Killing a waiter that is neither the head nor the tail of the wait queue
+		// leaves the others queued, so both survivors still get the mutex.
+		{"kill_a_middle_waiter", `m = Mutex.new
+m.lock
+a = Thread.new { m.lock; m.unlock }
+sleep 0.05
+b = Thread.new { m.lock; m.unlock }
+sleep 0.05
+c = Thread.new { m.lock; m.unlock }
+sleep 0.05
+b.kill
+b.join
+m.unlock
+a.join
+c.join
+puts "done"`, "done\n"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -262,22 +278,6 @@ Thread.pass until th.stop?
 m.synchronize { cv.signal; sleep 0.05; th.kill }
 th.join
 p owned`, "true\n"},
-		// Killing a waiter that is neither the head nor the tail of the wait queue
-		// leaves the others queued, so both survivors still get the mutex.
-		{"kill_a_middle_waiter", `m = Mutex.new
-m.lock
-a = Thread.new { m.lock; m.unlock }
-sleep 0.05
-b = Thread.new { m.lock; m.unlock }
-sleep 0.05
-c = Thread.new { m.lock; m.unlock }
-sleep 0.05
-b.kill
-b.join
-m.unlock
-a.join
-c.join
-puts "done"`, "done\n"},
 		// A waiter that has already been HANDED the mutex but killed before it could
 		// run gives it back rather than dying with it: MRI releases the mutex before
 		// the interrupt check because the check may raise (do_mutex_lock).
