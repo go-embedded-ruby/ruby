@@ -5,6 +5,8 @@
 package vm_test
 
 import (
+	"fmt"
+	"math"
 	"strings"
 	"testing"
 )
@@ -65,11 +67,12 @@ class D
 end
 p 4.0 ** D.new`, "16.0\n"},
 		// Each quadrant of the half-turn reduction inside sincospi.
-		{"polar_quadrant0", `p((-2.0) ** 0.1)`, "(1.0193171355373614+0.3311962140437956i)\n"},
-		{"polar_quadrant1", `p((-2.0) ** (1.0 / 3))`, "(0.6299605249474366+1.0911236359717214i)\n"},
-		{"polar_quadrant2_half", `p((-2.0) ** 0.75)`, "(-1.1892071150027212+1.189207115002721i)\n"},
-		{"polar_quadrant2", `p((-2.0) ** 1.1)`, "(-2.0386342710747223-0.6623924280875918i)\n"},
-		{"polar_quadrant3", `p((-2.0) ** 1.6)`, "(0.9367643554147175-2.8830642348724616i)\n"},
+		// The polar cases are NOT pinned to their last digit here: see
+		// TestPowPolarWithinTolerance below. `(-2.0) ** 0.1` goes through cos/sin,
+		// and Go's math.Cos differs from glibc's by one ULP — so does MRI's own
+		// answer, since it calls the platform libm. Pinning 16 significant digits
+		// asserts the architecture, not the semantics: these five matched MRI
+		// exactly on darwin/arm64 and failed by one ULP on linux/amd64.
 		// rb_dbl_complex_new_polar_pi's sign flip on an odd half turn.
 		{"polar_half_turn_flip", `p((-2.0) ** 2.5)`, "(0.0+5.65685424949238i)\n"},
 		{"polar_neg_half_turn", `p((-2.0) ** -1.5)`, "(0.0+0.3535533905932738i)\n"},
@@ -135,5 +138,38 @@ func TestPowExponentiationErrors(t *testing.T) {
 				t.Fatalf("src=%q got %s: %q want %s: %q", tc.src, class, msg, tc.class, tc.msg)
 			}
 		})
+	}
+}
+
+// TestPowPolarWithinTolerance covers the polar branch of Float#** for a negative
+// base (complex.c rb_dbl_complex_new_polar_pi, via cospi/sinpi): the result is a
+// Complex whose components come from cos and sin.
+//
+// It asserts the VALUES within 1e-15 rather than their decimal expansion. MRI
+// calls the platform libm, Go calls its own math package, and the two agree to
+// within an ULP but not always to the last printed digit — the five cases this
+// replaces matched MRI byte-for-byte on darwin/arm64 and each missed by one ULP
+// on linux/amd64. A test that pins all 16 digits asserts which machine ran it.
+func TestPowPolarWithinTolerance(t *testing.T) {
+	cases := []struct {
+		src    string
+		re, im float64
+	}{
+		{`(-2.0) ** 0.1`, 1.0193171355373614, 0.3311962140437956},
+		{`(-2.0) ** (1.0 / 3)`, 0.6299605249474366, 1.0911236359717214},
+		{`(-2.0) ** 0.75`, -1.1892071150027212, 1.189207115002721},
+		{`(-2.0) ** 1.1`, -2.0386342710747223, -0.6623924280875918},
+		{`(-2.0) ** 1.6`, 0.9367643554147175, -2.8830642348724616},
+	}
+	for _, c := range cases {
+		got := strings.TrimSpace(eval(t, `z = (`+c.src+`); print z.real, " ", z.imaginary`))
+		var re, im float64
+		if _, err := fmt.Sscanf(got, "%g %g", &re, &im); err != nil {
+			t.Errorf("src=%q: could not read %q: %v", c.src, got, err)
+			continue
+		}
+		if math.Abs(re-c.re) > 1e-15 || math.Abs(im-c.im) > 1e-15 {
+			t.Errorf("src=%q got (%g%+gi), want (%g%+gi) within 1e-15", c.src, re, im, c.re, c.im)
+		}
 	}
 }
