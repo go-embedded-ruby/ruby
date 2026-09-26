@@ -7,9 +7,38 @@ package vm_test
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
+
+// chdirInto puts the test binary's working directory in dir for the duration of
+// the test, and puts it back in THIS package's source directory afterwards.
+//
+// Both halves matter. An earlier test in this package leaves the process in a
+// DELETED directory — wave28_file_open_mode_test.go runs `Dir.chdir(scratch)`
+// with no block, and the scratch directory is removed when that test ends — so a
+// test that reads the working directory inherits a path that no longer exists.
+// That is invisible on macOS, where os.Getwd() still answers it, and fatal on
+// Linux, where Getwd FAILS: File.expand_path then has no directory to prepend
+// and File.realpath cannot resolve a relative name. Both of those showed up as
+// green here and red on the two Linux CI lanes.
+//
+// The restore target is this file's own directory rather than the previous
+// working directory, because the previous one may be the deleted path we are
+// escaping. runtime.Caller gives it, and it is guaranteed to exist.
+func chdirInto(t *testing.T, dir string) {
+	t.Helper()
+	_, self, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller: no source path for the restore target")
+	}
+	pkgDir := filepath.Dir(self)
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir %s: %v", dir, err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(pkgDir) })
+}
 
 // TestIOOpenTimeEncodingResolution pins io.c rb_io_ext_int_to_encs — the single
 // place MRI turns a (named external, named internal) pair into the two
@@ -563,6 +592,9 @@ func TestIOBufferStringAndFree(t *testing.T) {
 //
 // Every expectation was taken from MRI ruby 4.0.5 running the same source.
 func TestFileExpandPathEncoding(t *testing.T) {
+	// Every case here expands a RELATIVE path, so every case reads the working
+	// directory. See chdirInto for why it cannot be the inherited one.
+	chdirInto(t, ioScratchDir(t))
 	for _, c := range []struct{ name, body, want string }{
 		{
 			// The ARGUMENT's encoding wins over the default: both are ASCII-only, so
@@ -656,12 +688,15 @@ func TestIONewlineWriteDecorator(t *testing.T) {
 // relative path there is resolved against the working directory — so the
 // relative and absolute spellings must name the same file.
 func TestFileRealpathRelativeUsesTheCwd(t *testing.T) {
-	// The Go test runs with the package directory as its working directory, so
-	// this file is reachable by its bare name.
-	const src = `rel = File.realpath("wave32_ioenc_test.go")
-p [File.absolute_path?(rel), File.basename(rel), rel == File.realpath(File.expand_path("wave32_ioenc_test.go"))]
+	dir := ioScratchDir(t)
+	if err := os.WriteFile(filepath.Join(dir, "rel.txt"), nil, 0o644); err != nil {
+		t.Fatalf("fixture: %v", err)
+	}
+	chdirInto(t, dir)
+	const src = `rel = File.realpath("rel.txt")
+p [File.absolute_path?(rel), File.basename(rel), rel == File.realpath(File.expand_path("rel.txt"))]
 `
-	want := "[true, \"wave32_ioenc_test.go\", true]\n"
+	want := "[true, \"rel.txt\", true]\n"
 	if got := eval(t, src); got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
