@@ -882,7 +882,15 @@ func (vm *VM) arrayUniq(elems []object.Value, blk *Proc) []object.Value {
 // not go through here.
 func (vm *VM) arrayIncludesEql(elems []object.Value, v object.Value) bool {
 	for _, e := range elems {
-		if vm.eqlKeys(e, v) {
+		// v is the element being looked UP and e one already in the set, which
+		// is the order MRI compares them in: rb_ary_diff / rb_ary_and build an
+		// st table from the other array and then look each receiver element up,
+		// and st's EQUAL is rb_any_cmp(search_key, stored_key) = !rb_eql(a, b),
+		// i.e. the SEARCH key is the one sent #eql?. With the arguments the
+		// other way round, core/array/shared/difference's "removes an item
+		// identified as equivalent via #hash and #eql?" sent #eql? to the
+		// object that had not been given one.
+		if vm.eqlKeys(v, e) {
 			return true
 		}
 	}

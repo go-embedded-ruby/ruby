@@ -21,7 +21,7 @@ p $&.encoding`, "#<Encoding:EUC-JP>\n"},
 		{"dollar_pre", `
 s = "abc".dup.force_encoding(Encoding::EUC_JP)
 s =~ /(b)/
-p $`+"`"+`.encoding`, "#<Encoding:EUC-JP>\n"},
+p $` + "`" + `.encoding`, "#<Encoding:EUC-JP>\n"},
 		{"dollar_post", `
 s = "abc".dup.force_encoding(Encoding::EUC_JP)
 s =~ /(b)/
@@ -39,7 +39,7 @@ p $1.encoding`, "#<Encoding:EUC-JP>\n"},
 		{"empty_pre", `
 s = "abc".dup.force_encoding(Encoding::ISO_8859_1)
 s =~ /a/
-p [$`+"`"+`.empty?, $`+"`"+`.encoding]`, "[true, #<Encoding:ISO-8859-1>]\n"},
+p [$` + "`" + `.empty?, $` + "`" + `.encoding]`, "[true, #<Encoding:ISO-8859-1>]\n"},
 		{"empty_post", `
 s = "abc".dup.force_encoding(Encoding::ISO_8859_1)
 s =~ /c/

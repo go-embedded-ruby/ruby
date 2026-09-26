@@ -98,6 +98,9 @@ func (vm *VM) strByteindex(self *object.String, args []object.Value) object.Valu
 	}
 	switch needle := args[0].(type) {
 	case *Regexp:
+		// rb_str_byteindex_m goes through rb_reg_search too, so an unmatchable
+		// pattern/subject pair is an Encoding::CompatibilityError, not a nil.
+		vm.checkSubjectEncoding(needle, self)
 		md, base := needle.searchFrom(s, off)
 		if md == nil {
 			vm.lastMatch = object.NilV
@@ -141,6 +144,7 @@ func (vm *VM) strByterindex(self *object.String, args []object.Value) object.Val
 	}
 	switch needle := args[0].(type) {
 	case *Regexp:
+		vm.checkSubjectEncoding(needle, self)
 		return vm.byterindexRegexp(s, self.Enc, needle, off)
 	default:
 		ns := vm.strValueArg(args[0])

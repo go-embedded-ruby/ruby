@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"unicode/utf8"
 
 	"golang.org/x/text/encoding/charmap"
@@ -1999,9 +2000,16 @@ func (vm *VM) bootstrap() {
 	vm.cSymbol.define("to_sym", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return self
 	})
-	vm.cSymbol.define("intern", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return self // MRI: Symbol#intern is an alias of Symbol#to_sym (returns self)
-	})
+	aliasBuiltin(vm.cSymbol, "intern", "to_sym")
+	// string.c v3_4_0 sym_equal is `return RBOOL(obj == sym);`, registered under
+	// BOTH "==" and "===" with the same C function. rbgo let Symbol#== fall to
+	// Comparable#== (via #<=>) and #=== to Object#===, so the two were neither
+	// equal nor identity comparisons.
+	symEqual := func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.Bool(self == args[0])
+	}
+	vm.cSymbol.define("==", symEqual)
+	aliasBuiltin(vm.cSymbol, "===", "==")
 	// Symbol#encoding: the encoding of the symbol's string (symbol.c v3_4_0
 	// sym_encoding is rb_obj_encoding(rb_sym2str(sym))). rb_str_intern re-tags an
 	// ASCII-only string as US-ASCII before interning it, whatever encoding it
@@ -2037,7 +2045,7 @@ func (vm *VM) bootstrap() {
 		return object.IntValue(int64(utf8.RuneCountInString(symStr(self))))
 	}
 	vm.cSymbol.define("length", symLen)
-	vm.cSymbol.define("size", symLen)
+	aliasBuiltin(vm.cSymbol, "size", "length")
 	vm.cSymbol.define("empty?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(symStr(self) == "")
 	})
@@ -2057,26 +2065,65 @@ func (vm *VM) bootstrap() {
 		return object.Symbol(succString(symStr(self)))
 	}
 	vm.cSymbol.define("succ", symSucc)
-	vm.cSymbol.define("next", symSucc)
+	aliasBuiltin(vm.cSymbol, "next", "succ")
 	// Symbol#[] / #slice run the whole String#[] protocol against the symbol's
 	// name (they are registered after strIndexFn is defined, below).
-	vm.cSymbol.define("start_with?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		s := symStr(self)
-		for _, a := range args {
-			if strings.HasPrefix(s, strArg(a)) {
-				return object.True
-			}
-		}
-		return object.False
+	// symbol.c v3_4_0 defines #start_with? / #end_with? as
+	//     sym_start_with(argc, argv, sym) { return rb_str_start_with(argc, argv, rb_sym2str(sym)); }
+	// i.e. the String implementations over the symbol's name, so they take a
+	// Regexp, run #to_str on anything else, refuse an incompatible encoding and
+	// set $~ — none of which a plain strings.HasPrefix over strArg does.
+	vm.cSymbol.define("start_with?", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		return vm.send(symbolNameString(self), "start_with?", args, blk)
 	})
-	vm.cSymbol.define("end_with?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		s := symStr(self)
-		for _, a := range args {
-			if strings.HasSuffix(s, strArg(a)) {
-				return object.True
-			}
-		}
-		return object.False
+	vm.cSymbol.define("end_with?", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		return vm.send(symbolNameString(self), "end_with?", args, blk)
+	})
+	// symbol.c v3_4_0 rb_sym_to_s is `rb_str_dup(rb_sym2str(sym))` — a fresh
+	// MUTABLE copy of the interned name, carrying the symbol's encoding, so
+	// :ruby.to_s is US-ASCII and not the VM's default UTF-8. Object#to_s used to
+	// answer this and stamped UTF-8 on every symbol.
+	symToS := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return symbolNameString(self)
+	}
+	vm.cSymbol.define("to_s", symToS)
+	// string.c v3_4_0 Init_Symbol registers each of these PAIRS against ONE C
+	// function (rb_define_method(rb_cSymbol, "next", sym_succ, 0) beside
+	// "succ", "size" beside "length", "slice" beside "[]", "id2name" beside
+	// "to_s", "intern" beside "to_sym"), and MRI's method equality compares the
+	// cfunc, so Symbol.instance_method(:next) == Symbol.instance_method(:succ).
+	// Sharing the record here is how rbgo spells that — the same thing it
+	// already does for String#slice / String#to_str.
+	aliasBuiltin(vm.cSymbol, "id2name", "to_s")
+	// sym_inspect builds ":" + the name and associates the symbol's encoding
+	// with the result (rb_enc_associate), so an ASCII-only symbol inspects as a
+	// US-ASCII String.
+	vm.cSymbol.define("inspect", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.NewStringBytesEnc([]byte(self.Inspect()), internedSymbolName(symStr(self)).Enc)
+	})
+	// Symbol has no allocator and its .new is undefined (symbol.c v3_4_0
+	// Init_Symbol: rb_undef_alloc_func(rb_cSymbol) and
+	// rb_undef_method(CLASS_OF(rb_cSymbol), "new")).
+	vm.cSymbol.smethods["allocate"] = &Method{name: "allocate", owner: vm.cSymbol,
+		native: func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+			return raise("TypeError", "allocator undefined for Symbol")
+		}}
+	vm.cSymbol.smethods["new"] = &Method{name: "new", owner: vm.cSymbol,
+		native: func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+			return raise("NoMethodError", "undefined method 'new' for class Symbol")
+		}}
+	// Symbol#name (Ruby 3.0+) is symbol.c's sym_name: `return rb_sym2str(sym);`
+	// over the interned symbol table, so it answers the SAME frozen String each
+	// time — core/symbol/name_spec asserts
+	// :"ruby_3".name.equal?(:"ruby_#{1+2}".name).
+	vm.cSymbol.define("name", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return internedSymbolName(symStr(self))
+	})
+	// Symbol#=~ is sym_match: `return rb_str_match(rb_sym2str(sym), other);`,
+	// which is String#=~ over the name — it answers the match position and sets
+	// $~ / $1.
+	vm.cSymbol.define("=~", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return vm.send(symbolNameString(self), "=~", args, nil)
 	})
 	// Spaceship (<=>) for the built-in ordered types; numerics compare across
 	// Integer/Float, strings lexically, and a mismatched type yields nil.
@@ -2277,7 +2324,14 @@ func (vm *VM) bootstrap() {
 		excl := len(args) > 1 && truthyValue(args[1])
 		// The end argument is coerced through #to_str (so a #to_str object works),
 		// raising TypeError otherwise — matching MRI, which rejects Integer/Symbol.
-		stringUpto(strOf(self), vm.affixString(args[0]).Str(), excl, func(cur string) {
+		limit := vm.affixString(args[0])
+		// string.c v3_4_0 rb_str_upto_each opens with `rb_enc_check(beg, end)`,
+		// so two strings that cannot be compared are an Encoding::CompatibilityError
+		// before any iteration.
+		if recv := stringOrSubclassBytes(self); recv != nil {
+			vm.combinedEncName(recv, limit)
+		}
+		stringUpto(strOf(self), limit.Str(), excl, func(cur string) {
 			vm.callBlock(blk, []object.Value{object.NewString(cur)})
 		})
 		return self
@@ -2569,6 +2623,11 @@ func (vm *VM) bootstrap() {
 			return object.NilV
 		}
 		if isRe {
+			// string.c v3_4_0 rb_str_index_m reaches rb_reg_search, whose
+			// rb_reg_prepare_re raises Encoding::CompatibilityError when the
+			// pattern and the subject cannot match — the same check #=~ and
+			// #match already make here.
+			vm.checkSubjectEncoding(re, self)
 			return vm.strIndexRegexp(re, s, matchEnc(self), start)
 		}
 		byteStart := charToByte(s, start)
@@ -2596,6 +2655,7 @@ func (vm *VM) bootstrap() {
 			}
 		}
 		if isRe {
+			vm.checkSubjectEncoding(re, self) // rb_str_rindex_m -> rb_reg_search, as above
 			return vm.strRindexRegexp(re, s, matchEnc(self), limit)
 		}
 		return strRindexString(s, needle, limit)
@@ -2777,7 +2837,7 @@ func (vm *VM) bootstrap() {
 		return strIndexFn(vm, object.NewString(symStr(self)), args, blk)
 	}
 	vm.cSymbol.define("[]", symIndexFn)
-	vm.cSymbol.define("slice", symIndexFn)
+	aliasBuiltin(vm.cSymbol, "slice", "[]")
 	// casecmp / casecmp? compare symbol names case-insensitively, but only against
 	// another Symbol — any other argument yields nil, as MRI does (String is never
 	// coerced here). They delegate to the String comparison of the two names.
@@ -3031,6 +3091,11 @@ func (vm *VM) bootstrap() {
 		}
 		if len(args) == 0 {
 			arr.Elems = nil
+			// rb_ary_initialize uses rb_warning here, not rb_warn, so this one is
+			// only heard under -w / $VERBOSE = true.
+			if blk != nil {
+				vm.rbWarning1("given block not used")
+			}
 			return self
 		}
 		// A single non-Integer argument is treated as another array to copy: an Array
@@ -3057,6 +3122,9 @@ func (vm *VM) bootstrap() {
 		}
 		// Build the array incrementally so that if the block calls break, the array
 		// is left holding the elements produced before the break, as MRI does.
+		if blk != nil && len(args) == 2 {
+			vm.rbWarn1("block supersedes default value argument")
+		}
 		arr.Elems = make([]object.Value, 0, n)
 		for i := int64(0); i < n; i++ {
 			switch {
@@ -3176,18 +3244,20 @@ func (vm *VM) bootstrap() {
 			raise("ArgumentError", "wrong number of arguments (given %d, expected 1..2)", len(args))
 		}
 		a := self.(*object.Array).Elems
+		// array.c v3_4_0 rb_ary_fetch warns BEFORE it even converts the index:
+		//     block_given = rb_block_given_p();
+		//     if (block_given && argc == 2) rb_warn("block supersedes default value argument");
+		// so the warning fires whether or not the index is in range.
+		if blk != nil && len(args) == 2 {
+			vm.rbWarn1("block supersedes default value argument")
+		}
 		v, orig, ok := vm.arrayFetchAt(a, args[0])
 		if ok {
 			return v
 		}
 		if blk != nil {
-			// The block supersedes a default argument. MRI also warns "block
-			// supersedes default value argument" on that clash, but rbgo's
-			// Kernel#warn currently writes to stdout rather than stderr, so
-			// emitting it here would pollute program output (and the only spec
-			// asserting it uses the stderr-based `complain` matcher); omit it
-			// until warn is routed to stderr. MRI passes the ORIGINAL index
-			// object to the block, not the #to_int result.
+			// MRI passes the ORIGINAL index object to the block, not the #to_int
+			// result.
 			return vm.callBlock(blk, []object.Value{args[0]})
 		}
 		if len(args) == 2 {
@@ -4343,6 +4413,11 @@ func (vm *VM) bootstrap() {
 		if len(args) == 0 && blk == nil {
 			return enumFor(self, "index")
 		}
+		// array.c v3_4_0 rb_ary_index: with a value argument the block is dead,
+		// and MRI says so — `if (rb_block_given_p()) rb_warn("given block not used");`
+		if len(args) > 0 && blk != nil {
+			vm.rbWarn1("given block not used")
+		}
 		for i := 0; i < len(a.Elems); i++ {
 			var match bool
 			if len(args) > 0 {
@@ -4366,6 +4441,10 @@ func (vm *VM) bootstrap() {
 		if len(args) == 0 && blk == nil {
 			// MRI's rindex Enumerator reports an unknown (nil) size.
 			return enumForSized(self, "rindex", func(*VM) object.Value { return object.NilV })
+		}
+		// rb_ary_rindex warns for the dead block exactly as rb_ary_index does.
+		if len(args) > 0 && blk != nil {
+			vm.rbWarn1("given block not used")
 		}
 		for i := len(a.Elems) - 1; i >= 0; i-- {
 			// A block may shrink the array; realign to the new end and re-check size
@@ -4880,7 +4959,7 @@ func (vm *VM) bootstrap() {
 		for _, o := range others {
 			// A non-Hash argument is coerced with #to_hash (MRI raises
 			// "no implicit conversion of X into Hash" when it cannot convert).
-			other := vm.toHash(o)
+			other := vm.hashOperand(o)
 			for _, k := range other.Keys {
 				v, _ := other.Get(k)
 				if blk != nil {
@@ -4945,6 +5024,11 @@ func (vm *VM) bootstrap() {
 		if len(args) < 1 || len(args) > 2 {
 			raise("ArgumentError", "wrong number of arguments (given %d, expected 1..2)", len(args))
 		}
+		// hash.c v3_4_0 rb_hash_fetch_m warns on the clash before the lookup:
+		//     if (block_given && argc == 2) rb_warn("block supersedes default value argument");
+		if blk != nil && len(args) == 2 {
+			vm.rbWarn1("block supersedes default value argument")
+		}
 		if v, ok := self.(*object.Hash).Get(args[0]); ok {
 			return v
 		}
@@ -4998,7 +5082,7 @@ func (vm *VM) bootstrap() {
 	vm.cHash.define("replace", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		h := self.(*object.Hash)
 		vm.checkHashFrozen(h)
-		h.ReplaceWith(vm.toHash(args[0]))
+		h.ReplaceWith(vm.hashOperand(args[0]))
 		return h
 	})
 	// compare_by_identity switches the receiver to identity-based key comparison
@@ -8055,6 +8139,26 @@ func (vm *VM) hashEachLive(h *object.Hash, fn func(k, v object.Value)) {
 // user subclass of Hash (an RObject wrapping a Hash); for the latter it also
 // returns that RObject so the result can be rebuilt with the same class. Any
 // other value raises the MRI "wrong argument type X (expected Hash)" TypeError.
+// hashOperand converts an operand to the Hash a Hash method reads, the way
+// hash.c's static `to_hash` does at tag v3_4_0:
+//
+//	static VALUE to_hash(VALUE hash) {
+//	    return rb_convert_type_with_id(hash, T_HASH, "Hash", idTo_hash);
+//	}
+//
+// rb_convert_type_with_id hands back a value that is ALREADY of the target
+// type, and a Hash SUBCLASS instance is T_HASH — so #to_hash is never
+// consulted for one. core/hash/merge_spec.rb states it outright ("does not
+// call to_hash on hash subclasses"), as does core/hash/replace_spec.rb.
+func (vm *VM) hashOperand(v object.Value) *object.Hash {
+	if o, ok := v.(*RObject); ok {
+		if h, ok := o.builtin.(*object.Hash); ok {
+			return h
+		}
+	}
+	return vm.toHash(v)
+}
+
 func hashOrSubclassArg(vm *VM, v object.Value) (*object.Hash, *RObject) {
 	if o, ok := v.(*RObject); ok {
 		if h, ok := o.builtin.(*object.Hash); ok {
@@ -12048,3 +12152,75 @@ func (vm *VM) qualifiedConstName(scope *RClass, name string) string {
 	}
 	return vm.moduleToSStr(scope) + "::" + name
 }
+
+// rbWarn1 is error.c's rb_warn at tag v3_4_0: the message is written to stderr
+// with the CALLING frame's "path:lineno: warning: " in front (rb_warn builds it
+// through rb_warning_string, which starts at the current frame), and it is
+// silenced only under -W0, where $VERBOSE is nil. `ruby -e 'p [1].index(1){}'`
+// prints "-e:1: warning: given block not used".
+func (vm *VM) rbWarn1(msg string) {
+	if object.IsNil(vm.gvar("$VERBOSE")) {
+		return
+	}
+	vm.curStderr().writeStr(vm.warnUplevelPrefix(0) + msg + "\n")
+}
+
+// rbWarning1 is error.c's rb_warning, the quieter sibling of rb_warn: it prints
+// only when $VERBOSE is TRUE (ruby -w), which is why the specs that assert one
+// of these pass `verbose: true` to `complain`.
+func (vm *VM) rbWarning1(msg string) {
+	if v := vm.gvar("$VERBOSE"); v != object.True {
+		return
+	}
+	vm.curStderr().writeStr(vm.warnUplevelPrefix(0) + msg + "\n")
+}
+
+// symbolNames interns the frozen String that Symbol#name answers. MRI's symbol
+// table is process-wide and hands back one String object per symbol, so this
+// one is too; the Strings in it are frozen and immutable, which is what makes
+// sharing them safe.
+var symbolNames sync.Map // string -> *object.String
+
+// internedSymbolName returns the one frozen String naming this symbol, tagged
+// the way symbol.c v3_4_0 tags it: rb_str_intern re-tags an ASCII-only name as
+// US-ASCII whatever encoding it arrived in, and keeps the string's own
+// encoding otherwise (see Symbol#encoding above for why the non-ASCII case is
+// derived from the bytes here).
+func internedSymbolName(name string) *object.String {
+	if v, ok := symbolNames.Load(name); ok {
+		return v.(*object.String)
+	}
+	enc := "UTF-8"
+	b := []byte(name)
+	switch {
+	case asciiOnly(b):
+		enc = "US-ASCII"
+	case !utf8.Valid(b):
+		enc = "ASCII-8BIT"
+	}
+	str := object.NewStringViewEnc(name, enc)
+	str.Frozen = true
+	actual, _ := symbolNames.LoadOrStore(name, str)
+	return actual.(*object.String)
+}
+
+// symbolNameString is the String a Symbol method delegates through: a fresh,
+// mutable copy of the interned name, so the delegate cannot hand the interned
+// object out or mutate it. Its encoding is the symbol's.
+func symbolNameString(sym object.Value) *object.String {
+	n := internedSymbolName(string(sym.(object.Symbol)))
+	return object.NewStringBytesEnc([]byte(n.Str()), n.Enc)
+}
+
+// NOTE: string.c v3_4_0 rstrip_offset opens with
+//
+//	if (rb_enc_str_coderange(str) == ENC_CODERANGE_BROKEN)
+//	    rb_raise(rb_eEncCompatError, "invalid byte sequence in %s", rb_enc_name(enc));
+//
+// so #rstrip / #rstrip! / #strip / #strip! should refuse a string whose bytes
+// are not valid in its own encoding (core/string/rstrip_spec asserts it, one
+// example). The guard is NOT installed: prawn_bind.go's Prawn::Document#render
+// answers a UTF-8-TAGGED binary PDF where MRI answers ASCII-8BIT, and
+// TestPrawnGenerateRoundTrip calls #rstrip on it — so the guard fires on a
+// string that is only invalid because of that mis-tagging. Install it once
+// render carries the right encoding.
