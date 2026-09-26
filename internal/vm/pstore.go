@@ -354,6 +354,11 @@ func (p *PStore) transaction(vm *VM, readOnly bool, blk *Proc) object.Value {
 	fileStackDepth := len(vm.fileStack)
 	frameNamesDepth := len(vm.frameNames)
 	frameFilesDepth := len(vm.frameFiles)
+	// frameCrefs and frameMethods mirror frameNames one for one and are restored
+	// WITH it — frameLabel reads all three (#649), so one leaked entry renames
+	// every later frame in a backtrace.
+	frameCrefsDepth := len(vm.frameCrefs)
+	frameMethodsDepth := len(vm.frameMethods)
 	requireDirsDepth := len(vm.requireDirs)
 
 	body := func(t *libpstore.Tx) (bodyErr error) {
@@ -362,10 +367,12 @@ func (p *PStore) transaction(vm *VM, readOnly bool, blk *Proc) object.Value {
 			p.tx = nil
 			if r := recover(); r != nil {
 				if sig, ok := r.(pstoreSignal); ok {
-					vm.fileStack = vm.fileStack[:fileStackDepth]
-					vm.frameNames = vm.frameNames[:frameNamesDepth]
-					vm.frameFiles = vm.frameFiles[:frameFilesDepth]
-					vm.requireDirs = vm.requireDirs[:requireDirsDepth]
+					vm.fileStack = truncFrames(vm.fileStack, fileStackDepth)
+					vm.frameNames = truncFrames(vm.frameNames, frameNamesDepth)
+					vm.frameFiles = truncFrames(vm.frameFiles, frameFilesDepth)
+					vm.frameCrefs = truncFrames(vm.frameCrefs, frameCrefsDepth)
+					vm.frameMethods = truncFrames(vm.frameMethods, frameMethodsDepth)
+					vm.requireDirs = truncFrames(vm.requireDirs, requireDirsDepth)
 					if sig.abort {
 						bodyErr = t.Abort()
 					} else {

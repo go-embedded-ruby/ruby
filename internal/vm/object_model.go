@@ -2,8 +2,10 @@ package vm
 
 import (
 	"fmt"
+	"reflect"
 	"runtime"
 	"strings"
+	"sync"
 
 	rake "github.com/go-ruby-rake/rake"
 
@@ -2441,72 +2443,113 @@ func getIvar(self object.Value, name string) object.Value {
 }
 
 func setIvar(self object.Value, name string, v object.Value) {
-	if t := ivarTable(self); t != nil {
-		if _, exists := t[name]; !exists {
-			switch o := self.(type) {
-			case *RObject:
-				o.ivarOrder = append(o.ivarOrder, name)
-			case boxed:
-				st := o.state()
-				st.ivarOrder = append(st.ivarOrder, name)
-			}
-		}
-		t[name] = v
+	st := ivarStoreOf(self, true)
+	if st.tbl == nil {
+		return
 	}
+	if _, exists := st.tbl[name]; !exists && st.order != nil {
+		// A remove_instance_variable took the name out of the map and left it in the
+		// order list. MRI takes it out of the SHAPE (rb_shape_transition_shape_remove_ivar,
+		// variable.c rb_ivar_delete), so a re-assignment appends at the END — and
+		// appears once. Without the drop, `set @a; set @b; remove @a; set @a` reported
+		// [:@a, :@b, :@a] where MRI reports [:@b, :@a].
+		*st.order = append(dropName(*st.order, name), name)
+	}
+	st.tbl[name] = v
 }
 
-// ivarNamesInOrder returns self's instance-variable names as Symbols. For a
-// plain object the names are reported in the order they were first assigned
-// (matching MRI); other value kinds report in map order, which suffices for the
-// cases that reach them.
+// dropName removes the first occurrence of name from names, in place, and is a
+// no-op when it is absent (the common case: a name assigned for the first time).
+func dropName(names []string, name string) []string {
+	for i, n := range names {
+		if n == name {
+			return append(names[:i], names[i+1:]...)
+		}
+	}
+	return names
+}
+
+// ivarNamesInOrder returns self's instance-variable names as Symbols. Every kind
+// that records an assignment order — a plain object, a Bound/UnboundMethod, and
+// every natively-backed value through the generic table — reports in
+// first-assignment order, which is what MRI reports: rb_obj_instance_variables
+// collects through rb_ivar_foreach, and that walks the shape chain in creation
+// order (variable.c). The remaining kinds (a class, main, the Sinatra and
+// ActionView contexts) report in map order, which suffices for the cases that
+// reach them.
 func ivarNamesInOrder(self object.Value) []object.Value {
-	if o, ok := self.(*RObject); ok {
-		out := make([]object.Value, 0, len(o.ivarOrder))
-		for _, n := range o.ivarOrder {
-			if _, live := o.ivars[n]; live {
+	st := ivarStoreOf(self, false)
+	if st.order != nil {
+		out := make([]object.Value, 0, len(*st.order))
+		for _, n := range *st.order {
+			// A remove_instance_variable leaves the name in the order list; the map
+			// says which names are still live.
+			if _, live := st.tbl[n]; live {
 				out = append(out, object.Symbol(n))
 			}
 		}
 		return out
 	}
-	if b, ok := self.(boxed); ok {
-		st := b.state()
-		out := make([]object.Value, 0, len(st.ivarOrder))
-		for _, n := range st.ivarOrder {
-			if _, live := st.ivars[n]; live {
-				out = append(out, object.Symbol(n))
-			}
-		}
-		return out
-	}
-	t := ivarTable(self)
-	out := make([]object.Value, 0, len(t))
-	for n := range t {
+	out := make([]object.Value, 0, len(st.tbl))
+	for n := range st.tbl {
 		out = append(out, object.Symbol(n))
 	}
 	return out
 }
 
-// ivarTable returns the instance-variable map backing self, or nil for values
-// (Integer, String, …) that cannot hold ivars in this phase.
+// ivarTable returns the instance-variable map backing self, or nil when there is
+// none to show: an immediate (Integer, Float, Symbol, nil, true, false — MRI's
+// SPECIAL_CONST_P, for which rb_ivar_defined answers false and rb_ivar_count 0
+// outright) or a value no ivar has ever been written to. It never creates a
+// generic table, so a pure read — `defined?(@x)`, instance_variable_defined?,
+// remove_instance_variable — costs a lookup and leaves nothing behind. A writer
+// goes through setIvar, hence ivarStoreOf(self, true).
 func ivarTable(self object.Value) map[string]object.Value {
+	return ivarStoreOf(self, false).tbl
+}
+
+// ivarStore is where one value's instance variables live: the name-to-value map
+// and, for a kind that records it, the first-assignment order to report them in.
+type ivarStore struct {
+	tbl   map[string]object.Value
+	order *[]string // nil for a kind that records no order
+}
+
+// ivarStoreOf resolves self's ivar storage. With create set the caller is about
+// to write, so what is missing is allocated; without it, the function reports
+// only what already exists.
+//
+// Every kind with room of its own answers from that room. Everything else —
+// File, StringIO, Dir, IO::Buffer, Array, Hash, String, Proc, a Regexp, … —
+// answers from the VM-wide generic table, which is how MRI stores the ivars of
+// an object with no slots of its own: variable.c's ivar_set sends T_OBJECT to
+// rb_obj_ivar_set, T_CLASS/T_MODULE to rb_class_ivar_set and EVERYTHING ELSE to
+// generic_ivar_set. Before this, the kinds with no room returned no table at all
+// and every write was DISCARDED in silence (#672).
+func ivarStoreOf(self object.Value, create bool) ivarStore {
 	switch o := self.(type) {
 	case *RObject:
-		return o.ivars
+		if o.ivars == nil && create {
+			o.ivars = map[string]object.Value{}
+		}
+		return ivarStore{tbl: o.ivars, order: &o.ivarOrder}
 	case *RClass:
-		return o.ivars
+		if o.ivars == nil && create {
+			o.ivars = map[string]object.Value{}
+		}
+		return ivarStore{tbl: o.ivars}
 	case *object.Main:
-		return o.IvarTable()
+		return ivarStore{tbl: o.IvarTable()}
 	case *SinatraCtx:
 		if o.ivars == nil {
 			o.ivars = map[string]object.Value{}
 		}
-		return o.ivars
+		return ivarStore{tbl: o.ivars}
 	case *ActionViewBase:
 		if o.ivars == nil {
 			o.ivars = map[string]object.Value{}
 		}
-		return o.ivars
+		return ivarStore{tbl: o.ivars}
 	}
 	// Bound/UnboundMethod carry their ivars in an embedded methodValueState.
 	if b, ok := self.(boxed); ok {
@@ -2514,9 +2557,73 @@ func ivarTable(self object.Value) map[string]object.Value {
 		if st.ivars == nil {
 			st.ivars = map[string]object.Value{}
 		}
-		return st.ivars
+		return ivarStore{tbl: st.ivars, order: &st.ivarOrder}
 	}
-	return nil
+	if g := genericIvarsOf(self, create); g != nil {
+		return ivarStore{tbl: g.ivars, order: &g.order}
+	}
+	return ivarStore{}
+}
+
+// genericIvars is the ivar table of a value that has no room for one of its own:
+// the map, created with the entry, plus the assignment order. MRI's struct
+// gen_ivtbl.
+type genericIvars struct {
+	ivars map[string]object.Value
+	order []string
+}
+
+// genericIvarTbl is MRI's generic_iv_tbl_ (variable.c): one process-wide table
+// KEYED BY THE OBJECT holding the instance variables of values that carry none
+// themselves. An entry is created by the first write and never by a read, so a
+// value no Ruby code ever sets an ivar on costs nothing at all — no field on the
+// struct, no allocation, no map entry. Keying a map by an object.Value is how
+// internal/object's recursion guard (ReprEnter) already tracks identity.
+//
+// The mutex mirrors MRI's own: rb_gen_ivtbl_get and generic_ivar_set take the
+// VM lock (RB_VM_LOCK_ENTER) around this table, because a Ruby thread may set an
+// ivar on an object another thread shares. It guards the outer lookup only — the
+// returned map is then used exactly as an RObject's is, unsynchronized.
+//
+// One deliberate difference from MRI: MRI drops an object's entry when the GC
+// frees the object (rb_free_generic_ivar) and moves or copies it on dup/clone
+// (rb_mv_generic_ivar, rb_copy_generic_ivar). Go's GC offers no free hook and the
+// key keeps the object reachable, so an entry lives as long as the process.
+var (
+	genericIvarMu  sync.Mutex
+	genericIvarTbl = map[object.Value]*genericIvars{}
+)
+
+// genericIvarsOf returns self's entry in the generic table, creating it when
+// create is set. It answers nil for a value that cannot key the table.
+func genericIvarsOf(self object.Value, create bool) *genericIvars {
+	if !hasIdentity(self) {
+		return nil
+	}
+	genericIvarMu.Lock()
+	defer genericIvarMu.Unlock()
+	if g := genericIvarTbl[self]; g != nil {
+		return g
+	}
+	if !create {
+		return nil
+	}
+	g := &genericIvars{ivars: map[string]object.Value{}}
+	genericIvarTbl[self] = g
+	return g
+}
+
+// hasIdentity reports whether self is a reference. That is what the generic
+// table needs of a key — an entry belongs to ONE object, and a copy of a Go
+// struct value would answer to the entry of every equal copy — and it is the
+// complement of MRI's SPECIAL_CONST_P screen, which makes rb_ivar_defined answer
+// false and rb_ivar_count 0 for an immediate. rbgo's immediates (Integer, Float,
+// Symbol, nil, true, false) are Go values, and MRI holds every one of them
+// frozen, so a write there reaches rb_check_frozen and raises instead of reaching
+// any table (Object#instance_variable_set raises FrozenError for them here too).
+func hasIdentity(self object.Value) bool {
+	t := reflect.TypeOf(self)
+	return t != nil && t.Kind() == reflect.Pointer
 }
 
 // refDefineeOf picks the second end of the cref chain to record on a block

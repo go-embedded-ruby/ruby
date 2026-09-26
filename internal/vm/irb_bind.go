@@ -54,6 +54,11 @@ func (vm *VM) irbEval(b *Binding, code string) (result object.Value, errClass, e
 
 	nNames, nFiles := len(vm.frameNames), len(vm.frameFiles)
 	nStack, nDirs := len(vm.fileStack), len(vm.requireDirs)
+	// frameCrefs and frameMethods mirror frameNames one for one and are restored
+	// WITH it: frameLabel reads all three (#649), so a single leaked entry would
+	// make every later label name a different frame — for the rest of the IRB
+	// session, since a binding outlives the statement that raised.
+	nCrefs, nMethods := len(vm.frameCrefs), len(vm.frameMethods)
 	defer func() {
 		if r := recover(); r != nil {
 			rerr, ok := r.(RubyError)
@@ -62,10 +67,12 @@ func (vm *VM) irbEval(b *Binding, code string) (result object.Value, errClass, e
 			}
 			// An exception unwinding past exec frames leaves their per-frame tracking
 			// entries unpopped; truncate back so the next statement sees clean state.
-			vm.frameNames = vm.frameNames[:nNames]
-			vm.frameFiles = vm.frameFiles[:nFiles]
-			vm.fileStack = vm.fileStack[:nStack]
-			vm.requireDirs = vm.requireDirs[:nDirs]
+			vm.frameNames = truncFrames(vm.frameNames, nNames)
+			vm.frameFiles = truncFrames(vm.frameFiles, nFiles)
+			vm.frameCrefs = truncFrames(vm.frameCrefs, nCrefs)
+			vm.frameMethods = truncFrames(vm.frameMethods, nMethods)
+			vm.fileStack = truncFrames(vm.fileStack, nStack)
+			vm.requireDirs = truncFrames(vm.requireDirs, nDirs)
 			result, errClass, errMsg, raised = nil, rerr.Class, rerr.Message, true
 		}
 	}()
