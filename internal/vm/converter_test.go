@@ -121,7 +121,7 @@ func TestConverterConvert(t *testing.T) {
 		// replace flags.
 		{`c = Encoding::Converter.new("utf-8","us-ascii", invalid: :replace, undef: :replace); c.replacement = "!"; d = String.new; c.primitive_convert("中文123", d); p d`, "\"!!123\"\n"},
 		{`p Encoding::Converter.new("utf-8","us-ascii", undef: :replace).convert("é")`, "\"?\"\n"},
-		{`p(Encoding::Converter.new("utf-8","utf-8", invalid: :replace) rescue "same")`, "\"same\"\n"},
+		{`p((Encoding::Converter.new("utf-8","utf-8", invalid: :replace) rescue "same"))`, "\"same\"\n"},
 		// finish: stateless codecs emit nothing more.
 		{`c = Encoding::Converter.new("utf-8","iso-8859-1"); c.convert("hi"); p c.finish`, "\"\"\n"},
 		{`c = Encoding::Converter.new("utf-8","iso-8859-1"); p c.finish.encoding.name`, "\"ISO-8859-1\"\n"},
