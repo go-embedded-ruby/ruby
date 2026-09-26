@@ -5,6 +5,7 @@
 package vm
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -27,7 +28,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-embedded-ruby/ruby/internal/compiler"
 	"github.com/go-embedded-ruby/ruby/internal/object"
+	"github.com/go-ruby-parser/parser"
 )
 
 // The socket transport is proven end-to-end against real, in-process loopback
@@ -771,6 +774,137 @@ func genSelfSigned(t *testing.T) (certPEM, keyPEM string) {
 	return
 }
 
+// runSrcDeadline is runSrc bounded by d, failing in seconds and naming the
+// program instead of hanging the test binary. Every socket test whose Ruby
+// program has a server on one Thread and a client on another needs it: such a
+// program deadlocks outright if a blocking socket call keeps the GVL, and #695
+// is what that costs without a bound — one test consumed 80 minutes of a
+// 90-minute lane and reported as `panic: test timed out` with no failing
+// assertion anywhere in the job.
+//
+// The bound is the TEST's, never the VM's: MRI's accept and read block
+// indefinitely, so a timeout inside the primitive would be a divergence. On a
+// timeout the VM goroutine is left behind — Go cannot interrupt a goroutine
+// blocked in a syscall — and since each call builds a fresh VM, a leaked one
+// blocks nothing that follows.
+func runSrcDeadline(t *testing.T, d time.Duration, src string) string {
+	t.Helper()
+	prog, err := parser.Parse(src)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	iseq, err := compiler.Compile(prog)
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	type res struct {
+		out string
+		err error
+	}
+	done := make(chan res, 1)
+	go func() {
+		var buf bytes.Buffer
+		_, runErr := New(&buf).Run(iseq)
+		done <- res{strings.TrimRight(buf.String(), "\n"), runErr}
+	}()
+	select {
+	case r := <-done:
+		if r.err != nil {
+			t.Fatalf("run: %v", r.err)
+		}
+		return r.out
+	case <-time.After(d):
+		t.Fatalf("program did not finish within %s — a blocking socket call is "+
+			"holding the GVL the other Thread needs:\n%s", d, src)
+		return ""
+	}
+}
+
+// TestSocketBlockingCallsReleaseTheGVL is #695's mechanism, made deterministic.
+// A blocking socket call that keeps the GVL deadlocks a program whose peer is
+// another Thread of the same VM: the peer needs the lock to send the very bytes
+// the call is waiting for. MRI releases it around every blocking socket call
+// (rb_io_blocking_region / rb_thread_io_blocking_call, io.c, over
+// rb_thread_call_without_gvl in thread.c).
+//
+// Each case forces the interleaving that TestServerTLSLoopback only reaches by
+// chance, with one `sleep` placed so the main thread is guaranteed to enter the
+// blocking call first. Both programs print "hi" under MRI 4.0.5; before the fix
+// rbgo hung on both — and hung SILENTLY, with no Go deadlock panic, because a
+// goroutine parked in the netpoller does not count as asleep.
+func TestSocketBlockingCallsReleaseTheGVL(t *testing.T) {
+	cases := []struct{ name, src string }{
+		// The main thread reaches accept before the client connects.
+		{"accept", `require "socket"
+srv = TCPServer.new("127.0.0.1", 0)
+port = srv.addr[1]
+t = Thread.new { sleep 0.1; s = TCPSocket.new("127.0.0.1", port); s.write("hi\n"); s.close }
+c = srv.accept
+puts c.gets.chomp
+t.join`},
+		// The connection is already accepted, and the main thread reaches gets before
+		// the client writes — the interleaving TestServerTLSLoopback loses on.
+		{"gets", `require "socket"
+srv = TCPServer.new("127.0.0.1", 0)
+port = srv.addr[1]
+t = Thread.new { s = TCPSocket.new("127.0.0.1", port); sleep 0.1; s.write("hi\n"); s.close }
+c = srv.accept
+puts c.gets.chomp
+t.join`},
+		// #read and #recv go through the same release, so name them too: a fix on
+		// #gets alone would leave the same deadlock behind a different method.
+		{"read", `require "socket"
+srv = TCPServer.new("127.0.0.1", 0)
+port = srv.addr[1]
+t = Thread.new { s = TCPSocket.new("127.0.0.1", port); sleep 0.1; s.write("hi"); s.close }
+c = srv.accept
+puts c.read(2)
+t.join`},
+		{"recv", `require "socket"
+srv = TCPServer.new("127.0.0.1", 0)
+port = srv.addr[1]
+t = Thread.new { s = TCPSocket.new("127.0.0.1", port); sleep 0.1; s.write("hi"); s.close }
+c = srv.accept
+puts c.recv(2)
+t.join`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := runSrcDeadline(t, 20*time.Second, c.src); got != "hi" {
+				t.Errorf("got %q want %q", got, "hi")
+			}
+		})
+	}
+}
+
+// TestUNIXSocketBlockingCallsReleaseTheGVL is the AF_UNIX dual: the same deadlock
+// reached through UNIXServer#accept, which is a different Accept in a different
+// file. A socket path lives in t.TempDir(), which is inside no repository.
+func TestUNIXSocketBlockingCallsReleaseTheGVL(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("AF_UNIX unsupported on Windows")
+	}
+	// A short directory, not t.TempDir(): that one embeds the test's name, and
+	// this name is long enough to push the socket path past the 104-byte sun_path
+	// limit, which surfaces as "bind: invalid argument".
+	dir, err := os.MkdirTemp("", "rbgo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	sock := filepath.Join(dir, "s.sock")
+	src := fmt.Sprintf(`require "socket"
+srv = UNIXServer.new(%q)
+t = Thread.new { sleep 0.1; s = UNIXSocket.new(%q); s.write("hi
+"); s.close }
+c = srv.accept
+puts c.gets.chomp
+t.join`, sock, sock)
+	if got := runSrcDeadline(t, 20*time.Second, src); got != "hi" {
+		t.Errorf("got %q want %q", got, "hi")
+	}
+}
+
 // TestServerTLSLoopback is the server-side-TLS proof: an in-VM OpenSSL::SSL::
 // SSLServer wraps a TCPServer with a self-signed cert generated in-test; a
 // concurrent in-VM client SSLSocket (VERIFY_NONE) connects, exchanges a message,
@@ -816,7 +950,11 @@ res << srv.closed?
 t.join
 puts (res + cli).inspect`, certPEM, keyPEM)
 	want := `[true, "AF_INET", 0, false, "hi", "no-client-cert", true, true, true]`
-	if got := runSrc(t, src); got != want {
+	// A deadline of its own (#695): this program has a server on the main thread
+	// and a client in a Thread, so it can deadlock, and without a bound it took
+	// 1h20m of a 90-minute lane and reported as a timeout with no failing
+	// assertion.
+	if got := runSrcDeadline(t, 30*time.Second, src); got != want {
 		t.Errorf("server TLS loopback\n got=%q\nwant=%q", got, want)
 	}
 }

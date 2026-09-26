@@ -114,6 +114,13 @@ type RThread struct {
 	// before each wait so a leftover token can never wake the wrong wait.
 	intr chan struct{}
 
+	// held is every Mutex this thread currently owns, in MRI's keeping_mutexes
+	// order (thread_sync.c thread_mutex_insert / thread_mutex_remove). A thread
+	// that dies hands all of them on, which is what makes a Mutex survive its
+	// owner's death (rb_threadptr_unlock_all_locking_mutexes, thread.c). Touched
+	// only under the GVL.
+	held []*RMutex
+
 	// reportOnException mirrors Thread#report_on_exception (default true in MRI):
 	// whether a thread terminating with an unhandled exception prints a warning.
 	// rbgo does not print the warning, but the accessor is honoured for programs
@@ -447,6 +454,35 @@ func (vm *VM) eagerStart(t *RThread) {
 	cur.restoreCtx(vm)
 }
 
+// abortMainThread raises a dead thread's unhandled exception in the main thread,
+// which is what Thread#abort_on_exception= and Thread.abort_on_exception= promise:
+// thread_start_func_2 (thread.c) ends with
+//
+//	if (RB_TYPE_P(errinfo, T_OBJECT)) rb_threadptr_raise(ractor_main_th, 1, &errinfo);
+//
+// and rb_threadptr_raise enqueues the exception and then interrupts, which is why
+// the main thread's `sleep` ends instead of running to completion. Until now the
+// flag was written by its setter and read by its getter and by nothing else, so it
+// was a stored value equal to its own default and no program could observe it.
+//
+// The guard mirrors MRI's: only a real exception object propagates. A Go-level
+// failure wrapped as a RuntimeError has no Ruby object, and MRI has no such case,
+// so it stays what it already is -- re-raised in whoever joins the thread.
+func (vm *VM) abortMainThread(t *RThread) {
+	main := vm.mainThread
+	exc := t.err.Obj
+	if main == nil || main == t || exc == nil || main.isDone() {
+		return
+	}
+	if main.pendingRaise != nil {
+		// MRI queues pending interrupts; rbgo holds one, so the first abort to reach
+		// the main thread is the one it raises, rather than the last.
+		return
+	}
+	main.pendingRaise = exc
+	main.interrupt()
+}
+
 // threadCaptureErr turns a panic recovered in a thread's goroutine into the
 // RubyError to re-raise on join: a Ruby exception is preserved as-is; any other
 // panic (a Go-level failure) is wrapped as a RuntimeError rather than crashing
@@ -503,6 +539,14 @@ func (vm *VM) registerThreadClass() {
 	// thread starts its #report_on_exception / #abort_on_exception with, and the
 	// deadlock-detector switch. They live here (one set per VM) because they are
 	// read only through these accessors and by spawn.
+	// reportDefault is Thread.report_on_exception, which a new thread INHERITS
+	// (thread.c thread_create_core copies th->vm->thread_report_on_exception).
+	// abortDefault is Thread.abort_on_exception, which it does NOT: nothing in
+	// thread_create_core touches th->abort_on_exception, and termination tests the
+	// two independently ("th->vm->thread_abort_on_exception || th->abort_on_exception",
+	// thread.c). Seeding the per-thread flag from the class-level one made
+	// `Thread.abort_on_exception = true; Thread.new {}.abort_on_exception` answer
+	// true where MRI 4.0.5 answers false.
 	reportDefault, abortDefault, ignoreDeadlock := true, false, false
 
 	spawn := func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
@@ -512,7 +556,7 @@ func (vm *VM) registerThreadClass() {
 		t := &RThread{
 			blk: blk, args: append([]object.Value{}, args...),
 			done: make(chan struct{}), status: "run", handback: make(chan struct{}),
-			reportOnException: reportDefault, abort: abortDefault,
+			reportOnException: reportDefault,
 		}
 		t.initFibers()
 		// A new thread's root fiber starts from a copy of the CREATING fiber's
@@ -541,7 +585,15 @@ func (vm *VM) registerThreadClass() {
 				t.result = vm.callBlock(t.blk, t.args)
 			}()
 			t.status = "dead"
-			close(t.done)
+			close(t.done) // MRI: rb_threadptr_join_list_wakeup, before the two below
+			// A dying thread gives up the mutexes it still holds, then -- if its
+			// unhandled exception is one abort_on_exception asked to be fatal -- raises
+			// that exception in the MAIN thread. Both are what MRI's
+			// thread_start_func_2 (thread.c) does at exactly this point.
+			vm.releaseHeldMutexes(t)
+			if t.err != nil && (t.abort || abortDefault) {
+				vm.abortMainThread(t)
+			}
 			t.firstPark() // release the spawner if the thread never blocked
 			vm.gvl.Unlock()
 		}()
@@ -1303,6 +1355,7 @@ func (vm *VM) mutexLock(m *RMutex) {
 	t := vm.currentThread
 	if m.owner == nil {
 		m.owner = t
+		t.held = append(t.held, m)
 		return
 	}
 	if m.owner == t {
@@ -1339,6 +1392,7 @@ func (vm *VM) mutexLock(m *RMutex) {
 	}
 	locked = true
 	// On wake, mutexUnlock has already transferred ownership to t.
+	t.held = append(t.held, m) // MRI: mutex_locked -> thread_mutex_insert
 }
 
 // enqueue registers t as a waiter on m and returns its wait slot. Caller holds
@@ -1366,10 +1420,42 @@ func (m *RMutex) leave(t *RThread) {
 	m.waitq = kept
 }
 
+// forget drops m from the thread's owned-mutex list (MRI's thread_mutex_remove,
+// thread_sync.c). Caller holds the GVL.
+func (t *RThread) forget(m *RMutex) {
+	for i, h := range t.held {
+		if h == m {
+			t.held = append(t.held[:i:i], t.held[i+1:]...)
+			return
+		}
+	}
+}
+
+// releaseHeldMutexes gives up every Mutex this thread still owns as it dies:
+// MRI's rb_threadptr_unlock_all_locking_mutexes (thread.c), which walks the
+// keeping_mutexes list and unlocks each one, waking its waiters. Without it a
+// Mutex whose owner was killed, or died on an unhandled exception, stayed locked
+// for the rest of the program, so the next Mutex#lock waited on a thread that no
+// longer existed -- a hang that survived making the wait interruptible, because
+// nothing was ever going to interrupt it.
+func (vm *VM) releaseHeldMutexes(t *RThread) {
+	for len(t.held) > 0 {
+		m := t.held[0]
+		if m.owner == t {
+			m.handOn() // also removes m from t.held
+			continue
+		}
+		t.forget(m)
+	}
+}
+
 // handOn passes ownership to the head of the wait queue, or clears it when
 // nobody is waiting. It is the tail of mutexUnlock without the ownership check,
 // shared with the interrupt path that must give the mutex back.
 func (m *RMutex) handOn() {
+	if m.owner != nil {
+		m.owner.forget(m) // MRI: thread_mutex_remove, inside rb_mutex_unlock_th
+	}
 	if len(m.waitq) > 0 {
 		w := m.waitq[0]
 		m.waitq = m.waitq[1:]
