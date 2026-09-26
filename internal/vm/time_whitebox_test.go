@@ -2,18 +2,24 @@ package vm
 
 import (
 	"testing"
+	stdtime "time"
 )
 
-// TestTimeNowSeam pins the nowUnix seam so Time.now is deterministic in a test:
-// FromUnix(fixed) must round-trip to that instant.
+// TestTimeNowSeam pins the nowWall seam so Time.now is deterministic in a test:
+// the seam's instant must round-trip through the Time wrapper, seconds *and*
+// nanoseconds. A seam that could only carry seconds is what made Time.now whole
+// (#689), so the nanosecond leg is the part worth pinning.
 func TestTimeNowSeam(t *testing.T) {
-	saved := nowUnix
-	defer func() { nowUnix = saved }()
-	nowUnix = func() int64 { return 1782045296 }
+	saved := nowWall
+	defer func() { nowWall = saved }()
+	nowWall = func() stdtime.Time { return stdtime.Unix(1782045296, 123456789).UTC() }
 
-	tm := unixTime(nowUnix())
+	tm := &Time{t: nowWall()}
 	if got := tm.t.Unix(); got != 1782045296 {
 		t.Fatalf("seamed Time.now = %d, want 1782045296", got)
+	}
+	if got := tm.t.Nanosecond(); got != 123456789 {
+		t.Fatalf("seamed Time.now nsec = %d, want 123456789", got)
 	}
 }
 

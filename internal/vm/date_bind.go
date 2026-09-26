@@ -298,7 +298,7 @@ func twoDigits(s string) (int, bool) {
 
 // withDeterministicClock installs the Ruby VM's controllable clock instant into
 // the library's Today / Now clock for the duration of fn, so Date.today /
-// DateTime.now track the same source as Time.now: nowUnix's real instant by
+// DateTime.now track the same source as Time.now: nowWall's real instant by
 // default, or the mocked instant when a require "timecop" program has frozen /
 // travelled / scaled the clock. fn's result is returned; the library clock is
 // always restored.

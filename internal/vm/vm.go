@@ -353,7 +353,7 @@ type VM struct {
 	cTime                              *RClass
 	// clock is the per-VM controllable time source behind Time.now / Date.today /
 	// DateTime.now. It is always present; empty (unmocked) it reports the real
-	// wall clock through its Now seam (wired to nowUnix, the same determinism seam
+	// wall clock through its Now seam (wired to nowWall, the same determinism seam
 	// Time.now already used), so a program that never requires "timecop" is
 	// unaffected. require "timecop" installs the Ruby Timecop module (timecop.go),
 	// whose freeze / travel / scale push mock-time frames onto this clock.
@@ -1013,11 +1013,13 @@ func New(out io.Writer) *VM { return NewWithStderr(out, out) }
 // why the conformance suite could not observe this defect at all.
 func NewWithStderr(out, errOut io.Writer) *VM {
 	vm := &VM{out: out, errOut: errOut, main: object.NewMain(), consts: map[string]object.Value{}, loaded: map[string]bool{}, globals: map[string]object.Value{}}
-	// The controllable clock reads the real wall clock through nowUnix (the same
-	// whole-second determinism seam Time.now/Date.today already honour) until a
-	// require "timecop" program freezes/travels/scales it. Unmocked, Current()
-	// just returns nowUnix's instant, so non-timecop programs see real time.
-	vm.clock = timecop.NewWith(func() stdtime.Time { return stdtime.Unix(nowUnix(), 0).UTC() })
+	// The controllable clock reads the real wall clock through nowWall (the same
+	// determinism seam Time.now/Date.today already honour) until a require
+	// "timecop" program freezes/travels/scales it. Unmocked, Current() just
+	// returns nowWall's instant — nanoseconds included, since MRI's Time.now is
+	// clock_gettime(CLOCK_REALTIME) with its tv_nsec (#689) — so non-timecop
+	// programs see real time at the resolution the host clock offers.
+	vm.clock = timecop.NewWith(func() stdtime.Time { return nowWall().UTC() })
 	// The main thread holds the GVL for the VM's lifetime, releasing it only at
 	// blocking points so spawned Ruby threads can run (see thread.go).
 	vm.gvl.Lock()
