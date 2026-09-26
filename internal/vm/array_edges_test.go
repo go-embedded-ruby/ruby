@@ -190,7 +190,10 @@ func TestArrayRindex(t *testing.T) {
 		{`p [1, 2, 3].rindex.class`, "Enumerator\n"},
 		{`p [1, 2, 3, 2].rindex.to_a`, "[2, 3, 2, 1]\n"},
 		{`e = [1, 2, 3, 2].rindex; p e.each { |x| x == 2 }`, "3\n"},
-		{`p [1, 2, 3, 2, 1].rindex(2) { |x| x == 3 }`, "3\n"}, // argument wins over block
+		// The argument wins over the block, and rb_ary_rindex says so with
+		// rb_warn("given block not used") — one sink for stdout and stderr here.
+		{`p [1, 2, 3, 2, 1].rindex(2) { |x| x == 3 }`,
+			"(rbgo):1: warning: given block not used\n3\n"},
 	}
 	for _, c := range cases {
 		if got := eval(t, c.src); got != c.want {

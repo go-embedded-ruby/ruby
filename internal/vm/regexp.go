@@ -387,6 +387,29 @@ type MatchData struct {
 	// subject[byteOff:] tail, so every byte offset it reports is shifted by this
 	// to land in the full subject. Zero for an ordinary whole-subject match.
 	byteOff int
+	// enc is the subject String's encoding name ("" for the UTF-8 default).
+	// re.c's rb_reg_nth_match / rb_reg_match_pre / rb_reg_match_post at tag
+	// v3_4_0 all slice the stored subject with rb_str_subseq, which copies its
+	// encoding, so $&, $`, $', $+, $1..N and every MatchData accessor answer a
+	// String tagged like the subject. rbgo built them with object.NewString and
+	// tagged them UTF-8 whatever the subject was.
+	enc string
+}
+
+// matchEnc reports the encoding name a match against subj must stamp on the
+// substrings it yields (see MatchData.enc). A non-String subject — Symbol
+// receivers reach Regexp matching too — carries the default.
+func matchEnc(subj object.Value) string {
+	if s := stringOrSubclassBytes(subj); s != nil {
+		return s.Enc
+	}
+	return ""
+}
+
+// mdString builds one of m's substrings with the subject's encoding, the way
+// rb_str_subseq does.
+func (m *MatchData) mdString(s string) object.Value {
+	return object.NewStringViewEnc(s, m.enc)
 }
 
 func (m *MatchData) ToS() string     { return m.md.Str(0) }
@@ -1309,13 +1332,13 @@ func (r *Regexp) searchFrom(s string, pos int) (md *onig.MatchData, base int) {
 
 // runMatch matches re against subject, returning a MatchData value or nil. It
 // also records the result as $~ (the last match).
-func (vm *VM) runMatch(re *Regexp, subject string) object.Value {
+func (vm *VM) runMatch(re *Regexp, subject, enc string) object.Value {
 	md := re.matcher().Match(subject)
 	if md == nil {
 		vm.lastMatch = object.NilV
 		return object.NilV
 	}
-	m := &MatchData{md: md, subject: subject, re: re}
+	m := &MatchData{md: md, subject: subject, re: re, enc: enc}
 	vm.lastMatch = m
 	return m
 }
@@ -1325,7 +1348,7 @@ func (vm *VM) runMatch(re *Regexp, subject string) object.Value {
 // byte tail at that offset and the MatchData records the byte offset so its
 // positions report against the full subject. A negative pos counts from the end;
 // an out-of-range pos yields no match.
-func (vm *VM) runMatchFrom(re *Regexp, subject string, pos int64) object.Value {
+func (vm *VM) runMatchFrom(re *Regexp, subject, enc string, pos int64) object.Value {
 	nChars := int64(utf8.RuneCountInString(subject))
 	if pos < 0 {
 		pos += nChars
@@ -1340,7 +1363,7 @@ func (vm *VM) runMatchFrom(re *Regexp, subject string, pos int64) object.Value {
 		vm.lastMatch = object.NilV
 		return object.NilV
 	}
-	m := &MatchData{md: md, subject: subject, re: re, byteOff: base}
+	m := &MatchData{md: md, subject: subject, re: re, byteOff: base, enc: enc}
 	vm.lastMatch = m
 	return m
 }
@@ -1349,14 +1372,14 @@ func (vm *VM) runMatchFrom(re *Regexp, subject string, pos int64) object.Value {
 // match at or after character offset off (matching the full subject so anchors
 // and \G honour the offset), sets $~ (nil on no match) and returns the character
 // index of the match start, or nil. off may equal the character count.
-func (vm *VM) strIndexRegexp(re *Regexp, subject string, off int) object.Value {
+func (vm *VM) strIndexRegexp(re *Regexp, subject, enc string, off int) object.Value {
 	byteOff := charToByte(subject, off)
 	md, base := re.searchFrom(subject, byteOff) // leftmost match at or after the cursor
 	if md == nil {
 		vm.lastMatch = object.NilV
 		return object.NilV
 	}
-	vm.lastMatch = &MatchData{md: md, subject: subject, re: re, byteOff: base}
+	vm.lastMatch = &MatchData{md: md, subject: subject, re: re, byteOff: base, enc: enc}
 	return object.IntValue(int64(byteToChar(subject, base+md.Begin(0))))
 }
 
@@ -1364,11 +1387,11 @@ func (vm *VM) strIndexRegexp(re *Regexp, subject string, off int) object.Value {
 // in subject (the rightmost match, as String#rpartition selects it), or nil when
 // there is none. It probes anchored matches from the end toward the start, so the
 // whole string stays visible to anchors and lookbehind.
-func (vm *VM) lastRegexpMatch(re *Regexp, subject string) *MatchData {
+func (vm *VM) lastRegexpMatch(re *Regexp, subject, enc string) *MatchData {
 	for p := len(subject); p >= 0; p-- {
 		md := re.matcher().MatchAt(subject, p)
 		if md != nil && md.Begin(0) == p {
-			return &MatchData{md: md, subject: subject, re: re}
+			return &MatchData{md: md, subject: subject, re: re, enc: enc}
 		}
 	}
 	return nil
@@ -1378,12 +1401,12 @@ func (vm *VM) lastRegexpMatch(re *Regexp, subject string) *MatchData {
 // character index p (p <= limit) at which re matches starting exactly at p,
 // setting $~ (nil when there is no such match). limit has been clamped to the
 // character count by the caller.
-func (vm *VM) strRindexRegexp(re *Regexp, subject string, limit int) object.Value {
+func (vm *VM) strRindexRegexp(re *Regexp, subject, enc string, limit int) object.Value {
 	for p := limit; p >= 0; p-- {
 		bytep := charToByte(subject, p)
 		md := re.matcher().MatchAt(subject, bytep)
 		if md != nil && md.Begin(0) == bytep {
-			vm.lastMatch = &MatchData{md: md, subject: subject, re: re}
+			vm.lastMatch = &MatchData{md: md, subject: subject, re: re, enc: enc}
 			return object.IntValue(int64(p))
 		}
 	}
@@ -1414,15 +1437,15 @@ func (vm *VM) gvar(name string) object.Value {
 	switch name {
 	case "$&":
 		if ok {
-			return object.NewString(md.md.Str(0))
+			return md.mdString(md.md.Str(0))
 		}
 	case "$`":
 		if ok {
-			return object.NewString(md.md.Pre())
+			return md.mdString(md.md.Pre())
 		}
 	case "$'":
 		if ok {
-			return object.NewString(md.md.Post())
+			return md.mdString(md.md.Post())
 		}
 	case "$+":
 		// The last capture group that participated (highest-numbered match), or
@@ -1430,7 +1453,7 @@ func (vm *VM) gvar(name string) object.Value {
 		if ok {
 			for i := md.md.NGroups(); i >= 1; i-- {
 				if md.md.Begin(i) >= 0 {
-					return object.NewString(md.md.Str(i))
+					return md.mdString(md.md.Str(i))
 				}
 			}
 		}
@@ -1732,7 +1755,7 @@ func (vm *VM) scan(re *Regexp, subject string, self object.Value, blk *Proc) obj
 		// absolute byteOff so MatchData#string, #begin and #offset are correct).
 		// MRI leaves $~ set to the last match after scan returns, even if a block
 		// reassigned it, so re-set it after the block runs.
-		cur := &MatchData{md: md, subject: subject, re: re, byteOff: base}
+		cur := &MatchData{md: md, subject: subject, re: re, byteOff: base, enc: enc}
 		vm.lastMatch = cur
 		last = cur
 		if blk != nil {
@@ -2170,7 +2193,7 @@ func (vm *VM) gsub(re *Regexp, self *object.String, replObj *object.String, blk 
 		// matched from), so carry the FULL subject with byteOff=base — then
 		// MatchData#string is the whole receiver and #offset/#begin are absolute,
 		// as MRI reports inside the block.
-		cur := &MatchData{md: md, subject: subject, re: re, byteOff: base}
+		cur := &MatchData{md: md, subject: subject, re: re, byteOff: base, enc: srcEnc}
 		vm.lastMatch = cur
 		last = cur
 		if blk != nil {
@@ -2227,7 +2250,7 @@ func (vm *VM) gsubHash(re *Regexp, self *object.String, h *object.Hash, global b
 		b.cat(subject[pos:mBegin], srcEnc) // literal text before the match
 		// Carry the FULL subject with byteOff=base so $~ reports absolute
 		// offsets and the whole receiver (see gsub).
-		cur := &MatchData{md: md, subject: subject, re: re, byteOff: base}
+		cur := &MatchData{md: md, subject: subject, re: re, byteOff: base, enc: srcEnc}
 		vm.lastMatch = cur
 		last = cur
 		// Look the match up with Hash#[] (not a bare Get) so a missing key runs the
@@ -2448,7 +2471,7 @@ func groupValue(m *MatchData, i int) object.Value {
 	if m.md.Begin(i) < 0 {
 		return object.NilV
 	}
-	return object.NewString(m.md.Str(i))
+	return m.mdString(m.md.Str(i))
 }
 
 // installRegexp registers the Regexp and MatchData method tables. It runs at the
@@ -2625,9 +2648,9 @@ func (vm *VM) installRegexp() {
 		var md object.Value
 		if len(args) >= 2 {
 			// match(str, pos): start scanning at character offset pos.
-			md = vm.runMatchFrom(re, subject, intArg(args[1]))
+			md = vm.runMatchFrom(re, subject, matchEnc(args[0]), intArg(args[1]))
 		} else {
-			md = vm.runMatch(re, subject)
+			md = vm.runMatch(re, subject, matchEnc(args[0]))
 		}
 		// With a block, a successful match yields the MatchData and the block's value
 		// is returned; a failed match returns nil and never yields.
@@ -2666,7 +2689,7 @@ func (vm *VM) installRegexp() {
 		}
 		// Like =~, a successful === records $~ so Regexp.last_match / $1 work in the
 		// taken case/when branch (Trollop derives an option's :long this way).
-		vm.lastMatch = &MatchData{md: md, subject: s, re: re}
+		vm.lastMatch = &MatchData{md: md, subject: s, re: re, enc: matchEnc(args[0])}
 		return object.True
 	})
 
@@ -2769,7 +2792,8 @@ func (vm *VM) installRegexp() {
 			return object.NilV
 		}}
 	vm.cMatchData.define("to_s", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(mdArg(self).md.Str(0))
+		m := mdArg(self)
+		return m.mdString(m.md.Str(0))
 	})
 	vm.cMatchData.define("inspect", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(mdArg(self).Inspect())
@@ -2777,18 +2801,18 @@ func (vm *VM) installRegexp() {
 	vm.cMatchData.define("pre_match", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		m := mdArg(self)
 		if m.byteOff == 0 {
-			return object.NewString(m.md.Pre())
+			return m.mdString(m.md.Pre())
 		}
 		// Everything in the full subject before the match (the engine's Pre is
 		// relative to the matched tail, so prepend the skipped prefix).
-		return object.NewString(m.subject[:m.byteOff+m.md.Begin(0)])
+		return m.mdString(m.subject[:m.byteOff+m.md.Begin(0)])
 	})
 	vm.cMatchData.define("post_match", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		m := mdArg(self)
 		if m.byteOff == 0 {
-			return object.NewString(m.md.Post())
+			return m.mdString(m.md.Post())
 		}
-		return object.NewString(m.subject[m.byteOff+m.md.End(0):])
+		return m.mdString(m.subject[m.byteOff+m.md.End(0):])
 	})
 	vm.cMatchData.define("size", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(int64(mdArg(self).md.NGroups() + 1))
@@ -2868,8 +2892,12 @@ func (vm *VM) installRegexp() {
 		return mdArg(self).re
 	})
 	vm.cMatchData.define("string", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		// MRI returns a frozen copy of the original subject.
-		return object.NewFrozenStringView(mdArg(self).subject)
+		// re.c's match_string at tag v3_4_0 hands back RMATCH(match)->str
+		// itself ("str is frozen"), so the subject keeps its encoding.
+		m := mdArg(self)
+		str := object.NewStringViewEnc(m.subject, m.enc)
+		str.Frozen = true
+		return str
 	})
 	// MatchData#deconstruct is the Array of captures (groups 1..n), for array
 	// pattern matching (`in [a, b]`); it is a genuine alias of #captures (shared
@@ -2984,23 +3012,23 @@ func (vm *VM) regexpMatchIndex(re *Regexp, subject object.Value) object.Value {
 		vm.lastMatch = object.NilV
 		return object.NilV
 	}
-	vm.lastMatch = &MatchData{md: md, subject: s, re: re}
+	vm.lastMatch = &MatchData{md: md, subject: s, re: re, enc: matchEnc(subject)}
 	return object.IntValue(int64(byteToChar(s, md.Begin(0))))
 }
 
 // stringRegexpIndex implements String#[] / #slice with a Regexp argument: the
 // whole match (no extra arg) or the numbered/named capture group, and nil when
 // the pattern does not match. $~ is updated, as in MRI.
-func (vm *VM) stringRegexpIndex(s string, re *Regexp, rest []object.Value) object.Value {
+func (vm *VM) stringRegexpIndex(s, enc string, re *Regexp, rest []object.Value) object.Value {
 	md := re.matcher().Match(s)
 	if md == nil {
 		vm.lastMatch = object.NilV
 		return object.NilV
 	}
-	m := &MatchData{md: md, subject: s, re: re}
+	m := &MatchData{md: md, subject: s, re: re, enc: enc}
 	vm.lastMatch = m
 	if len(rest) == 0 {
-		return object.NewString(md.Str(0))
+		return m.mdString(md.Str(0))
 	}
 	return m.at(rest[0])
 }

@@ -91,9 +91,12 @@ func TestSpaceshipNumericCoerce(t *testing.T) {
 		{`class C1; def coerce(o); [o, 10]; end; end; p(3 <=> C1.new)`, "-1\n"},
 		{`class C2; def coerce(o); [o, 3]; end; end; p(3 <=> C2.new)`, "0\n"},
 		{`class C3; def coerce(o); [o, 1]; end; end; p(3 <=> C3.new)`, "1\n"},
-		// #coerce returning something other than a 2-element Array -> nil.
+		// numeric.c v3_4_0 do_coerce (err = FALSE, which rb_num_coerce_cmp passes):
+		// a #coerce answering nil declines quietly and <=> is nil; anything else
+		// that is not a two-element Array is a TypeError.
 		{`class C4; def coerce(o); nil; end; end; p(3 <=> C4.new)`, "nil\n"},
-		{`class C5; def coerce(o); [1]; end; end; p(3 <=> C5.new)`, "nil\n"},
+		{`class C5; def coerce(o); [1]; end; end
+begin; 3 <=> C5.new; rescue TypeError => e; puts e.message; end`, "coerce must return [x, y]\n"},
 		// An exception inside #coerce is not rescued.
 		{`class C6; def coerce(o); raise "boom"; end; end
 begin; 3 <=> C6.new; rescue => e; puts e.message; end`, "boom\n"},

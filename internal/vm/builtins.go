@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"unicode/utf8"
 
 	"golang.org/x/text/encoding/charmap"
@@ -1999,9 +2000,16 @@ func (vm *VM) bootstrap() {
 	vm.cSymbol.define("to_sym", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return self
 	})
-	vm.cSymbol.define("intern", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return self // MRI: Symbol#intern is an alias of Symbol#to_sym (returns self)
-	})
+	aliasBuiltin(vm.cSymbol, "intern", "to_sym")
+	// string.c v3_4_0 sym_equal is `return RBOOL(obj == sym);`, registered under
+	// BOTH "==" and "===" with the same C function. rbgo let Symbol#== fall to
+	// Comparable#== (via #<=>) and #=== to Object#===, so the two were neither
+	// equal nor identity comparisons.
+	symEqual := func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.Bool(self == args[0])
+	}
+	vm.cSymbol.define("==", symEqual)
+	aliasBuiltin(vm.cSymbol, "===", "==")
 	// Symbol#encoding: the encoding of the symbol's string (symbol.c v3_4_0
 	// sym_encoding is rb_obj_encoding(rb_sym2str(sym))). rb_str_intern re-tags an
 	// ASCII-only string as US-ASCII before interning it, whatever encoding it
@@ -2037,7 +2045,7 @@ func (vm *VM) bootstrap() {
 		return object.IntValue(int64(utf8.RuneCountInString(symStr(self))))
 	}
 	vm.cSymbol.define("length", symLen)
-	vm.cSymbol.define("size", symLen)
+	aliasBuiltin(vm.cSymbol, "size", "length")
 	vm.cSymbol.define("empty?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(symStr(self) == "")
 	})
@@ -2057,26 +2065,65 @@ func (vm *VM) bootstrap() {
 		return object.Symbol(succString(symStr(self)))
 	}
 	vm.cSymbol.define("succ", symSucc)
-	vm.cSymbol.define("next", symSucc)
+	aliasBuiltin(vm.cSymbol, "next", "succ")
 	// Symbol#[] / #slice run the whole String#[] protocol against the symbol's
 	// name (they are registered after strIndexFn is defined, below).
-	vm.cSymbol.define("start_with?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		s := symStr(self)
-		for _, a := range args {
-			if strings.HasPrefix(s, strArg(a)) {
-				return object.True
-			}
-		}
-		return object.False
+	// symbol.c v3_4_0 defines #start_with? / #end_with? as
+	//     sym_start_with(argc, argv, sym) { return rb_str_start_with(argc, argv, rb_sym2str(sym)); }
+	// i.e. the String implementations over the symbol's name, so they take a
+	// Regexp, run #to_str on anything else, refuse an incompatible encoding and
+	// set $~ — none of which a plain strings.HasPrefix over strArg does.
+	vm.cSymbol.define("start_with?", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		return vm.send(symbolNameString(self), "start_with?", args, blk)
 	})
-	vm.cSymbol.define("end_with?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		s := symStr(self)
-		for _, a := range args {
-			if strings.HasSuffix(s, strArg(a)) {
-				return object.True
-			}
-		}
-		return object.False
+	vm.cSymbol.define("end_with?", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		return vm.send(symbolNameString(self), "end_with?", args, blk)
+	})
+	// symbol.c v3_4_0 rb_sym_to_s is `rb_str_dup(rb_sym2str(sym))` — a fresh
+	// MUTABLE copy of the interned name, carrying the symbol's encoding, so
+	// :ruby.to_s is US-ASCII and not the VM's default UTF-8. Object#to_s used to
+	// answer this and stamped UTF-8 on every symbol.
+	symToS := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return symbolNameString(self)
+	}
+	vm.cSymbol.define("to_s", symToS)
+	// string.c v3_4_0 Init_Symbol registers each of these PAIRS against ONE C
+	// function (rb_define_method(rb_cSymbol, "next", sym_succ, 0) beside
+	// "succ", "size" beside "length", "slice" beside "[]", "id2name" beside
+	// "to_s", "intern" beside "to_sym"), and MRI's method equality compares the
+	// cfunc, so Symbol.instance_method(:next) == Symbol.instance_method(:succ).
+	// Sharing the record here is how rbgo spells that — the same thing it
+	// already does for String#slice / String#to_str.
+	aliasBuiltin(vm.cSymbol, "id2name", "to_s")
+	// sym_inspect builds ":" + the name and associates the symbol's encoding
+	// with the result (rb_enc_associate), so an ASCII-only symbol inspects as a
+	// US-ASCII String.
+	vm.cSymbol.define("inspect", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.NewStringBytesEnc([]byte(self.Inspect()), internedSymbolName(symStr(self)).Enc)
+	})
+	// Symbol has no allocator and its .new is undefined (symbol.c v3_4_0
+	// Init_Symbol: rb_undef_alloc_func(rb_cSymbol) and
+	// rb_undef_method(CLASS_OF(rb_cSymbol), "new")).
+	vm.cSymbol.smethods["allocate"] = &Method{name: "allocate", owner: vm.cSymbol,
+		native: func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+			return raise("TypeError", "allocator undefined for Symbol")
+		}}
+	vm.cSymbol.smethods["new"] = &Method{name: "new", owner: vm.cSymbol,
+		native: func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+			return raise("NoMethodError", "undefined method 'new' for class Symbol")
+		}}
+	// Symbol#name (Ruby 3.0+) is symbol.c's sym_name: `return rb_sym2str(sym);`
+	// over the interned symbol table, so it answers the SAME frozen String each
+	// time — core/symbol/name_spec asserts
+	// :"ruby_3".name.equal?(:"ruby_#{1+2}".name).
+	vm.cSymbol.define("name", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return internedSymbolName(symStr(self))
+	})
+	// Symbol#=~ is sym_match: `return rb_str_match(rb_sym2str(sym), other);`,
+	// which is String#=~ over the name — it answers the match position and sets
+	// $~ / $1.
+	vm.cSymbol.define("=~", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return vm.send(symbolNameString(self), "=~", args, nil)
 	})
 	// Spaceship (<=>) for the built-in ordered types; numerics compare across
 	// Integer/Float, strings lexically, and a mismatched type yields nil.
@@ -2277,7 +2324,14 @@ func (vm *VM) bootstrap() {
 		excl := len(args) > 1 && truthyValue(args[1])
 		// The end argument is coerced through #to_str (so a #to_str object works),
 		// raising TypeError otherwise — matching MRI, which rejects Integer/Symbol.
-		stringUpto(strOf(self), vm.affixString(args[0]).Str(), excl, func(cur string) {
+		limit := vm.affixString(args[0])
+		// string.c v3_4_0 rb_str_upto_each opens with `rb_enc_check(beg, end)`,
+		// so two strings that cannot be compared are an Encoding::CompatibilityError
+		// before any iteration.
+		if recv := stringOrSubclassBytes(self); recv != nil {
+			vm.combinedEncName(recv, limit)
+		}
+		stringUpto(strOf(self), limit.Str(), excl, func(cur string) {
 			vm.callBlock(blk, []object.Value{object.NewString(cur)})
 		})
 		return self
@@ -2477,7 +2531,7 @@ func (vm *VM) bootstrap() {
 				// A matching Regexp sets $~ (so $1.. and Regexp.last_match are live);
 				// a non-match clears it to nil, as MRI does.
 				if md := re.matcher().Match(s); md != nil && md.Begin(0) == 0 {
-					vm.lastMatch = &MatchData{md: md, subject: s, re: re}
+					vm.lastMatch = &MatchData{md: md, subject: s, re: re, enc: matchEnc(self)}
 					return object.True
 				}
 				vm.lastMatch = object.NilV
@@ -2569,7 +2623,12 @@ func (vm *VM) bootstrap() {
 			return object.NilV
 		}
 		if isRe {
-			return vm.strIndexRegexp(re, s, start)
+			// string.c v3_4_0 rb_str_index_m reaches rb_reg_search, whose
+			// rb_reg_prepare_re raises Encoding::CompatibilityError when the
+			// pattern and the subject cannot match — the same check #=~ and
+			// #match already make here.
+			vm.checkSubjectEncoding(re, self)
+			return vm.strIndexRegexp(re, s, matchEnc(self), start)
 		}
 		byteStart := charToByte(s, start)
 		byteIdx := strings.Index(s[byteStart:], needle)
@@ -2596,7 +2655,8 @@ func (vm *VM) bootstrap() {
 			}
 		}
 		if isRe {
-			return vm.strRindexRegexp(re, s, limit)
+			vm.checkSubjectEncoding(re, self) // rb_str_rindex_m -> rb_reg_search, as above
+			return vm.strRindexRegexp(re, s, matchEnc(self), limit)
 		}
 		return strRindexString(s, needle, limit)
 	})
@@ -2697,13 +2757,22 @@ func (vm *VM) bootstrap() {
 	// -@ returns a frozen copy (self when already frozen); +@ returns a mutable copy
 	// (self when already mutable), matching MRI's String#-@ / #+@.
 	vm.cString.define("-@", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		s := self.(*object.String)
-		if s.Frozen {
-			return s
-		}
-		d := s.Dup()
-		d.Frozen = true
-		return d
+		// string.c v3_4_0 str_uminus is
+		//     if (!BARE_STRING_P(str) && !rb_obj_frozen_p(str)) str = rb_str_dup(str);
+		//     return rb_fstring(str);
+		// and rb_fstring DEDUPLICATES through the process-wide fstring table, so
+		// -"a string" is the same object however it was built. rbgo only froze a
+		// copy, so core/string/uminus_spec's "returns the same object for equal
+		// unfrozen strings" and "… on the same String literal" both failed.
+		//
+		// str_uminus's BARE_STRING_P guard (a string carrying instance variables
+		// is never deduplicated) is NOT reproduced: object_model.go's setIvar
+		// drops an instance variable set on a bare String, so ivarTable is always
+		// empty here and the guard would be dead code. That is also why
+		// core/string/uminus_spec's "does not deduplicate a frozen string when it
+		// has instance variables" fails — it was passing only because nothing
+		// deduplicated at all.
+		return internFString(self.(*object.String))
 	})
 	vm.cString.define("+@", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		s := self.(*object.String)
@@ -2760,7 +2829,7 @@ func (vm *VM) bootstrap() {
 		}
 		var res object.Value
 		if re, ok := args[0].(*Regexp); ok { // s[/re/] / s[/re/, group]
-			res = vm.stringRegexpIndex(strOf(self), re, args[1:])
+			res = vm.stringRegexpIndex(strOf(self), matchEnc(self), re, args[1:])
 		} else {
 			res = stringIndexEnc(strOf(self), vm.coerceStrIndexArgs(args), self.(*object.String).IsBinary())
 		}
@@ -2777,7 +2846,7 @@ func (vm *VM) bootstrap() {
 		return strIndexFn(vm, object.NewString(symStr(self)), args, blk)
 	}
 	vm.cSymbol.define("[]", symIndexFn)
-	vm.cSymbol.define("slice", symIndexFn)
+	aliasBuiltin(vm.cSymbol, "slice", "[]")
 	// casecmp / casecmp? compare symbol names case-insensitively, but only against
 	// another Symbol — any other argument yields nil, as MRI does (String is never
 	// coerced here). They delegate to the String comparison of the two names.
@@ -2819,7 +2888,7 @@ func (vm *VM) bootstrap() {
 				vm.lastMatch = object.NilV
 				return object.NewArray(strEncOf(self, s), strEncOf(self, ""), strEncOf(self, ""))
 			}
-			vm.lastMatch = &MatchData{md: md, subject: s, re: re}
+			vm.lastMatch = &MatchData{md: md, subject: s, re: re, enc: enc}
 			b, e := md.Begin(0), md.End(0)
 			return object.NewArray(object.NewStringBytesEnc([]byte(s[:b]), enc),
 				object.NewStringBytesEnc([]byte(s[b:e]), enc), object.NewStringBytesEnc([]byte(s[e:]), enc))
@@ -2835,7 +2904,7 @@ func (vm *VM) bootstrap() {
 		s := strOf(self)
 		enc := self.(*object.String).Enc
 		if re, ok := regexpSep(args[0]); ok {
-			m := vm.lastRegexpMatch(re, s)
+			m := vm.lastRegexpMatch(re, s, matchEnc(self))
 			if m == nil {
 				vm.lastMatch = object.NilV
 				return object.NewArray(strEncOf(self, ""), strEncOf(self, ""), strEncOf(self, s))
@@ -3031,6 +3100,11 @@ func (vm *VM) bootstrap() {
 		}
 		if len(args) == 0 {
 			arr.Elems = nil
+			// rb_ary_initialize uses rb_warning here, not rb_warn, so this one is
+			// only heard under -w / $VERBOSE = true.
+			if blk != nil {
+				vm.rbWarning1("given block not used")
+			}
 			return self
 		}
 		// A single non-Integer argument is treated as another array to copy: an Array
@@ -3057,6 +3131,9 @@ func (vm *VM) bootstrap() {
 		}
 		// Build the array incrementally so that if the block calls break, the array
 		// is left holding the elements produced before the break, as MRI does.
+		if blk != nil && len(args) == 2 {
+			vm.rbWarn1("block supersedes default value argument")
+		}
 		arr.Elems = make([]object.Value, 0, n)
 		for i := int64(0); i < n; i++ {
 			switch {
@@ -3176,18 +3253,20 @@ func (vm *VM) bootstrap() {
 			raise("ArgumentError", "wrong number of arguments (given %d, expected 1..2)", len(args))
 		}
 		a := self.(*object.Array).Elems
+		// array.c v3_4_0 rb_ary_fetch warns BEFORE it even converts the index:
+		//     block_given = rb_block_given_p();
+		//     if (block_given && argc == 2) rb_warn("block supersedes default value argument");
+		// so the warning fires whether or not the index is in range.
+		if blk != nil && len(args) == 2 {
+			vm.rbWarn1("block supersedes default value argument")
+		}
 		v, orig, ok := vm.arrayFetchAt(a, args[0])
 		if ok {
 			return v
 		}
 		if blk != nil {
-			// The block supersedes a default argument. MRI also warns "block
-			// supersedes default value argument" on that clash, but rbgo's
-			// Kernel#warn currently writes to stdout rather than stderr, so
-			// emitting it here would pollute program output (and the only spec
-			// asserting it uses the stderr-based `complain` matcher); omit it
-			// until warn is routed to stderr. MRI passes the ORIGINAL index
-			// object to the block, not the #to_int result.
+			// MRI passes the ORIGINAL index object to the block, not the #to_int
+			// result.
 			return vm.callBlock(blk, []object.Value{args[0]})
 		}
 		if len(args) == 2 {
@@ -4343,6 +4422,11 @@ func (vm *VM) bootstrap() {
 		if len(args) == 0 && blk == nil {
 			return enumFor(self, "index")
 		}
+		// array.c v3_4_0 rb_ary_index: with a value argument the block is dead,
+		// and MRI says so — `if (rb_block_given_p()) rb_warn("given block not used");`
+		if len(args) > 0 && blk != nil {
+			vm.rbWarn1("given block not used")
+		}
 		for i := 0; i < len(a.Elems); i++ {
 			var match bool
 			if len(args) > 0 {
@@ -4366,6 +4450,10 @@ func (vm *VM) bootstrap() {
 		if len(args) == 0 && blk == nil {
 			// MRI's rindex Enumerator reports an unknown (nil) size.
 			return enumForSized(self, "rindex", func(*VM) object.Value { return object.NilV })
+		}
+		// rb_ary_rindex warns for the dead block exactly as rb_ary_index does.
+		if len(args) > 0 && blk != nil {
+			vm.rbWarn1("given block not used")
 		}
 		for i := len(a.Elems) - 1; i >= 0; i-- {
 			// A block may shrink the array; realign to the new end and re-check size
@@ -4672,9 +4760,22 @@ func (vm *VM) bootstrap() {
 			stringInit(vm, s, args, blk)
 			return s
 		}}
+	// Hash.[] allocates through hash_alloc(klass) in hash.c's rb_hash_s_create at
+	// tag v3_4_0, so on a subclass it answers an instance of THAT class and never
+	// runs its #initialize — core/hash/constructor_spec asserts both. rbgo always
+	// returned a plain Hash.
 	vm.cHash.smethods["[]"] = &Method{name: "[]", owner: vm.cHash,
-		native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		native: func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 			h := object.NewHash()
+			ret := func(built *object.Hash) object.Value {
+				recv, ok := self.(*RClass)
+				if !ok || recv == vm.cHash {
+					return built
+				}
+				obj := &RObject{class: recv, ivars: map[string]object.Value{}, builtin: built}
+				vm.registerLiveObject(obj)
+				return obj
+			}
 			// Hash[[[k,v],…]] / Hash[existing_hash] / Hash[k1,v1,k2,v2,…].
 			if len(args) == 1 {
 				a0 := args[0]
@@ -4710,13 +4811,13 @@ func (vm *VM) bootstrap() {
 						}
 						h.Set(pair.Elems[0], v)
 					}
-					return h
+					return ret(h)
 				case *object.Hash:
 					for _, k := range a.Keys {
 						v, _ := a.Get(k)
 						h.Set(k, v)
 					}
-					return h
+					return ret(h)
 				}
 			}
 			if len(args)%2 != 0 {
@@ -4725,7 +4826,7 @@ func (vm *VM) bootstrap() {
 			for i := 0; i < len(args); i += 2 {
 				h.Set(args[i], args[i+1])
 			}
-			return h
+			return ret(h)
 		}}
 	// Hash.ruby2_keywords_hash(hash) returns a copy of hash flagged as a keyword
 	// hash for `*args` forwarding; Hash.ruby2_keywords_hash? reports that flag.
@@ -4867,7 +4968,7 @@ func (vm *VM) bootstrap() {
 		for _, o := range others {
 			// A non-Hash argument is coerced with #to_hash (MRI raises
 			// "no implicit conversion of X into Hash" when it cannot convert).
-			other := vm.toHash(o)
+			other := vm.hashOperand(o)
 			for _, k := range other.Keys {
 				v, _ := other.Get(k)
 				if blk != nil {
@@ -4932,6 +5033,11 @@ func (vm *VM) bootstrap() {
 		if len(args) < 1 || len(args) > 2 {
 			raise("ArgumentError", "wrong number of arguments (given %d, expected 1..2)", len(args))
 		}
+		// hash.c v3_4_0 rb_hash_fetch_m warns on the clash before the lookup:
+		//     if (block_given && argc == 2) rb_warn("block supersedes default value argument");
+		if blk != nil && len(args) == 2 {
+			vm.rbWarn1("block supersedes default value argument")
+		}
 		if v, ok := self.(*object.Hash).Get(args[0]); ok {
 			return v
 		}
@@ -4985,7 +5091,7 @@ func (vm *VM) bootstrap() {
 	vm.cHash.define("replace", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		h := self.(*object.Hash)
 		vm.checkHashFrozen(h)
-		h.ReplaceWith(vm.toHash(args[0]))
+		h.ReplaceWith(vm.hashOperand(args[0]))
 		return h
 	})
 	// compare_by_identity switches the receiver to identity-based key comparison
@@ -5945,7 +6051,11 @@ func (vm *VM) bootstrap() {
 		if base < 2 || base > 36 {
 			raise("ArgumentError", "invalid radix %d", base)
 		}
-		return object.NewString(bigVal(self).Text(int(base)))
+		// numeric.c's rb_fix2str at tag v3_4_0 ends in `rb_usascii_str_new(b, e-b)`
+		// (and `rb_usascii_str_new2("0")` for zero), and bignum.c's rb_big2str does
+		// the same, so every Integer#to_s is US-ASCII — core/integer/to_s_spec
+		// asserts it. rbgo tagged the digits UTF-8.
+		return object.NewStringBytesEnc([]byte(bigVal(self).Text(int(base))), "US-ASCII")
 	})
 	// Bitwise / shift operators (arbitrary precision via big.Int, so a left shift
 	// promotes to a Bignum and bitwise ops work on Bignums too).
@@ -6027,16 +6137,12 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cInteger.define("floor", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		// floor(n>=0) is self; floor(n<0) rounds toward negative infinity to the
-		// nearest multiple of 10**(-n).
+		// nearest multiple of 10**(-n) — exactly, see intFloorPrecision.
 		n := intArgOr(args, 0)
 		if n >= 0 {
 			return self
 		}
-		pow, ok := pow10(-n)
-		if !ok {
-			return object.IntValue(0) // 10**(-n) exceeds int64; the result is not int64-representable
-		}
-		return object.IntValue(floorDiv(intOf(self), pow) * pow)
+		return intFloorPrecision(bigVal(self), -n)
 	})
 	vm.cInteger.define("ceil", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		// ceil(n>=0) is self; ceil(n<0) rounds toward positive infinity.
@@ -6044,11 +6150,7 @@ func (vm *VM) bootstrap() {
 		if n >= 0 {
 			return self
 		}
-		pow, ok := pow10(-n)
-		if !ok {
-			return object.IntValue(0)
-		}
-		return object.IntValue(-floorDiv(-intOf(self), pow) * pow)
+		return intCeilPrecision(bigVal(self), -n)
 	})
 	vm.cInteger.define("digits", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		n := intOf(self)
@@ -6139,10 +6241,24 @@ func (vm *VM) bootstrap() {
 	vm.cFloat.define("to_int", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return floatToInt(floatOf(self))
 	})
+	// numeric.c v3_4_0 rb_float_ceil / rb_float_floor round the double to an
+	// integer FIRST and then apply the integer rule:
+	//     num = dbl2ival(ceil(number));
+	//     if (ndigits < 0) num = rb_int_ceil(num, ndigits);
+	// so a large negative ndigits stays exact. Scaling the double by 10**ndigits
+	// instead gave 123.0.ceil(-50) as 1.00000000000000007629...e+50.
 	vm.cFloat.define("ceil", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		if n := intArgOr(args, 0); n < 0 {
+			iv, _ := object.BigOf(floatToInt(math.Ceil(floatOf(self))))
+			return intCeilPrecision(iv, -n)
+		}
 		return floatRound(floatOf(self), args, math.Ceil)
 	})
 	vm.cFloat.define("floor", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		if n := intArgOr(args, 0); n < 0 {
+			iv, _ := object.BigOf(floatToInt(math.Floor(floatOf(self))))
+			return intFloorPrecision(iv, -n)
+		}
 		return floatRound(floatOf(self), args, math.Floor)
 	})
 	// Float#round is defined (with the half: keyword) in registerNumericEdges,
@@ -8038,6 +8154,26 @@ func (vm *VM) hashEachLive(h *object.Hash, fn func(k, v object.Value)) {
 // user subclass of Hash (an RObject wrapping a Hash); for the latter it also
 // returns that RObject so the result can be rebuilt with the same class. Any
 // other value raises the MRI "wrong argument type X (expected Hash)" TypeError.
+// hashOperand converts an operand to the Hash a Hash method reads, the way
+// hash.c's static `to_hash` does at tag v3_4_0:
+//
+//	static VALUE to_hash(VALUE hash) {
+//	    return rb_convert_type_with_id(hash, T_HASH, "Hash", idTo_hash);
+//	}
+//
+// rb_convert_type_with_id hands back a value that is ALREADY of the target
+// type, and a Hash SUBCLASS instance is T_HASH — so #to_hash is never
+// consulted for one. core/hash/merge_spec.rb states it outright ("does not
+// call to_hash on hash subclasses"), as does core/hash/replace_spec.rb.
+func (vm *VM) hashOperand(v object.Value) *object.Hash {
+	if o, ok := v.(*RObject); ok {
+		if h, ok := o.builtin.(*object.Hash); ok {
+			return h
+		}
+	}
+	return vm.toHash(v)
+}
+
 func hashOrSubclassArg(vm *VM, v object.Value) (*object.Hash, *RObject) {
 	if o, ok := v.(*RObject); ok {
 		if h, ok := o.builtin.(*object.Hash); ok {
@@ -8304,7 +8440,7 @@ func (vm *VM) stringAssignRegexp(s *object.String, re *Regexp, groupArgs []objec
 		vm.lastMatch = object.NilV
 		raise("IndexError", "regexp not matched")
 	}
-	m := &MatchData{md: md, subject: subject, re: re}
+	m := &MatchData{md: md, subject: subject, re: re, enc: s.Enc}
 	vm.lastMatch = m
 	gi := 0
 	if len(groupArgs) > 0 {
@@ -8435,7 +8571,7 @@ func (vm *VM) stringSliceBangRegexp(s *object.String, re *Regexp, rest []object.
 		vm.lastMatch = object.NilV
 		return object.NilV
 	}
-	m := &MatchData{md: md, subject: subject, re: re}
+	m := &MatchData{md: md, subject: subject, re: re, enc: s.Enc}
 	vm.lastMatch = m
 	gi := 0
 	if len(rest) > 0 {
@@ -10597,42 +10733,44 @@ func makePad(pad string, n int) string {
 	return string(out)
 }
 
-// powNumeric implements ** / pow: integer base and non-negative integer
-// exponent stay integer; a negative integer exponent or any float yields a
-// float (no Rational in this phase).
-func powNumeric(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+// powNumeric implements ** / pow. The one-argument form is numeric.c's fix_pow
+// (via integerPow) or rb_float_pow (via floatPow) at tag v3_4_0; the
+// two-argument Integer#pow(exp, mod) is bignum.c's rb_int_powm.
+func powNumeric(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 	// Integer#pow(exp, mod) is modular exponentiation: base**exp mod m.
 	if len(args) > 1 {
-		base, ok1 := object.BigOf(self)
-		e, ok2 := object.BigOf(args[0])
-		m, ok3 := object.BigOf(args[1])
-		if !ok1 || !ok2 || !ok3 {
-			raise("TypeError", "Integer#pow with a modulus requires integer arguments")
+		// bignum.c's rb_int_powm at tag v3_4_0 checks in this order, with two
+		// distinct messages: the exponent first, then its sign, then the modulus.
+		base, _ := object.BigOf(self)
+		e, ok := object.BigOf(args[0])
+		if !ok {
+			raise("TypeError", "Integer#pow() 2nd argument not allowed unless a 1st argument is integer")
 		}
 		if e.Sign() < 0 {
 			raise("RangeError", "Integer#pow() 1st argument cannot be negative when 2nd argument specified")
 		}
+		m, ok := object.BigOf(args[1])
+		if !ok {
+			raise("TypeError", "Integer#pow() 2nd argument not allowed unless all arguments are integers")
+		}
 		if m.Sign() == 0 {
 			raise("ZeroDivisionError", "divided by 0")
 		}
-		return object.NormInt(new(big.Int).Exp(base, e, m))
-	}
-	if base, ok := object.BigOf(self); ok {
-		if ei, ok := args[0].(object.Integer); ok {
-			if ei < 0 {
-				bf, _ := toFloat(self)
-				return object.Float(math.Pow(bf, float64(ei)))
-			}
-			// Arbitrary-precision exponentiation, demoting if it fits int64.
-			return object.NormInt(new(big.Int).Exp(base, big.NewInt(int64(ei)), nil))
+		// rb_int_powm ends in int_pow_tmpl's `if (v < 0) v += m`, i.e. the result
+		// takes the modulus' sign the way Integer#% does ("handles sign like
+		// #divmod does" in core/integer/shared/exponent). big.Int.Exp reduces
+		// modulo |m| and is always non-negative, so a negative modulus needs the
+		// extra step.
+		r := new(big.Int).Exp(base, e, new(big.Int).Abs(m))
+		if m.Sign() < 0 && r.Sign() != 0 {
+			r.Add(r, m)
 		}
+		return object.NormInt(r)
 	}
-	a, _ := toFloat(self)
-	b, ok := toFloat(args[0])
-	if !ok {
-		raise("TypeError", "%s can't be coerced for **", args[0].Inspect())
+	if _, ok := object.BigOf(self); ok {
+		return vm.integerPow(self, args[0])
 	}
-	return object.Float(math.Pow(a, b))
+	return vm.floatPow(self, args[0])
 }
 
 // stringLineSegs splits the receiver into line segments for String#lines /
@@ -11308,16 +11446,73 @@ func spaceshipNumeric(vm *VM, self object.Value, args []object.Value, _ *Proc) o
 	}
 	a, _ := toFloat(self)
 	if b, ok := toFloat(other); ok {
+		// numeric.c v3_4_0 flo_cmp opens with `if (isnan(a)) return Qnil;` and ends
+		// in rb_dbl_cmp, which is `if (isnan(a) || isnan(b)) return Qnil;`. cmpFloat
+		// cannot say "unordered", so the NaN cases have to be caught here — a plain
+		// three-way compare answered 0 for NaN <=> 1.0.
+		if math.IsNaN(a) || math.IsNaN(b) {
+			return object.NilV
+		}
 		return object.IntValue(int64(cmpFloat(a, b)))
 	}
+	// An INFINITE Float receiver asks a non-numeric operand for #infinite? before
+	// it coerces (flo_cmp):
+	//
+	//	if (isinf(a) && !UNDEF_P(i = rb_check_funcall(y, rb_intern("infinite?"), 0, 0))) {
+	//	    if (RTEST(i)) {
+	//	        int j = rb_cmpint(i, x, y);
+	//	        j = (a > 0.0) ? (j > 0 ? 0 : +1) : (j < 0 ? 0 : -1);
+	//	        return INT2FIX(j);
+	//	    }
+	//	    if (a > 0.0) return INT2FIX(1);
+	//	    return INT2FIX(-1);
+	//	}
+	//
+	// so an object that claims to be infinite in the same direction compares
+	// EQUAL to the infinity, and a finite one is simply smaller (or larger).
+	if vm != nil && math.IsInf(a, 0) {
+		if _, isFloat := self.(object.Float); isFloat && vm.respondsToDynamic(other, "infinite?") {
+			i := vm.send(other, "infinite?", nil, nil)
+			if !i.Truthy() {
+				return object.IntValue(int64(signOfFloat(a)))
+			}
+			j := vm.cmpIntValue(i)
+			if a > 0 {
+				if j > 0 {
+					j = 0
+				} else {
+					j = 1
+				}
+			} else if j < 0 {
+				j = 0
+			} else {
+				j = -1
+			}
+			return object.IntValue(int64(j))
+		}
+	}
 	// Non-numeric argument: MRI runs the numeric coercion protocol — other.coerce(self)
-	// — and re-dispatches <=> on the returned pair. Any exception raised by #coerce
-	// propagates; a missing #coerce or a non-Array result yields nil (not an error).
+	// — and re-dispatches <=> on the returned pair (rb_num_coerce_cmp -> do_coerce).
+	// Any exception raised by #coerce propagates; a missing #coerce yields nil, but
+	// a #coerce that does NOT answer a two-element Array is a TypeError.
 	if vm != nil && vm.respondsToDynamic(other, "coerce") {
 		pair := vm.send(other, "coerce", []object.Value{self}, nil)
-		if arr, ok := pair.(*object.Array); ok && len(arr.Elems) == 2 {
-			return vm.send(arr.Elems[0], "<=>", []object.Value{arr.Elems[1]}, nil)
+		arr, ok := pair.(*object.Array)
+		if !ok || len(arr.Elems) != 2 {
+			// do_coerce with err = FALSE (which is what rb_num_coerce_cmp passes):
+			//     if (!RB_TYPE_P(ary, T_ARRAY) || RARRAY_LEN(ary) != 2) {
+			//         if (err) rb_raise(rb_eTypeError, "coerce must return [x, y]");
+			//         else if (!NIL_P(ary)) rb_raise(rb_eTypeError, "coerce must return [x, y]");
+			//         return FALSE;
+			//     }
+			// so a #coerce answering nil declines quietly and the comparison is
+			// nil; anything else that is not a pair is a TypeError.
+			if object.IsNil(pair) {
+				return object.NilV
+			}
+			raise("TypeError", "coerce must return [x, y]")
 		}
+		return vm.send(arr.Elems[0], "<=>", []object.Value{arr.Elems[1]}, nil)
 	}
 	return object.NilV
 }
@@ -12028,4 +12223,129 @@ func (vm *VM) qualifiedConstName(scope *RClass, name string) string {
 		return name
 	}
 	return vm.moduleToSStr(scope) + "::" + name
+}
+
+// rbWarn1 is error.c's rb_warn at tag v3_4_0: the message is written to stderr
+// with the CALLING frame's "path:lineno: warning: " in front (rb_warn builds it
+// through rb_warning_string, which starts at the current frame), and it is
+// silenced only under -W0, where $VERBOSE is nil. `ruby -e 'p [1].index(1){}'`
+// prints "-e:1: warning: given block not used".
+func (vm *VM) rbWarn1(msg string) {
+	if object.IsNil(vm.gvar("$VERBOSE")) {
+		return
+	}
+	vm.curStderr().writeStr(vm.warnUplevelPrefix(0) + msg + "\n")
+}
+
+// rbWarning1 is error.c's rb_warning, the quieter sibling of rb_warn: it prints
+// only when $VERBOSE is TRUE (ruby -w), which is why the specs that assert one
+// of these pass `verbose: true` to `complain`.
+func (vm *VM) rbWarning1(msg string) {
+	if v := vm.gvar("$VERBOSE"); v != object.True {
+		return
+	}
+	vm.curStderr().writeStr(vm.warnUplevelPrefix(0) + msg + "\n")
+}
+
+// symbolNames interns the frozen String that Symbol#name answers. MRI's symbol
+// table is process-wide and hands back one String object per symbol, so this
+// one is too; the Strings in it are frozen and immutable, which is what makes
+// sharing them safe.
+var symbolNames sync.Map // string -> *object.String
+
+// internedSymbolName returns the one frozen String naming this symbol, tagged
+// the way symbol.c v3_4_0 tags it: rb_str_intern re-tags an ASCII-only name as
+// US-ASCII whatever encoding it arrived in, and keeps the string's own
+// encoding otherwise (see Symbol#encoding above for why the non-ASCII case is
+// derived from the bytes here).
+func internedSymbolName(name string) *object.String {
+	if v, ok := symbolNames.Load(name); ok {
+		return v.(*object.String)
+	}
+	enc := "UTF-8"
+	b := []byte(name)
+	switch {
+	case asciiOnly(b):
+		enc = "US-ASCII"
+	case !utf8.Valid(b):
+		enc = "ASCII-8BIT"
+	}
+	str := object.NewStringViewEnc(name, enc)
+	str.Frozen = true
+	actual, _ := symbolNames.LoadOrStore(name, str)
+	return actual.(*object.String)
+}
+
+// symbolNameString is the String a Symbol method delegates through: a fresh,
+// mutable copy of the interned name, so the delegate cannot hand the interned
+// object out or mutate it. Its encoding is the symbol's.
+func symbolNameString(sym object.Value) *object.String {
+	n := internedSymbolName(string(sym.(object.Symbol)))
+	return object.NewStringBytesEnc([]byte(n.Str()), n.Enc)
+}
+
+// NOTE: string.c v3_4_0 rstrip_offset opens with
+//
+//	if (rb_enc_str_coderange(str) == ENC_CODERANGE_BROKEN)
+//	    rb_raise(rb_eEncCompatError, "invalid byte sequence in %s", rb_enc_name(enc));
+//
+// so #rstrip / #rstrip! / #strip / #strip! should refuse a string whose bytes
+// are not valid in its own encoding (core/string/rstrip_spec asserts it, one
+// example). The guard is NOT installed: prawn_bind.go's Prawn::Document#render
+// answers a UTF-8-TAGGED binary PDF where MRI answers ASCII-8BIT, and
+// TestPrawnGenerateRoundTrip calls #rstrip on it — so the guard fires on a
+// string that is only invalid because of that mis-tagging. Install it once
+// render carries the right encoding.
+
+// fstrings is the process-wide deduplication table behind String#-@, MRI's
+// fstring table (string.c v3_4_0 rb_fstring / register_fstring). It is keyed by
+// encoding and bytes together, since two strings only deduplicate when both
+// match; every value in it is frozen, which is what makes sharing one across
+// VMs in a process safe — and MRI's table is equally process-wide.
+var fstrings sync.Map // enc + "\x00" + bytes -> *object.String
+
+// internFString returns the canonical frozen String for s's content. An
+// already-frozen receiver becomes the canonical one itself when nothing is
+// registered yet, so `input = "foo".freeze; (-input).equal?(input)` holds.
+func internFString(s *object.String) *object.String {
+	key := s.EncName() + "\x00" + s.Str()
+	if v, ok := fstrings.Load(key); ok {
+		return v.(*object.String)
+	}
+	fs := s
+	if !fs.Frozen {
+		fs = object.NewStringBytesEnc(append([]byte(nil), s.Bytes()...), s.Enc)
+		fs.Frozen = true
+	}
+	actual, _ := fstrings.LoadOrStore(key, fs)
+	return actual.(*object.String)
+}
+
+// signOfFloat is the sign of a non-zero double as a three-way comparison result.
+func signOfFloat(f float64) int {
+	if f > 0 {
+		return 1
+	}
+	return -1
+}
+
+// cmpIntValue is compar.c v3_4_0's rb_cmpint over an already-non-nil value: a
+// numeric answers its sign, and anything else is asked #> 0 then #< 0.
+func (vm *VM) cmpIntValue(v object.Value) int {
+	if f, ok := toFloat(v); ok {
+		switch {
+		case f > 0:
+			return 1
+		case f < 0:
+			return -1
+		}
+		return 0
+	}
+	if vm.send(v, ">", []object.Value{object.IntValue(0)}, nil).Truthy() {
+		return 1
+	}
+	if vm.send(v, "<", []object.Value{object.IntValue(0)}, nil).Truthy() {
+		return -1
+	}
+	return 0
 }

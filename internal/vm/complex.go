@@ -69,16 +69,27 @@ func registerNumericGeneric(vm *VM, cNumeric *RClass) {
 	bin := func(self object.Value, op string, other object.Value) object.Value {
 		return vm.send(self, op, []object.Value{other}, nil)
 	}
-	cmpZero := func(self object.Value) int {
-		c := vm.send(self, "<=>", []object.Value{object.IntValue(0)}, nil)
-		i, ok := c.(object.Integer)
-		if !ok {
+	// numeric.c v3_4_0 asks the RECEIVER's own #< / #> rather than its #<=>:
+	// num_positive_p ends in rb_num_compare_with_zero(num, '>'), num_negative_p
+	// is RBOOL(rb_num_negative_int_p(num)) — the same helper with '<' — and
+	// num_abs is
+	//     if (rb_num_negative_int_p(num)) return num_funcall0(num, idUMinus);
+	//     return num;
+	// rb_num_compare_with_zero itself is rb_check_funcall(num, mid, 1, &zero)
+	// followed by rb_cmperr when the receiver has no such method, which is where
+	// "comparison of X with 0 failed" comes from — a MISSING operator, not an
+	// unusable <=> result. core/numeric/{abs,positive,negative}_spec mock #< and
+	// #> and saw no call at all while this went through #<=>.
+	compareWithZero := func(self object.Value, op string) bool {
+		if !vm.respondsToDynamic(self, op) {
 			raise("ArgumentError", "comparison of %s with 0 failed", vm.classOf(self).name)
 		}
-		return int(i)
+		return vm.send(self, op, []object.Value{object.IntValue(0)}, nil).Truthy()
 	}
+	negativeZero := func(self object.Value) bool { return compareWithZero(self, "<") }
+	positiveZero := func(self object.Value) bool { return compareWithZero(self, ">") }
 	absFn := func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		if cmpZero(self) < 0 {
+		if negativeZero(self) {
 			return vm.send(self, "-@", nil, nil)
 		}
 		return self
@@ -95,18 +106,38 @@ func registerNumericGeneric(vm *VM, cNumeric *RClass) {
 		return self
 	})
 	cNumeric.define("negative?", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(cmpZero(self) < 0)
+		return object.Bool(negativeZero(self))
 	})
 	cNumeric.define("positive?", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(cmpZero(self) > 0)
+		return object.Bool(positiveZero(self))
 	})
+	// numeric.c v3_4_0 num_fdiv is `rb_funcall(rb_Float(x), '/', 1, rb_Float(y))`,
+	// and rb_Float is a CONVERSION: an operand with no #to_f raises
+	// TypeError("can't convert X into Float"), not NoMethodError for #to_f.
+	toFloatConv := func(v object.Value) object.Value {
+		if f, ok := toFloat(v); ok {
+			return object.Float(f)
+		}
+		if vm.respondsToDynamic(v, "to_f") {
+			if f, ok := vm.send(v, "to_f", nil, nil).(object.Float); ok {
+				return f
+			}
+		}
+		raise("TypeError", "can't convert %s into Float", vm.classOf(v).name)
+		return nil
+	}
 	cNumeric.define("fdiv", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		a := vm.send(self, "to_f", nil, nil)
-		b := vm.send(args[0], "to_f", nil, nil)
-		return bin(a, "/", b)
+		return bin(toFloatConv(self), "/", toFloatConv(args[0]))
 	})
-	// integer division: floor of the true quotient (MRI Numeric#div).
+	// integer division: floor of the true quotient (MRI Numeric#div), which
+	// refuses a zero divisor first —
+	//     if (rb_equal(INT2FIX(0), y)) rb_num_zerodiv();
+	//     return rb_funcall(num_funcall1(x, '/', y), rb_intern("floor"), 0);
+	// note the direction: it is 0 == y, not y == 0.
 	divOf := func(self, other object.Value) object.Value {
+		if vm.send(object.IntValue(0), "==", []object.Value{other}, nil).Truthy() {
+			raise("ZeroDivisionError", "divided by 0")
+		}
 		return vm.send(bin(self, "/", other), "floor", nil, nil)
 	}
 	cNumeric.define("div", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
@@ -154,6 +185,79 @@ func registerNumericGeneric(vm *VM, cNumeric *RClass) {
 	// real returns self: a real number is its own real part.
 	cNumeric.define("real", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return self
+	})
+	// Numeric#to_int (num_to_int: `return num_funcall0(num, id_to_i);`) is NOT
+	// defined here. Adding it makes every Numeric subclass answer #to_int, and
+	// time.go's numeric coercion tries #to_int BEFORE #to_r, so a subclass that
+	// defines only #to_r (which time.c v3_4_0's obj2subsecx reaches first) then
+	// fails with NoMethodError for #to_i. Wiring it needs that order swapped in
+	// time.go, which this wave does not own; core/numeric/to_int_spec.rb is one
+	// example, two Time behaviours are the price.
+	// Numeric#eql? is num_eql at tag v3_4_0:
+	//     if (TYPE(x) != TYPE(y)) return Qfalse;
+	//     if (RB_BIGNUM_TYPE_P(x)) return rb_big_eql(x, y);
+	//     return rb_equal(x, y);
+	// i.e. an operand of a different class is never eql?, and a matching one is
+	// decided by the receiver's own #==. rbgo had no Numeric#eql? at all, so a
+	// Numeric subclass fell through to Object#eql?, which compares identity and
+	// never consults #==. Integer and Bignum are one class here, which is what
+	// makes ((-2) ** 63).eql?(-9223372036854775808) true.
+	cNumeric.define("eql?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		if vm.classOf(self) != vm.classOf(args[0]) {
+			return object.False
+		}
+		return object.Bool(vm.send(self, "==", []object.Value{args[0]}, nil).Truthy())
+	})
+	// Numeric#remainder is num_remainder: an operand that is not a Numeric goes
+	// through the coerce protocol first, then
+	//     VALUE z = num_funcall1(x, '%', y);
+	//     if ((!rb_equal(z, INT2FIX(0))) &&
+	//         ((rb_num_negative_int_p(x) && rb_num_positive_int_p(y)) ||
+	//          (rb_num_positive_int_p(x) && rb_num_negative_int_p(y)))) {
+	//         if (RB_FLOAT_TYPE_P(y) && isinf(RFLOAT_VALUE(y))) return x;
+	//         return rb_funcall(z, '-', 1, y);
+	//     }
+	//     return z;
+	// The short-circuit order matters: core/numeric/remainder_spec counts the
+	// #< and #> calls on both operands.
+	cNumeric.define("remainder", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		x, y := self, args[0]
+		if !vm.valueIsNumeric(y) {
+			x, y = vm.numericCoercePair(x, y)
+		}
+		z := vm.send(x, "%", []object.Value{y}, nil)
+		if vm.send(z, "==", []object.Value{object.IntValue(0)}, nil).Truthy() {
+			return z
+		}
+		if !((negativeZero(x) && positiveZero(y)) || (positiveZero(x) && negativeZero(y))) {
+			return z
+		}
+		if f, ok := y.(object.Float); ok && math.IsInf(float64(f), 0) {
+			return x
+		}
+		return vm.send(z, "-", []object.Value{y}, nil)
+	})
+	// Numeric#quo is rational.c's rb_numeric_quo at tag v3_4_0:
+	//     if (RB_TYPE_P(x, T_COMPLEX)) return rb_complex_div(x, y);
+	//     if (RB_FLOAT_TYPE_P(y)) return rb_funcallv(x, idFdiv, 1, &y);
+	//     x = rb_convert_type(x, T_RATIONAL, "Rational", "to_r");
+	//     return rb_rational_div(x, y);
+	// Integer, Float, Rational and Complex each carry their own #quo; this is
+	// the one a plain Numeric subclass inherits, and rbgo had none.
+	cNumeric.define("quo", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		y := args[0]
+		if _, isFloat := y.(object.Float); isFloat {
+			return vm.send(self, "fdiv", []object.Value{y}, nil)
+		}
+		if !vm.respondsToDynamic(self, "to_r") {
+			raise("TypeError", "can't convert %s into Rational", vm.classOf(self).name)
+		}
+		r := vm.send(self, "to_r", nil, nil)
+		if _, isRat := r.(*object.Rational); !isRat {
+			raise("TypeError", "can't convert %s to Rational (%s#to_r gives %s)",
+				vm.classOf(self).name, vm.classOf(self).name, vm.classOf(r).name)
+		}
+		return vm.send(r, "/", []object.Value{y}, nil)
 	})
 	// floor / ceil / round / truncate fall back to operating on #to_f, so a Numeric
 	// subclass that only defines #to_f still rounds; the optional digits argument is
@@ -954,4 +1058,19 @@ func complexPow(z *object.Complex, exp object.Value) object.Value {
 func complexReciprocal(z *object.Complex) *object.Complex {
 	one := &object.Complex{Re: object.IntValue(1), Im: object.IntValue(0)}
 	return complexOp(bytecode.OpDiv, one, z).(*object.Complex)
+}
+
+// numericCoercePair runs numeric.c's do_coerce(&x, &y, TRUE) at tag v3_4_0: it
+// sends #coerce to the right operand with the left and returns the two-element
+// pair it answers, raising TypeError when the operand has no #coerce or gives
+// back something other than a two-element Array.
+func (vm *VM) numericCoercePair(x, y object.Value) (object.Value, object.Value) {
+	if !vm.respondsToDynamic(y, "coerce") {
+		raise("TypeError", "%s can't be coerced into %s", coerceFailedName(y), vm.classOf(x).name)
+	}
+	pair, ok := vm.send(y, "coerce", []object.Value{x}, nil).(*object.Array)
+	if !ok || len(pair.Elems) != 2 {
+		raise("TypeError", "coerce must return [x, y]")
+	}
+	return pair.Elems[0], pair.Elems[1]
 }

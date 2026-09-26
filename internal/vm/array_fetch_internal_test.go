@@ -24,7 +24,11 @@ func TestArrayFetch(t *testing.T) {
 		// The block receives the original index object, not the #to_int result.
 		{`o = Object.new; def o.to_int; 5; end; p [1, 2, 3].fetch(o) { |i| i.equal?(o) }`, `true`},
 		// The block supersedes a default argument.
-		{`p [1, 2, 3].fetch(9, :foo) { |i| i * i }`, `81`},
+		// rb_ary_fetch warns "block supersedes default value argument" on this
+		// clash. The test VM has one sink for stdout and stderr (vm.New sets
+		// errOut = out), so the warning lands in the captured output here.
+		{`$stderr = STDERR; p [1, 2, 3].fetch(9, :foo) { |i| i * i }`,
+			"(rbgo):1: warning: block supersedes default value argument\n81"},
 		// #to_int coercion of an in-bounds index.
 		{`o = Object.new; def o.to_int; 2; end; p ["a", "b", "c"].fetch(o)`, `"c"`},
 		// Out-of-bounds IndexError messages use the original (pre-adjustment) index.

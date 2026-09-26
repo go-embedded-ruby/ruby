@@ -14,7 +14,7 @@ func TestExponentiation(t *testing.T) {
 		{"int_float_exp", `p 2 ** 0.5`, "1.4142135623730951\n"},
 		{"float_root", `p 4 ** 0.5`, "2.0\n"},
 		{"right_assoc", `p 2 ** 3 ** 2`, "512\n"},
-		{"neg_exp", `p 10 ** -1`, "0.1\n"},
+		{"neg_exp", `p 10 ** -1`, "(1/10)\n"}, // fix_pow_inverted: Rational, not Float
 		{"pow_method", `p 5.pow(2)`, "25\n"},
 		{"float_pow_method", `p 2.0.pow(3)`, "8.0\n"},
 		{"var", "x = 3\np x ** 2", "9\n"},
