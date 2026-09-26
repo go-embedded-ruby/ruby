@@ -178,16 +178,22 @@ func (vm *VM) registerFile() {
 		return object.NewString(fileJoin(parts))
 	})
 	def("expand_path", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(vm.fileExpand(vm.filePathArg(args[0]), args[1:], true))
+		return vm.fileExpandValue(args, true)
 	})
 	// absolute_path resolves a path to an absolute one against an optional base
 	// directory (defaulting to the CWD), like expand_path but without ~ expansion.
 	// Puppet uses it with relative paths and an explicit base, where the two agree.
 	def("absolute_path", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(vm.fileExpand(vm.filePathArg(args[0]), args[1:], false))
+		return vm.fileExpandValue(args, false)
 	})
+	// absolute_path? (file.c rb_file_s_absolute_path_p) asks whether the path is
+	// already rooted. It has to be isAbsPath rather than path.IsAbs: rbgo keeps
+	// paths forward-slashed, so a Windows drive-letter root ("C:/x") — which is
+	// what File.realpath hands back there — reads as RELATIVE to path.IsAbs alone.
+	// That is the same reason File.expand_path uses isAbsPath, and the two must
+	// agree or `File.absolute_path?(File.expand_path(p))` is false on Windows.
 	def("absolute_path?", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Bool(path.IsAbs(toSlash(pathArg(vm, args[0]))))
+		return object.Bool(isAbsPath(toSlash(pathArg(vm, args[0]))))
 	})
 
 	def("exist?", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
@@ -360,12 +366,33 @@ func (vm *VM) registerFile() {
 		return object.IntValue(int64(len(paths)))
 	})
 	// NOTE: File.mkfifo (syscall.Mkfifo) is deliberately left unregistered. It is
-	// straightforward and MRI-verified, but wiring it up REGRESSES core/file:
-	// open_spec's "on a FIFO" example opens both ends of the FIFO from two Ruby
-	// threads, and rbgo's blocking File.open (io.go) deadlocks the interpreter on
-	// the FIFO open(2) handshake — hanging the whole spec file and losing its ~55
-	// passing examples. Add File.mkfifo only once File.open on a FIFO no longer
-	// blocks the scheduler (an io.go / thread-concurrency fix the io agent owns).
+	// straightforward and MRI-verified — core/file/mkfifo_spec.rb would go 0 -> 7,
+	// its MRI ceiling — but wiring it up REGRESSES core/file by far more:
+	// open_spec's "on a FIFO" example opens both ends from two Ruby threads, the
+	// interpreter deadlocks, and the whole spec file times out and loses its ~55
+	// passing examples.
+	//
+	// The earlier note here blamed a blocking File.open. Re-measured 2026-09-26,
+	// that is no longer where it hangs, so do not go looking there:
+	//
+	//   - File.open on a FIFO returns at once, for either mode: openFileSpec's
+	//     `special` branch (io.go) skips the whole-file read for anything that is
+	//     not a regular file, so no open(2) handshake is attempted.
+	//   - rbgo's Ruby threads really are concurrent (goroutines) — a two-thread
+	//     interleaving test alternates as MRI's does.
+	//   - The hang is at CLOSE, in ioFlush: it does os.WriteFile on the path, and
+	//     opening a FIFO for writing blocks until a reader opens it. No reader ever
+	//     does, because the READ side never opens the path either — it serves an
+	//     empty in-memory buffer. Each end avoids the handshake, so neither can
+	//     complete it. Witnessed: `File.open(fifo, "w")` then `#write` then
+	//     `#close` hangs past 10s; the read side returns "" immediately; MRI does
+	//     both in milliseconds.
+	//
+	// Unblocking this needs a real descriptor for a FIFO on BOTH sides, which is a
+	// departure from IOObj's buffer-backed model rather than a patch to it — and
+	// the read side would then block with no writer, exactly as MRI does, which is
+	// the faithful behaviour but hangs any single-threaded spec that opens a FIFO
+	// to read. Register File.mkfifo in the same change, never before it.
 	// File.umask([mask]) reads (and optionally sets) the process umask, returning
 	// the previous value — the bracket Puppet::Util.withumask uses. With no
 	// argument it reports the current umask without changing it.
@@ -830,15 +857,7 @@ func (vm *VM) pathStr(v object.Value) *object.String {
 // ArgumentError ("path name contains null byte"). Path-algebra entry points
 // (File.basename/dirname/extname/split/path and Dir.mkdir …) use this so those
 // two guards fire before the path is examined, matching MRI.
-func (vm *VM) filePathArg(v object.Value) string {
-	s := vm.pathStr(v)
-	vm.checkPathEncoding(s)
-	str := s.Str()
-	if strings.IndexByte(str, 0) >= 0 {
-		raise("ArgumentError", "path name contains null byte")
-	}
-	return str
-}
+func (vm *VM) filePathArg(v object.Value) string { return vm.filePathString(v).Str() }
 
 // checkPathEncoding raises Encoding::CompatibilityError when a path (or glob
 // pattern) string carries an ASCII-incompatible encoding, mirroring MRI's
@@ -864,6 +883,74 @@ func isAbsPath(p string) bool {
 // user's home directory, a relative path is resolved against the optional base
 // (default: the working directory), and the result is cleaned (so .. and . collapse)
 // while a leading run of two or more separators is preserved (POSIX / MRI).
+// fileExpandValue is File.expand_path / File.absolute_path including the part
+// of the answer a Go string cannot carry: its ENCODING.
+//
+// rb_file_expand_path_internal starts from `enc = rb_enc_get(fname)`, and a path
+// that is already absolute keeps it. A RELATIVE one grows a directory in front
+// of it, and append_fspath then runs rb_enc_check(fname, dirname) over the pair.
+// That single call does two things:
+//
+//   - it REFUSES an incompatible combination — an ASCII path expanded while
+//     Encoding.default_external is UTF-16BE is Encoding::CompatibilityError,
+//     because the directory that must go in front cannot be spliced onto it;
+//   - and otherwise it names the result's encoding, which is why "./a" tagged
+//     CP1251 comes back CP1251 instead of picking up the default, and why a path
+//     of raw bytes comes back BINARY.
+//
+// The directory is the second argument when one was given (itself expanded
+// first), else the working directory, which carries the filesystem encoding.
+func (vm *VM) fileExpandValue(args []object.Value, expandTilde bool) object.Value {
+	fname := vm.filePathString(args[0])
+	var baseArg *object.String
+	if len(args) > 1 && args[1] != object.NilV {
+		baseArg = vm.filePathString(args[1])
+	}
+	p := fname.Str()
+	if expandTilde {
+		p = expandTildePath(p)
+	}
+	if isAbsPath(p) {
+		return object.NewStringBytesEnc([]byte(cleanAbs(p)), fname.EncName())
+	}
+	dir := baseArg
+	if dir == nil {
+		wd := ""
+		if w, err := os.Getwd(); err == nil {
+			wd = toSlash(w)
+		}
+		dir = object.NewStringBytesEnc([]byte(wd), vm.fsEncName())
+	}
+	enc := vm.combinedEncName(fname, dir)
+	base := dir.Str()
+	if baseArg != nil {
+		base = vm.fileExpand(base, nil, expandTilde)
+	}
+	return object.NewStringBytesEnc([]byte(cleanAbs(path.Join(base, p))), enc)
+}
+
+// filePathString is filePathArg keeping the String it coerced, so a caller that
+// needs the argument's ENCODING does not have to send #to_path a second time to
+// get it.
+func (vm *VM) filePathString(v object.Value) *object.String {
+	s := vm.pathStr(v)
+	vm.checkPathEncoding(s)
+	if strings.IndexByte(s.Str(), 0) >= 0 {
+		raise("ArgumentError", "path name contains null byte")
+	}
+	return s
+}
+
+// fsEncName is rb_filesystem_encoding(), which Encoding.find("filesystem")
+// resolves to Encoding.default_external here (see encoding.go).
+func (vm *VM) fsEncName() string {
+	name := "UTF-8" // a VM built without the encoding bootstrap has no default
+	if vm.defExternalEnc != nil {
+		name = vm.defExternalEnc.name
+	}
+	return name
+}
+
 func (vm *VM) fileExpand(p string, rest []object.Value, expandTilde bool) string {
 	if expandTilde {
 		p = expandTildePath(p)

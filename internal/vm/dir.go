@@ -48,19 +48,13 @@ func (vm *VM) registerDir() {
 		return object.NewString(toSlash(dirHomeStr()))
 	})
 	def("entries", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		names := dirNames(vm.filePathArg(args[0]))
-		elems := []object.Value{object.NewString("."), object.NewString("..")}
-		for _, n := range names {
-			elems = append(elems, object.NewString(n))
-		}
-		return object.NewArrayFromSlice(elems)
+		pos, enc := vm.dirEncOption(args)
+		names := append([]string{".", ".."}, dirNames(vm.filePathArg(pos[0]))...)
+		return object.NewArrayFromSlice(vm.dirNameValues(names, enc))
 	})
 	def("children", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		var elems []object.Value
-		for _, n := range dirNames(vm.filePathArg(args[0])) {
-			elems = append(elems, object.NewString(n))
-		}
-		return object.NewArrayFromSlice(elems)
+		pos, enc := vm.dirEncOption(args)
+		return object.NewArrayFromSlice(vm.dirNameValues(dirNames(vm.filePathArg(pos[0])), enc))
 	})
 	// Dir.glob(pattern, flags=0, base: nil, sort: true) — pattern is a String or
 	// an Array of Strings; flags is an FNM_* OR (positional, or the `flags:`
@@ -173,22 +167,24 @@ func (vm *VM) registerDir() {
 	// is nil, and whose iteration re-yields the names. The block-less form must not
 	// dereference a nil block (the previous version crashed there).
 	def("each_child", func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
-		names := dirNames(vm.filePathArg(args[0]))
+		pos, enc := vm.dirEncOption(args)
+		names := dirNames(vm.filePathArg(pos[0]))
 		if blk == nil {
-			return dirEnumerator(names)
+			return dirEnumerator(vm.dirNameValues(names, enc))
 		}
 		for _, n := range names {
-			vm.callBlock(blk, []object.Value{object.NewString(n)})
+			vm.callBlock(blk, []object.Value{vm.dirExternalStr(n, enc)})
 		}
 		return object.NilV
 	})
 	def("foreach", func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
-		names := append([]string{".", ".."}, dirNames(vm.filePathArg(args[0]))...)
+		pos, enc := vm.dirEncOption(args)
+		names := append([]string{".", ".."}, dirNames(vm.filePathArg(pos[0]))...)
 		if blk == nil {
-			return dirEnumerator(names)
+			return dirEnumerator(vm.dirNameValues(names, enc))
 		}
 		for _, n := range names {
-			vm.callBlock(blk, []object.Value{object.NewString(n)})
+			vm.callBlock(blk, []object.Value{vm.dirExternalStr(n, enc)})
 		}
 		return object.NilV
 	})
@@ -204,6 +200,13 @@ type DirObj struct {
 	entries []string
 	pos     int
 	closed  bool
+	// enc is dir.c's dp->enc: the encoding every name this handle yields is
+	// tagged with, from the `encoding:` keyword or the filesystem encoding.
+	enc string
+	// pathStr is dir.c's dp->path: `rb_str_dup_frozen(dirname)` taken BEFORE
+	// rb_str_encode_ospath, so #path / #to_path give back the argument as it was
+	// passed — encoding included. A Go string cannot carry that.
+	pathStr *object.String
 }
 
 func (d *DirObj) ToS() string     { return "#<Dir:" + d.path + ">" }
@@ -212,10 +215,106 @@ func (d *DirObj) Truthy() bool    { return true }
 
 // openDirObj snapshots a directory's entries into a DirObj, raising Errno::ENOENT
 // (a SystemCallError) when the path is not a readable directory — matching MRI's
-// Dir.new / Dir.open.
-func openDirObj(path string) *DirObj {
+// Dir.new / Dir.open. enc is the handle's encoding (dir.c dir_initialize's
+// dp->enc): every name it later hands out is tagged with it.
+func openDirObj(path, enc string, orig *object.String) *DirObj {
 	entries := append([]string{".", ".."}, dirNames(path)...)
-	return &DirObj{path: path, entries: entries}
+	return &DirObj{path: path, entries: entries, enc: enc, pathStr: orig}
+}
+
+// dirPathArg coerces a Dir.new / Dir.open path argument and keeps the String it
+// came from, which #to_path has to hand back unchanged (see DirObj.pathStr).
+func (vm *VM) dirPathArg(v object.Value) (string, *object.String) {
+	p := pathArg(vm, v)
+	// FilePathValue has already coerced anything that is not a String, and
+	// dp->path is the COERCED value — a Pathname argument leaves a plain UTF-8
+	// path behind, not the Pathname's own encoding.
+	orig := object.NewString(p)
+	if s, ok := v.(*object.String); ok {
+		orig = s
+	}
+	return p, orig
+}
+
+// dirEncOption is dir.c dir_initialize's
+// `NIL_P(enc) ? rb_filesystem_encoding() : rb_to_encoding(enc)`: the `encoding:`
+// keyword every Dir reader accepts, defaulting to the filesystem encoding. It
+// also strips the option Hash off the positional arguments, since rbgo passes
+// keywords through as a trailing Hash.
+func (vm *VM) dirEncOption(args []object.Value) ([]object.Value, string) {
+	pos, opts := splitIOOpts(args)
+	if opts != nil {
+		if v, ok := opts.Get(object.Symbol("encoding")); ok && !object.IsNil(v) {
+			return pos, vm.encodingArg(v).name
+		}
+	}
+	return pos, vm.fsEncName()
+}
+
+// dirExternalStr is what dir.c does to EVERY name it reads —
+// rb_external_str_new_with_enc (string.c), through dir_read and dir_each_entry:
+// tag the bytes with the handle's encoding, then, when
+// Encoding.default_internal is set, CONVERT them to it. Tagging alone is not
+// enough: `Dir.children(d)` under default_internal = EUC-KR hands back EUC-KR
+// strings, not filesystem-encoded ones.
+//
+// rb_external_str_with_enc's one special case is kept: a US-ASCII handle
+// encoding over bytes that are not ASCII is ASCII-8BIT instead, and is not
+// converted — there is no meaningful source encoding to convert from.
+//
+// The conversion is rb_str_conv_enc, NOT String#encode, and the difference
+// decides whether this works at all: rb_str_conv_enc_opts ends with
+// "/* some error, return original */ return str;". A name that cannot be
+// represented in the internal encoding is handed back AS IS, in the filesystem
+// encoding, rather than raising. A directory holding "こんにちは.txt" read under
+// default_internal = EUC-KR is exactly that case, and MRI lists it without
+// complaint.
+func (vm *VM) dirExternalStr(name, enc string) object.Value {
+	if enc == "US-ASCII" && !isASCIIOnly(name) {
+		return object.NewStringBytesEnc([]byte(name), "ASCII-8BIT")
+	}
+	s := object.NewStringBytesEnc([]byte(name), enc)
+	if vm.defInternalEnc == nil || vm.defInternalEnc.name == enc {
+		return s
+	}
+	return vm.convEncOrOriginal(s, vm.defInternalEnc.name)
+}
+
+// convEncOrOriginal is rb_str_conv_enc: a BEST-EFFORT transcode that answers the
+// original string when the conversion fails, where String#encode raises.
+//
+// Treating ANY recovery as a failed conversion is safe HERE and nowhere in
+// general: stringEncode calls no Ruby block, so it cannot be carrying a
+// break/return/throw signal that swallowing would lose — the only thing it
+// panics with is the Encoding::UndefinedConversionError this exists to absorb.
+func (vm *VM) convEncOrOriginal(s *object.String, to string) object.Value {
+	converted := object.Value(s)
+	if rec := recoverAny(func() {
+		converted = vm.stringEncode(s, []object.Value{object.NewString(to)})
+	}); rec != nil {
+		return s
+	}
+	return converted
+}
+
+// isASCIIOnly reports whether every byte of s is 7-bit (string.c
+// is_ascii_string).
+func isASCIIOnly(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= 0x80 {
+			return false
+		}
+	}
+	return true
+}
+
+// dirNameValues maps a snapshot of entry names through dirExternalStr.
+func (vm *VM) dirNameValues(names []string, enc string) []object.Value {
+	elems := make([]object.Value, len(names))
+	for i, n := range names {
+		elems[i] = vm.dirExternalStr(n, enc)
+	}
+	return elems
 }
 
 // registerDirInstance installs Dir.new / Dir.open and the Dir instance methods
@@ -231,10 +330,14 @@ func (vm *VM) registerDirInstance(cDir *RClass) {
 	}
 
 	cDir.smethods["new"] = &Method{name: "new", owner: cDir, native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return openDirObj(pathArg(vm, args[0]))
+		pos, enc := vm.dirEncOption(args)
+		p, orig := vm.dirPathArg(pos[0])
+		return openDirObj(p, enc, orig)
 	}}
 	cDir.smethods["open"] = &Method{name: "open", owner: cDir, native: func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
-		d := openDirObj(pathArg(vm, args[0]))
+		pos, enc := vm.dirEncOption(args)
+		p, orig := vm.dirPathArg(pos[0])
+		d := openDirObj(p, enc, orig)
 		if blk == nil {
 			return d
 		}
@@ -245,7 +348,7 @@ func (vm *VM) registerDirInstance(cDir *RClass) {
 
 	d := func(name string, fn NativeFn) { cDir.define(name, fn) }
 
-	d("read", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+	d("read", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		dir := self(v)
 		checkOpen(dir)
 		if dir.pos >= len(dir.entries) {
@@ -253,7 +356,7 @@ func (vm *VM) registerDirInstance(cDir *RClass) {
 		}
 		name := dir.entries[dir.pos]
 		dir.pos++
-		return object.NewString(name)
+		return vm.dirExternalStr(name, dir.enc)
 	})
 	d("pos", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		dir := self(v)
@@ -281,7 +384,9 @@ func (vm *VM) registerDirInstance(cDir *RClass) {
 		return dir
 	})
 	d("to_path", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).path) // works even on a closed handle
+		// dp->path is the ORIGINAL argument, so its encoding survives the round
+		// trip. Works even on a closed handle.
+		return self(v).pathStr
 	})
 	cDir.methods["path"] = cDir.methods["to_path"] // path is an alias of to_path
 	// fileno: rbgo's Dir has no underlying file descriptor, so — as MRI does on
@@ -302,10 +407,10 @@ func (vm *VM) registerDirInstance(cDir *RClass) {
 		if blk == nil {
 			// A block-less #each returns an Enumerator whose #size is nil (MRI does
 			// not pre-count a directory), backed by the current entry snapshot.
-			return dirEnumerator(dir.entries)
+			return dirEnumerator(vm.dirNameValues(dir.entries, dir.enc))
 		}
 		for _, n := range dir.entries {
-			vm.callBlock(blk, []object.Value{object.NewString(n)})
+			vm.callBlock(blk, []object.Value{vm.dirExternalStr(n, dir.enc)})
 		}
 		dir.pos = len(dir.entries) // each leaves the cursor at the end (MRI)
 		return dir
@@ -314,28 +419,23 @@ func (vm *VM) registerDirInstance(cDir *RClass) {
 		dir := self(v)
 		checkOpen(dir)
 		if blk == nil {
-			return dirEnumerator(dirChildNames(dir.entries))
+			return dirEnumerator(vm.dirNameValues(dirChildNames(dir.entries), dir.enc))
 		}
 		for _, n := range dir.entries {
 			if n == "." || n == ".." {
 				continue
 			}
-			vm.callBlock(blk, []object.Value{object.NewString(n)})
+			vm.callBlock(blk, []object.Value{vm.dirExternalStr(n, dir.enc)})
 		}
 		return dir
 	})
 	// Dir#children returns the entry names of the open handle minus "." and ".."
 	// (Ruby 2.5+ dir.c dir_collect_children). It reads the snapshot, so repeated
 	// calls return the same result regardless of the read cursor.
-	d("children", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+	d("children", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		dir := self(v)
 		checkOpen(dir)
-		names := dirChildNames(dir.entries)
-		elems := make([]object.Value, len(names))
-		for i, n := range names {
-			elems[i] = object.NewString(n)
-		}
-		return object.NewArrayFromSlice(elems)
+		return object.NewArrayFromSlice(vm.dirNameValues(dirChildNames(dir.entries), dir.enc))
 	})
 	// Dir#chdir changes the process working directory to the handle's path,
 	// returning 0 (or the block's value for the block form, which restores the
@@ -458,11 +558,12 @@ func dirChildNames(entries []string) []string {
 	return out
 }
 
-func dirEnumerator(names []string) *Enumerator {
-	elems := make([]object.Value, len(names))
-	for i, n := range names {
-		elems[i] = object.NewString(n)
-	}
+// dirEnumerator wraps already-encoded entry names (dirNameValues) in the
+// Enumerator the block-less Dir readers return. The names must arrive encoded:
+// the `encoding:` keyword applies to `Dir.foreach(d, encoding: e).to_a` exactly
+// as it does to the block form, and building plain UTF-8 strings here would
+// silently drop it on the enumerator path alone.
+func dirEnumerator(elems []object.Value) *Enumerator {
 	return enumForSized(object.NewArrayFromSlice(elems), "each",
 		func(*VM) object.Value { return object.NilV })
 }

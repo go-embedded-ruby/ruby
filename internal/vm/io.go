@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"bytes"
 	"errors"
 	"io"
 	"io/fs"
@@ -72,8 +73,18 @@ type IOObj struct {
 	rdClosed   bool   // #close_read (or a write-only mode) — reads raise "not opened for reading"
 	wrClosed   bool   // #close_write (or a read-only mode) — writes raise "not opened for writing"
 	appendMode bool   // opened in append mode ("a"/"a+") — every write lands at end-of-buffer
-	openMode   string // the fopen-style access mode a file stream was opened with ("r", "w+", "ab"…)
-	nonblock   bool   // O_NONBLOCK is set (io/nonblock): false for a file, true for a pipe end
+	// newline is the :newline option's write-side decorator ("crlf" or "cr", ""
+	// for none): io.c turns it into an ECONV_*_NEWLINE_DECORATOR bit that the
+	// write converter applies, translating every "\n" the stream is asked to
+	// write. Only the stream path carries it — #syswrite and #write_nonblock go
+	// to the descriptor and are not decorated.
+	newline string
+	// wbufDirty stands in for MRI's fptr->wbuf.len: bytes a buffered #write has
+	// accepted but not yet put on disk. Only #syswrite reads it, to reproduce
+	// rb_io_syswrite's "syswrite for buffered IO" warning; every flush clears it.
+	wbufDirty bool
+	openMode  string // the fopen-style access mode a file stream was opened with ("r", "w+", "ab"…)
+	nonblock  bool   // O_NONBLOCK is set (io/nonblock): false for a file, true for a pipe end
 	// encSet records that #set_encoding has resolved this stream's encodings
 	// against the defaults in force at that moment (io.c io_encoding_set →
 	// rb_io_ext_int_to_enc). An empty extEnc then means "no encoding" — MRI's
@@ -209,6 +220,8 @@ func (o *IOObj) writeBytes(p []byte) int {
 		o.syncStr()
 		if o.sync { // sync=true: a File's writes reach disk immediately (no buffering)
 			ioFlush(o)
+		} else if o.path != "" {
+			o.wbufDirty = true // bytes accepted but not on disk: MRI's fptr->wbuf.len
 		}
 		return len(p)
 	}
@@ -216,7 +229,25 @@ func (o *IOObj) writeBytes(p []byte) int {
 	return n
 }
 
-func (o *IOObj) writeStr(s string) int { return o.writeBytes([]byte(s)) }
+func (o *IOObj) writeStr(s string) int { return o.writeBytes(o.newlineConv([]byte(s))) }
+
+// newlineConv is the write half of io.c's newline decorators
+// (ECONV_CRLF_NEWLINE_DECORATOR / ECONV_CR_NEWLINE_DECORATOR), which the
+// :newline option asks for: every "\n" written to the stream becomes "\r\n" or
+// "\r". :lf and :universal have no write-side effect — universal is a READ
+// decorator — so they leave the bytes alone, as MRI does.
+func (o *IOObj) newlineConv(p []byte) []byte {
+	var nl string
+	switch o.newline {
+	case "crlf":
+		nl = "\r\n"
+	case "cr":
+		nl = "\r"
+	default:
+		return p
+	}
+	return bytes.ReplaceAll(p, []byte("\n"), []byte(nl))
+}
 
 // syncStr mirrors the working buffer back into the backing String object of a
 // StringIO so that #string (which returns that very object) and any external
@@ -860,7 +891,7 @@ func (vm *VM) openFileArgs(cls *RClass, args []object.Value) *IOObj {
 		}
 	}
 	o := openFileSpec(cls, path, &ms, perm, permGiven)
-	o.extEnc, o.intEnc, o.binmode = ms.extEnc, ms.intEnc, ms.binmode
+	o.extEnc, o.intEnc, o.binmode, o.newline = ms.extEnc, ms.intEnc, ms.binmode, ms.newline
 	return o
 }
 
@@ -1234,6 +1265,7 @@ func ioFlush(o *IOObj) {
 	if !o.writable || o.path == "" {
 		return
 	}
+	o.wbufDirty = false
 	err := os.WriteFile(o.path, o.buf, 0o644)
 	if err == nil {
 		return
@@ -1287,7 +1319,7 @@ func (vm *VM) ioWriteAll(o *IOObj, args []object.Value) int64 {
 	ioCheckOpen(o)
 	n := 0
 	for _, s := range strs {
-		n += o.writeBytes(vm.ioWriteEncode(o, s))
+		n += o.writeBytes(o.newlineConv(vm.ioWriteEncode(o, s)))
 	}
 	return int64(n)
 }
@@ -1522,7 +1554,7 @@ func defIOWrite(cls *RClass) {
 		if len(pos) < 1 || len(pos) > 2 {
 			raise("ArgumentError", "wrong number of arguments (given %d, expected 1..2)", len(pos))
 		}
-		o.extEnc, o.intEnc = "", ""
+		ext, intn, intState := "", "", encUnset
 		if !object.IsNil(pos[0]) {
 			// A single String — or a non-Encoding coerced via #to_str
 			// (rb_check_string_type) — of the form "ext:int" names both encodings;
@@ -1533,55 +1565,92 @@ func defIOWrite(cls *RClass) {
 					s, isStr = vm.send(pos[0], "to_str", nil, nil).(*object.String)
 				}
 			}
-			if isStr {
-				if i := strings.IndexByte(s.Str(), ':'); i >= 0 && len(pos) == 1 {
-					o.extEnc = vm.lookupEncodingName(s.Str()[:i]).name
-					o.intEnc = vm.lookupEncodingName(s.Str()[i+1:]).name
-				} else {
-					o.extEnc = vm.lookupEncodingName(s.Str()).name
-				}
-			} else {
-				o.extEnc = vm.encodingArg(pos[0]).name
+			switch {
+			case !isStr:
+				ext = vm.encodingArg(pos[0]).name
+			case strings.IndexByte(s.Str(), ':') >= 0 && len(pos) == 1:
+				i := strings.IndexByte(s.Str(), ':')
+				ext = vm.lookupEncodingName(s.Str()[:i]).name
+				intn, intState = vm.lookupEncodingName(s.Str()[i+1:]).name, encNamed
+			default:
+				ext = vm.lookupEncodingName(s.Str()).name
 			}
 		}
 		if len(pos) > 1 && !object.IsNil(pos[1]) {
-			o.intEnc = vm.encodingArg(pos[1]).name
+			intn, intState = vm.encodingArg(pos[1]).name, encNamed
 		}
 		// io_encoding_set: an internal encoding equal to the external one means no
 		// transcoding, so the internal encoding is dropped (enc2 = NULL).
-		if o.intEnc == o.extEnc {
-			o.intEnc = ""
+		if intState == encNamed && intn == ext {
+			intn, intState = "", encNone
 		}
-		if object.IsNil(pos[0]) {
-			o.extEnc, o.intEnc = vm.extIntToEnc(o.intEnc)
-		}
+		// The one call io_encoding_set makes for every shape of argument. An
+		// external encoding named ALONE still picks up Encoding.default_internal —
+		// `io.set_encoding Encoding::IBM866` under default_internal = UTF-8 leaves
+		// the stream transcoding IBM866 to UTF-8 — which is why this does not stop
+		// at recording the external name.
+		o.extEnc, o.intEnc = vm.ioExtIntToEncs(ext, intn, intState)
 		o.encSet = true
 		return self
 	})
 }
 
-// extIntToEnc resolves a #set_encoding whose external argument was nil, which
-// io.c io_encoding_set passes to rb_io_ext_int_to_enc with a NULL external: the
-// external becomes Encoding.default_external (default_ext), and an internal that
-// was not named becomes Encoding.default_internal. When there is no internal left
-// — or it equals the external — no converter is needed, and the recorded encoding
-// is NULL precisely when the external was defaulted and differs from the
-// internal; otherwise the pair is kept and drives the converter.
+// The three states MRI's rb_io_ext_int_to_encs distinguishes for its `intern`
+// argument. C spells them as a NULL pointer, the Qnil VALUE cast to
+// rb_encoding*, and a real encoding; Go needs a tag beside the name because ""
+// cannot stand for two different things.
+const (
+	encUnset = iota // NULL  — no internal encoding named; Encoding.default_internal applies
+	encNone         // Qnil  — an internal encoding explicitly refused (nil / "-"): no transcoding
+	encNamed        // a real encoding was named
+)
+
+// ioExtIntToEncs is io.c rb_io_ext_int_to_encs, the one place MRI turns a
+// (named external, named internal) pair into the two encodings it stores on a
+// stream — fptr->encs.enc and fptr->encs.enc2. It is reached from
+// rb_io_extract_modeenc (open time, with both arguments NULL, which is what
+// snapshots the defaults), from parse_mode_enc (a mode string's ":ext:int"
+// suffix), from rb_io_extract_encoding_option (the :encoding /
+// :external_encoding / :internal_encoding options) and from io_encoding_set
+// (#set_encoding).
 //
-// The consequence the specs pin down is that the answer is FROZEN here: a stream
-// reset with `set_encoding nil, nil` while the defaults are UTF-8 / nil reports
-// nil for both afterwards even once the defaults change, whereas one reset while
-// they are IBM437 / IBM866 reports that pair.
-func (vm *VM) extIntToEnc(named string) (ext, intn string) {
-	if vm.defExternalEnc != nil {
-		ext = vm.defExternalEnc.name
+// ext is "" when no external encoding was named; intn/intState carry the
+// tri-state above. The result is the pair rbgo records on the stream: the
+// external encoding name and the internal one, each "" where MRI leaves the
+// corresponding field NULL.
+//
+// The C takes a further fmode argument, used only for FMODE_SETENC_BY_BOM (a
+// "BOM|" mode prefix keeps the pair even when the two encodings match). rbgo
+// strips that prefix during name lookup and never carries the flag this far, so
+// the parameter would have no caller and is not reproduced.
+//
+// Two rules in the C carry all the behaviour the specs pin down:
+//
+//   - an ASCII-8BIT external encoding drops the internal one outright, because
+//     bytes need no transcoding;
+//   - when the external encoding was DEFAULTED and no internal encoding
+//     survives, MRI records NOTHING (enc == enc2 == NULL) rather than the
+//     default's name, so the stream keeps following Encoding.default_external as
+//     it changes. Every other resolution FREEZES the pair, which is why a stream
+//     opened while default_internal is set reports that internal encoding for
+//     ever after.
+func (vm *VM) ioExtIntToEncs(ext string, intn string, intState int) (extOut, intOut string) {
+	defaultExt := false
+	if ext == "" {
+		if vm.defExternalEnc != nil {
+			ext = vm.defExternalEnc.name
+		}
+		defaultExt = true
 	}
-	intn = named
-	if intn == "" && ext != "ASCII-8BIT" && vm.defInternalEnc != nil {
-		intn = vm.defInternalEnc.name
+	if ext == "ASCII-8BIT" {
+		// If external is ASCII-8BIT, no transcoding.
+		intn, intState = "", encUnset
+	} else if intState == encUnset && vm.defInternalEnc != nil {
+		intn, intState = vm.defInternalEnc.name, encNamed
 	}
-	if intn == "" || intn == ext {
-		if intn != ext { // a defaulted external with no internal records nothing
+	if intState != encNamed || intn == ext {
+		// No internal encoding => use external + no transcoding.
+		if defaultExt && intn != ext {
 			return "", ""
 		}
 		return ext, ""
@@ -1597,19 +1666,26 @@ func (vm *VM) extIntToEnc(named string) (ext, intn string) {
 func ioFmodeWritable(o *IOObj) bool { return o.writable || o.w != nil }
 
 // ioReadEnc returns the (external, internal) encoding names in effect for a
-// whole-stream read, filling the unset sides from Encoding.default_external and
-// Encoding.default_internal. A BINARY external encoding — or an internal equal
-// to the external — suppresses transcoding (io.c rb_io_ext_int_to_enc leaves the
-// second converter NULL), so the returned internal name is "".
+// whole-stream read: io.c io_input_encoding over io_read_encoding.
+//
+// Only the EXTERNAL side falls back to a default, and only to
+// Encoding.default_external — that is the whole of io_read_encoding, which
+// answers fptr->encs.enc when it is set and rb_default_external_encoding()
+// when it is NULL. The internal side has no such fallback: MRI resolves
+// Encoding.default_internal ONCE, when the stream is opened or #set_encoding is
+// called (rb_io_ext_int_to_encs), so a read never re-consults it and a default
+// changed after the open cannot start transcoding a stream that was not already
+// doing it.
+//
+// A BINARY external encoding — or an internal equal to the external —
+// suppresses transcoding (rb_io_ext_int_to_encs leaves enc2 NULL), so the
+// returned internal name is "".
 func (vm *VM) ioReadEnc(o *IOObj) (ext, intn string) {
 	ext = o.extEnc
 	if ext == "" && vm.defExternalEnc != nil {
 		ext = vm.defExternalEnc.name
 	}
 	intn = o.intEnc
-	if intn == "" && vm.defInternalEnc != nil {
-		intn = vm.defInternalEnc.name
-	}
 	if ext == "ASCII-8BIT" || intn == ext {
 		intn = ""
 	}
