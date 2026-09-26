@@ -291,6 +291,41 @@ b.join
 p m.locked?
 m.lock
 puts "relocked"`, "false\nrelocked\n"},
+		// Locking a mutex this thread already owns is a ThreadError, not a wait:
+		// do_mutex_lock raises before it ever reaches the queue.
+		{"recursive_locking_raises", `m = Mutex.new
+m.lock
+begin
+  m.lock
+rescue ThreadError => e
+  puts e.message
+end`, "deadlock; recursive locking\n"},
+		// A raise masked by :never, arriving at a thread blocked in Mutex#lock, must
+		// send the wait BACK to sleep on the same queue entry rather than end it --
+		// do_mutex_lock's loop. The lock is then acquired normally and the deferred
+		// exception fires when the handle_interrupt frame exits.
+		//
+		// Until this case existed, that arm of the loop was reached only through the
+		// uninterruptible relock, whose timing decides whether the waiter is parked
+		// when the kill lands. A gate that reads coverage on the unlucky run fails.
+		{"masked_raise_reaches_a_mutex_wait", `m = Mutex.new
+m.lock
+t = Thread.new do
+  Thread.handle_interrupt(RuntimeError => :never) do
+    m.lock
+    puts "lock acquired normally"
+    m.unlock
+  end
+end
+Thread.pass until t.stop?
+t.raise("masked")
+sleep 0.05
+m.unlock
+begin
+  t.join
+rescue RuntimeError => e
+  puts "delivered on exit: #{e.message}"
+end`, "lock acquired normally\ndelivered on exit: masked\n"},
 		// A raise masked by Thread.handle_interrupt(:never) does not end the wait it
 		// arrives during — the wait goes back to sleep, as do_mutex_lock's loop does.
 		{"masked_raise_does_not_end_the_wait", `q = Queue.new

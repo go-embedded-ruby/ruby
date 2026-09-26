@@ -1391,6 +1391,8 @@ func (vm *VM) mutexLock(m *RMutex) {
 	if m.owner == t {
 		raise("ThreadError", "deadlock; recursive locking")
 	}
+	// One queue entry for the whole wait: a continue re-waits on the SAME entry,
+	// because a deferred interrupt does not consume it.
 	w := m.enqueue(t)
 	// MRI wraps the wait in the equivalent of an ensure clause so a waiter leaving
 	// through an interrupt unlinks itself from the queue (do_mutex_lock's
@@ -1415,10 +1417,12 @@ func (vm *VM) mutexLock(m *RMutex) {
 		// code might call rb_raise()" (do_mutex_lock). Whether the unlock handed us
 		// the mutex a moment ago or we are still queued, leave cleanly first.
 		m.leave(t)
+		// This does not return: threadInterrupted is true exactly when the safepoint
+		// raises -- a kill unwinds, and a raise the current Thread.handle_interrupt
+		// frame defers reads as NOT interrupted and takes the continue above instead.
+		// So there is no re-registration after this point; the raise unwinds through
+		// the deferred leave, which is the only cleanup any exit needs.
 		vm.serviceSafepointAt(t, true)
-		// The interrupt turned out to be deferred by a Thread.handle_interrupt
-		// frame, so go back to waiting — MRI's loop does the same.
-		w = m.enqueue(t)
 	}
 	locked = true
 	// On wake, mutexUnlock has already transferred ownership to t.
