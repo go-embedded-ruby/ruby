@@ -135,9 +135,20 @@ func (vm *VM) registerDir() {
 		} else {
 			target = dirHomeStr()
 		}
-		old, _ := os.Getwd()
+		// dir.c chdir_path takes the directory it will restore ONLY on the block
+		// form — `if (chdir_alone_block_p()) { args.old_path =
+		// rb_str_encode_ospath(rb_dir_getwd()); ... }` — and rb_dir_getwd raises.
+		// So `Dir.chdir(d) { }` out of a removed working directory is
+		// Errno::ENOENT - getcwd, while the plain `Dir.chdir(d)` never consults
+		// getcwd at all and still returns 0. Both witnessed against MRI 4.0.5;
+		// reading the working directory unconditionally here would raise where MRI
+		// succeeds.
+		var old string
+		if blk != nil {
+			old = getwdOrFail()
+		}
 		if err := os.Chdir(target); err != nil {
-			raise("Errno::ENOENT", "No such file or directory @ dir_chdir - %s", target)
+			raiseChdirErr(err, target)
 		}
 		if blk != nil {
 			defer os.Chdir(old)
@@ -444,9 +455,16 @@ func (vm *VM) registerDirInstance(cDir *RClass) {
 	d("chdir", func(vm *VM, v object.Value, _ []object.Value, blk *Proc) object.Value {
 		dir := self(v)
 		checkOpen(dir)
+		// The discarded error is DELIBERATE, and the opposite of dirPwd's: Dir#chdir
+		// is dir.c dir_chdir -> dir_s_fchdir(dir_fileno(dir)), whose block form
+		// saves the previous directory by OPENING "." (dir_initialize(..., "."))
+		// rather than by calling getcwd. So `Dir.new(d).chdir { }` out of a removed
+		// working directory succeeds in MRI 4.0.5 — witnessed — and raising here
+		// would be a divergence, not a fix. rbgo has no fd for the old directory,
+		// so it can only restore by path and gives up silently when there is none.
 		old, _ := os.Getwd()
 		if err := os.Chdir(dir.path); err != nil {
-			raise("Errno::ENOENT", "No such file or directory @ dir_chdir - %s", dir.path)
+			raiseChdirErr(err, dir.path)
 		}
 		if blk != nil {
 			defer os.Chdir(old)
@@ -501,9 +519,86 @@ func raiseMkdirErr(err error, path string) {
 	}
 }
 
+// dirPwd is Dir.pwd / Dir.getwd: dir.c dir_s_getwd -> rb_dir_getwd ->
+// rb_dir_getwd_ospath -> util.c ruby_getcwd. ruby_getcwd never hands a failure
+// back to its caller — it calls rb_syserr_fail(errno, "getcwd") — so a working
+// directory that was removed under the process RAISES here instead of returning
+// the path that no longer exists. Discarding that error was worth about 145
+// corpus examples that no reference could reach (#681): the Dir specs remove the
+// working directory in teardown, MRI's failure cascades from that point on, and
+// rbgo therefore scored ABOVE MRI read through the same shim.
 func dirPwd(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-	wd, _ := os.Getwd()
-	return object.NewString(toSlash(wd))
+	return object.NewString(toSlash(getwdOrFail()))
+}
+
+// osGetwd is a seam over os.Getwd so getwdOrFail's failure branch is testable.
+// The real call does not fail on darwin even when the working directory has been
+// removed (see cwdStillNamed), so there is no platform here on which to exercise
+// it otherwise. It joins osStat / osLstat in filestat.go as a filesystem seam.
+var osGetwd = os.Getwd
+
+// getwdOrFail is util.c ruby_getcwd(): it returns the working directory or
+// raises, never both. The errno is getcwd(2)'s own and the operation MRI names
+// is "getcwd", so the message is "<strerror> - getcwd" (rb_syserr_fail in
+// error.c, which is what sysFail reproduces) — Errno::ENOENT for the removed
+// directory, Errno::EACCES for a parent that became unsearchable, and a
+// rescuable SystemCallError for anything with no registered class.
+func getwdOrFail() string {
+	wd, err := osGetwd()
+	if err != nil {
+		sysFail(err, "getcwd")
+	}
+	if err := cwdStillNamed(wd); err != nil {
+		sysFail(err, "getcwd")
+	}
+	return wd
+}
+
+// cwdStillNamed answers the question os.Getwd cannot be trusted with on darwin.
+// Go's syscall.Getwd there is getattrlist(".", ATTR_CMN_FULLPATH), which keeps
+// reporting the recorded path of an UNLINKED directory and returns no error at
+// all — measured on this host (macOS 25, Go 1.26.4): with the working directory
+// removed, os.Getwd hands back the dead path and err == nil, while MRI's
+// getcwd(3) fails. Checking the error alone would therefore have fixed nothing
+// here. So the answer is confirmed the way POSIX getcwd(3) confirms it, by
+// resolving the name it produced and requiring it to still BE "." — the same
+// kludge os.Getwd itself applies to $PWD. Three cases were witnessed against MRI
+// 4.0.5 and all three fall out of this one check: the directory removed
+// (Errno::ENOENT), removed and recreated, so the name resolves to a DIFFERENT
+// inode (Errno::ENOENT again), and a parent that became unsearchable, where the
+// resolution fails with the errno getcwd(3) reports (Errno::EACCES). A working
+// directory reached through a symlink still passes: os.Getwd names the physical
+// path, which is the same file.
+func cwdStillNamed(wd string) error {
+	dot, err := osStat(".")
+	if err != nil {
+		return err
+	}
+	named, err := osStat(wd)
+	if err != nil {
+		return err
+	}
+	if !os.SameFile(dot, named) {
+		return syscall.ENOENT
+	}
+	return nil
+}
+
+// raiseChdirErr reports a failed chdir(2) the way dir.c chdir_path does:
+// rb_sys_fail_path(path), which keeps the REAL errno rather than assuming the
+// directory was missing, and names the C function it failed in. So chdir into a
+// regular file is Errno::ENOTDIR ("Not a directory @ chdir_path - /etc/hosts"),
+// not the Errno::ENOENT this used to raise for every failure. Both the class and
+// the "chdir_path" label were witnessed against MRI 4.0.5.
+func raiseChdirErr(err error, path string) {
+	var eno syscall.Errno
+	if errors.As(err, &eno) {
+		if name, ok := errnoClasses[int64(eno)]; ok {
+			raise("Errno::"+name, "%s @ chdir_path - %s", errnoStrerror(int64(eno)), path)
+		}
+		raise("SystemCallError", "%s @ chdir_path - %s", errnoStrerror(int64(eno)), path)
+	}
+	raise("Errno::ENOENT", "No such file or directory @ chdir_path - %s", path)
 }
 
 // raiseChrootErr maps a chroot(2) failure to the MRI errno Dir.chroot raises via

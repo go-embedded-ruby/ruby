@@ -60,7 +60,12 @@ func TestDir(t *testing.T) {
 		{fmt.Sprintf(`Dir.mkdir(%q)`, dir), "File exists"},
 		{fmt.Sprintf(`Dir.mkdir(%q)`, dir+"/nope/deep"), "No such file"},
 		{fmt.Sprintf(`Dir.rmdir(%q)`, dir+"/nope"), "No such file"},
-		{fmt.Sprintf(`Dir.chdir(%q)`, dir+"/nope"), "No such file"},
+		// dir.c chdir_path reports rb_sys_fail_path(path), so what is asserted here
+		// is the OPERATION name rbgo now embeds — the strerror sentence in front of
+		// it is the C library's (Windows says "The system cannot find the file
+		// specified." for the same errno). The POSIX wording and the Errno class are
+		// pinned exactly in TestDirChdirErrnoKeepsTheRealError.
+		{fmt.Sprintf(`Dir.chdir(%q)`, dir+"/nope"), "@ chdir_path - "},
 		{`Dir.entries(123)`, "into String"},
 	}
 	for _, c := range errs {

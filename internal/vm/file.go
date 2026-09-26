@@ -915,11 +915,13 @@ func (vm *VM) fileExpandValue(args []object.Value, expandTilde bool) object.Valu
 	}
 	dir := baseArg
 	if dir == nil {
-		wd := ""
-		if w, err := os.Getwd(); err == nil {
-			wd = toSlash(w)
-		}
-		dir = object.NewStringBytesEnc([]byte(wd), vm.fsEncName())
+		// file.c rb_file_expand_path_internal reaches
+		// `append_fspath(result, fname, ruby_getcwd(), &enc, fsenc)` for a relative
+		// path with no base, and util.c ruby_getcwd RAISES (rb_syserr_fail(errno,
+		// "getcwd")) rather than returning an error. So File.expand_path("x") out of
+		// a removed working directory is Errno::ENOENT - getcwd, not the dead path
+		// with "x" joined onto it. Witnessed against MRI 4.0.5 (#681).
+		dir = object.NewStringBytesEnc([]byte(toSlash(getwdOrFail())), vm.fsEncName())
 	}
 	enc := vm.combinedEncName(fname, dir)
 	base := dir.Str()
@@ -963,8 +965,12 @@ func (vm *VM) fileExpand(p string, rest []object.Value, expandTilde bool) string
 		// The base directory is a path-like argument too, so MRI coerces it via
 		// rb_get_path (#to_path) — not a bare String check — before expanding it.
 		base = vm.fileExpand(vm.filePathArg(rest[0]), nil, expandTilde)
-	} else if wd, err := os.Getwd(); err == nil {
-		base = toSlash(wd)
+	} else {
+		// Same ruby_getcwd() call as fileExpandValue's, reached by the same branch of
+		// rb_file_expand_path_internal: it raises rather than yielding an error, so a
+		// removed working directory surfaces here too (File.expand_path("x", "."),
+		// File.realdirpath("x")) instead of silently expanding against "".
+		base = toSlash(getwdOrFail())
 	}
 	return cleanAbs(path.Join(base, p))
 }
