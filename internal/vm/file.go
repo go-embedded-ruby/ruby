@@ -360,12 +360,33 @@ func (vm *VM) registerFile() {
 		return object.IntValue(int64(len(paths)))
 	})
 	// NOTE: File.mkfifo (syscall.Mkfifo) is deliberately left unregistered. It is
-	// straightforward and MRI-verified, but wiring it up REGRESSES core/file:
-	// open_spec's "on a FIFO" example opens both ends of the FIFO from two Ruby
-	// threads, and rbgo's blocking File.open (io.go) deadlocks the interpreter on
-	// the FIFO open(2) handshake — hanging the whole spec file and losing its ~55
-	// passing examples. Add File.mkfifo only once File.open on a FIFO no longer
-	// blocks the scheduler (an io.go / thread-concurrency fix the io agent owns).
+	// straightforward and MRI-verified — core/file/mkfifo_spec.rb would go 0 -> 7,
+	// its MRI ceiling — but wiring it up REGRESSES core/file by far more:
+	// open_spec's "on a FIFO" example opens both ends from two Ruby threads, the
+	// interpreter deadlocks, and the whole spec file times out and loses its ~55
+	// passing examples.
+	//
+	// The earlier note here blamed a blocking File.open. Re-measured 2026-09-26,
+	// that is no longer where it hangs, so do not go looking there:
+	//
+	//   - File.open on a FIFO returns at once, for either mode: openFileSpec's
+	//     `special` branch (io.go) skips the whole-file read for anything that is
+	//     not a regular file, so no open(2) handshake is attempted.
+	//   - rbgo's Ruby threads really are concurrent (goroutines) — a two-thread
+	//     interleaving test alternates as MRI's does.
+	//   - The hang is at CLOSE, in ioFlush: it does os.WriteFile on the path, and
+	//     opening a FIFO for writing blocks until a reader opens it. No reader ever
+	//     does, because the READ side never opens the path either — it serves an
+	//     empty in-memory buffer. Each end avoids the handshake, so neither can
+	//     complete it. Witnessed: `File.open(fifo, "w")` then `#write` then
+	//     `#close` hangs past 10s; the read side returns "" immediately; MRI does
+	//     both in milliseconds.
+	//
+	// Unblocking this needs a real descriptor for a FIFO on BOTH sides, which is a
+	// departure from IOObj's buffer-backed model rather than a patch to it — and
+	// the read side would then block with no writer, exactly as MRI does, which is
+	// the faithful behaviour but hangs any single-threaded spec that opens a FIFO
+	// to read. Register File.mkfifo in the same change, never before it.
 	// File.umask([mask]) reads (and optionally sets) the process umask, returning
 	// the previous value — the bracket Puppet::Util.withumask uses. With no
 	// argument it reports the current umask without changing it.

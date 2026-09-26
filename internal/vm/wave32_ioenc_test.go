@@ -171,3 +171,158 @@ func TestIOOpenTimeEncodingResolution(t *testing.T) {
 		})
 	}
 }
+
+// TestIOSysWriteGoesToTheDescriptor pins io.c rb_io_syswrite and
+// io_write_nonblock, which differ from IO#write in four ways that all follow
+// from writing to the DESCRIPTOR rather than through the stream:
+// rb_obj_as_string on a non-String argument, rb_io_check_writable with no
+// zero-length shortcut, the string's OWN bytes (no econv, so an external
+// encoding does not transcode them), and nothing left in the write buffer.
+//
+// Every expectation was taken from MRI ruby 4.0.5 running the same source.
+func TestIOSysWriteGoesToTheDescriptor(t *testing.T) {
+	dir := ioScratchDir(t)
+	q := func(name string) string {
+		return `"` + strings.ReplaceAll(filepath.Join(dir, name), `\`, `\\`) + `"`
+	}
+
+	cases := []struct{ name, body, want string }{
+		{
+			// The bytes are on disk before the stream is closed.
+			"syswrite_does_not_buffer",
+			`File.write(A, "0123456789")
+			 f = File.open(A, "r+"); n = f.syswrite("abcde")
+			 p [n, File.read(A)]; f.close`,
+			"[5, \"abcde56789\"]\n",
+		},
+		{
+			"write_nonblock_does_not_buffer",
+			`File.write(A, "0123456789")
+			 f = File.open(A, "r+"); n = f.write_nonblock("abcde")
+			 p [n, File.read(A)]; f.close`,
+			"[5, \"abcde56789\"]\n",
+		},
+		{
+			// rb_obj_as_string, before the stream is even looked at.
+			"syswrite_coerces_with_to_s",
+			`class Q; def to_s; "QQ"; end; end
+			 f = File.open(A, "w"); n = f.syswrite(Q.new); f.close
+			 p [n, File.read(A)]`,
+			"[2, \"QQ\"]\n",
+		},
+		{
+			// No econv on this path: the stream's external encoding is ignored.
+			"syswrite_does_not_transcode",
+			`f = File.open(A, "w", external_encoding: Encoding::UTF_16BE)
+			 f.syswrite("hello"); f.close
+			 p File.binread(A).bytes`,
+			"[104, 101, 108, 108, 111]\n",
+		},
+		{
+			"write_nonblock_does_not_transcode",
+			`f = File.open(A, "w", external_encoding: Encoding::UTF_16BE)
+			 f.write_nonblock("hello"); f.close
+			 p File.binread(A).bytes`,
+			"[104, 101, 108, 108, 111]\n",
+		},
+		{
+			// io_write returns early for an all-empty write; these two do not, so
+			// the writability check is still reached.
+			"empty_write_still_checks_writable",
+			`File.write(A, "x")
+			 f = File.open(A, "r")
+			 r = []
+			 begin; f.syswrite(""); rescue IOError => e; r << e.message; end
+			 begin; f.write_nonblock(""); rescue IOError => e; r << e.message; end
+			 f.close; p r`,
+			"[\"not opened for writing\", \"not opened for writing\"]\n",
+		},
+		{
+			// write(2) on a NON-BLOCKING pipe takes what fits and returns that
+			// count; the same call on a blocking one takes the lot.
+			"short_write_on_a_nonblocking_pipe",
+			`require "io/nonblock"
+			 big = 2 * 1024 * 1024
+			 r, w = IO.pipe; w.nonblock = true
+			 n = w.syswrite("a" * big)
+			 p [n > 0, n < big]`,
+			"[true, true]\n",
+		},
+		{
+			// rb_scan_args "1": exactly one argument, checked before anything else.
+			"syswrite_arity",
+			`f = File.open(A, "w"); r = []
+			 begin; f.syswrite("a", "b"); rescue ArgumentError => e; r << e.message; end
+			 begin; f.syswrite; rescue ArgumentError => e; r << e.message; end
+			 f.close; p r`,
+			"[\"wrong number of arguments (given 2, expected 1)\", \"wrong number of arguments (given 0, expected 1)\"]\n",
+		},
+		{
+			// A write that fits takes the whole string and the bytes arrive intact.
+			"pipe_write_that_fits_is_whole",
+			`r, w = IO.pipe
+			 p [w.syswrite("abc"), r.read(3)]`,
+			"[3, \"abc\"]\n",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			src := "A = " + q(c.name+".txt") + "\n" + c.body + "\n"
+			if got := eval(t, src); got != c.want {
+				t.Errorf("got %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+// TestIOSysWriteWarnsAfterBufferedWrite covers rb_io_syswrite's
+// `if (fptr->wbuf.len) rb_warn("syswrite for buffered IO")` — bytes a buffered
+// #write accepted but has not put on disk, which is what wbufDirty stands in
+// for. A #read leaves nothing buffered, so it must NOT warn.
+func TestIOSysWriteWarnsAfterBufferedWrite(t *testing.T) {
+	dir := ioScratchDir(t)
+	q := func(name string) string {
+		return `"` + strings.ReplaceAll(filepath.Join(dir, name), `\`, `\\`) + `"`
+	}
+	for _, c := range []struct{ name, body, want string }{
+		{"after_buffered_write", `f = File.open(A, "w"); f.write("abcde"); f.syswrite("fg"); f.close`, "syswrite for buffered IO"},
+		{"after_read", `File.write(A, "0123456789")
+		                f = File.open(A, "r+"); f.read(5); f.syswrite("fg"); f.close`, ""},
+		{"when_sync", `f = File.open(A, "w"); f.sync = true; f.write("abcde"); f.syswrite("fg"); f.close`, ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			// eval's VM sends $stderr to the same buffer as $stdout, so the
+			// warning lands in the captured output.
+			src := "A = " + q(c.name+".txt") + "\n$VERBOSE = true\n" + c.body + "\n"
+			got := eval(t, src)
+			switch {
+			case c.want == "" && strings.Contains(got, "syswrite"):
+				t.Errorf("warned when it should not: %q", got)
+			case c.want != "" && !strings.Contains(got, c.want):
+				t.Errorf("got stderr %q, want it to contain %q", got, c.want)
+			}
+		})
+	}
+}
+
+// TestCopyStreamSrcOffsetOnAPipe covers the two DIFFERENT refusals io.c makes
+// for IO.copy_stream's src_offset. copy_stream_fallback raises the ArgumentError
+// only when the source has no fptr at all — a StringIO, or a duck-typed object.
+// A pipe IS an IO, so it reaches maygvl_copy_stream_read and preads, which on a
+// pipe fails with ESPIPE.
+func TestCopyStreamSrcOffsetOnAPipe(t *testing.T) {
+	dir := ioScratchDir(t)
+	out := `"` + strings.ReplaceAll(filepath.Join(dir, "copy.out"), `\`, `\\`) + `"`
+	src := `require "stringio"
+O = ` + out + `
+r, w = IO.pipe; w.write("Line one\nLine two\n"); w.close
+res = []
+begin; IO.copy_stream(r, O, 8, 4); rescue SystemCallError => e; res << [e.class.name, e.message]; end
+begin; IO.copy_stream(StringIO.new("abcdefghijkl"), O, 8, 4); rescue ArgumentError => e; res << e.message; end
+p res
+`
+	want := "[[\"Errno::ESPIPE\", \"Illegal seek - pread\"], \"cannot specify src_offset for non-IO\"]\n"
+	if got := eval(t, src); got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}

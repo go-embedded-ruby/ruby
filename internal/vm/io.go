@@ -72,8 +72,12 @@ type IOObj struct {
 	rdClosed   bool   // #close_read (or a write-only mode) — reads raise "not opened for reading"
 	wrClosed   bool   // #close_write (or a read-only mode) — writes raise "not opened for writing"
 	appendMode bool   // opened in append mode ("a"/"a+") — every write lands at end-of-buffer
-	openMode   string // the fopen-style access mode a file stream was opened with ("r", "w+", "ab"…)
-	nonblock   bool   // O_NONBLOCK is set (io/nonblock): false for a file, true for a pipe end
+	// wbufDirty stands in for MRI's fptr->wbuf.len: bytes a buffered #write has
+	// accepted but not yet put on disk. Only #syswrite reads it, to reproduce
+	// rb_io_syswrite's "syswrite for buffered IO" warning; every flush clears it.
+	wbufDirty bool
+	openMode  string // the fopen-style access mode a file stream was opened with ("r", "w+", "ab"…)
+	nonblock  bool   // O_NONBLOCK is set (io/nonblock): false for a file, true for a pipe end
 	// encSet records that #set_encoding has resolved this stream's encodings
 	// against the defaults in force at that moment (io.c io_encoding_set →
 	// rb_io_ext_int_to_enc). An empty extEnc then means "no encoding" — MRI's
@@ -209,6 +213,8 @@ func (o *IOObj) writeBytes(p []byte) int {
 		o.syncStr()
 		if o.sync { // sync=true: a File's writes reach disk immediately (no buffering)
 			ioFlush(o)
+		} else if o.path != "" {
+			o.wbufDirty = true // bytes accepted but not on disk: MRI's fptr->wbuf.len
 		}
 		return len(p)
 	}
@@ -1234,6 +1240,7 @@ func ioFlush(o *IOObj) {
 	if !o.writable || o.path == "" {
 		return
 	}
+	o.wbufDirty = false
 	err := os.WriteFile(o.path, o.buf, 0o644)
 	if err == nil {
 		return

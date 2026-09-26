@@ -395,8 +395,17 @@ func (vm *VM) ioReadFile(args []object.Value, forceBinary bool) object.Value {
 func (vm *VM) copyStreamRead(src object.Value, length int, hasLen bool, srcOffset int, hasOff bool) []byte {
 	if o, ok := src.(*IOObj); ok {
 		if hasOff {
-			if ioIsStringIO(o) || o.path == "" {
+			// copy_stream_fallback raises the ArgumentError only when the source has
+			// NO fptr — a StringIO, or any duck-typed object. A real IO always has
+			// one and reaches maygvl_copy_stream_read, which preads: on a pipe,
+			// socket or tty that fails with ESPIPE, reported as syserr "pread".
+			// The two are not interchangeable — core/io/copy_stream_spec.rb asks a
+			// pipe source for an offset and expects Errno::ESPIPE.
+			switch {
+			case ioIsStringIO(o):
 				raise("ArgumentError", "cannot specify src_offset for non-IO")
+			case o.path == "":
+				raise("Errno::ESPIPE", "Illegal seek - pread")
 			}
 			ioCheckReadable(o)
 			o.pipeRefresh()

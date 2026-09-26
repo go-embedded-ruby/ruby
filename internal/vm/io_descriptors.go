@@ -150,10 +150,33 @@ func defIOReadExtra(cls *RClass) {
 		o.pos = end
 		return ioReadResult(data, buf)
 	})
-	cls.define("syswrite", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	// syswrite(string) — io.c rb_io_syswrite. The name is the whole of it: the
+	// bytes go to the DESCRIPTOR (rb_io_write_memory), not through the stream's
+	// write buffer and not through its encoding converter.
+	//
+	//   - a non-String argument is rb_obj_as_string'd FIRST, before the stream is
+	//     even looked at;
+	//   - rb_io_check_writable then refuses a read-only stream — with no
+	//     zero-length shortcut, unlike io_write;
+	//   - the string's own bytes are written, so an external encoding set on the
+	//     stream does NOT transcode them and a frozen argument is not rewritten;
+	//   - nothing is buffered, so the bytes are visible to another open of the
+	//     same path immediately;
+	//   - and bytes a buffered #write left behind earn the "syswrite for buffered
+	//     IO" warning, because the two orderings can interleave on disk.
+	cls.define("syswrite", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
+		if len(args) != 1 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 1)", len(args))
+		}
+		str := vm.asWriteString(args[0])
 		ioCheckOpen(o)
-		return object.IntValue(int64(o.writeStr(args[0].ToS())))
+		if o.wbufDirty {
+			vm.rbWarn("syswrite for buffered IO")
+		}
+		n := o.writeBytes(ioShortWrite(o, str.Bytes()))
+		ioFlush(o)
+		return object.IntValue(int64(n))
 	})
 	cls.define("lineno", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
@@ -239,13 +262,17 @@ func defIOReadExtra(cls *RClass) {
 // binary-mode / autoclose / fdatasync accessors. pread/pwrite address the buffer
 // by absolute offset without disturbing the cursor.
 func defIOSeekable(cls *RClass) {
-	// write_nonblock(string, exception: true): a non-blocking write. To a file it
-	// writes the string and returns the byte count exactly like IO#write (io.c
-	// io_write_nonblock shares io_binwrite). To a pipe it models a finite kernel
-	// buffer: once the unread backlog reaches the pipe capacity a further write
-	// would block, so it reports would-block — raising Errno::EAGAIN, or returning
-	// :wait_writable when exception: false is given. It is an IO/File method (not
-	// StringIO).
+	// write_nonblock(string, exception: true) — io.c io_write_nonblock. Like
+	// #syswrite it goes STRAIGHT to the descriptor: rb_obj_as_string first,
+	// rb_io_check_writable with no zero-length shortcut (io_write has one,
+	// io_write_nonblock does not), io_fflush of whatever the buffered write path
+	// left, then a bare write(2) of the string's own bytes — so no transcoding,
+	// whatever external encoding the stream carries, and nothing left buffered.
+	//
+	// To a pipe it models a finite kernel buffer: once the unread backlog reaches
+	// the pipe capacity a further write would block, so it reports would-block —
+	// raising Errno::EAGAIN, or returning :wait_writable when exception: false is
+	// given. It is an IO/File method (not StringIO).
 	cls.define("write_nonblock", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
 		pos, opts := splitIOOpts(args)
@@ -258,18 +285,19 @@ func defIOSeekable(cls *RClass) {
 				raiseOnBlock = v.Truthy()
 			}
 		}
-		if o.pipe != nil && o.isWriteEnd {
-			// A typical pipe holds 64 KiB of unread data before a write blocks.
-			const pipeCapacity = 65536
-			if len(o.pipe.data)-o.pipe.rpos >= pipeCapacity {
-				if !raiseOnBlock {
-					return object.Symbol("wait_writable")
-				}
-				raise("IO::EAGAINWaitWritable", "Resource temporarily unavailable - write would block")
+		if o.pipe != nil && o.isWriteEnd && ioPipeRoom(o) <= 0 {
+			if !raiseOnBlock {
+				return object.Symbol("wait_writable")
 			}
+			raise("IO::EAGAINWaitWritable", "Resource temporarily unavailable - write would block")
 		}
-		o.nonblock = true // io_write_nonblock leaves the descriptor non-blocking
-		return object.IntValue(vm.ioWriteAll(o, pos[:1]))
+		str := vm.asWriteString(pos[0])
+		ioCheckOpen(o) // rb_io_check_writable — reached even for an empty string
+		o.nonblock = true
+		ioFlush(o) // io_fflush before the direct write
+		n := o.writeBytes(ioShortWrite(o, str.Bytes()))
+		ioFlush(o)
+		return object.IntValue(int64(n))
 	})
 	cls.define("pread", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
@@ -710,6 +738,40 @@ func ioReopenPath(vm *VM, o *IOObj, pos []object.Value, opts *object.Hash) objec
 		o.extEnc, o.intEnc, o.binmode = ms.extEnc, ms.intEnc, ms.binmode
 	}
 	return o
+}
+
+// pipeCapacity is how much unread data a pipe holds before a write on it would
+// block — 64 KiB on Linux and macOS alike, and the figure both IO#write_nonblock
+// and IO#syswrite model here.
+const pipeCapacity = 65536
+
+// ioPipeRoom reports how many more bytes the pipe behind o's write end can take
+// before write(2) would block. rbgo backs a pipe with an unbounded byte slice
+// (see pipeBuf), so the kernel's bound has to be applied where the write is.
+func ioPipeRoom(o *IOObj) int {
+	return pipeCapacity - (len(o.pipe.data) - o.pipe.rpos)
+}
+
+// ioShortWrite is write(2)'s SHORT WRITE on a non-blocking pipe: the kernel
+// takes what fits in the pipe buffer and returns that count instead of blocking,
+// which is why core/io/syswrite_spec.rb can assert that a 2 MiB syswrite returns
+// something strictly between 0 and 2 MiB. Everything else — a file, a blocking
+// pipe — takes the whole string.
+//
+// An ALREADY FULL pipe (room <= 0) is deliberately left alone rather than made
+// to fail: MRI's own answer could not be witnessed here, because a second
+// syswrite to a filled non-blocking pipe never returned under ruby 4.0.5 on this
+// machine (it was still running at the two-minute mark, with no reader). Guessing
+// Errno::EAGAIN would be inventing a semantics, so the pre-existing behaviour
+// stands and the gap is recorded instead.
+func ioShortWrite(o *IOObj, p []byte) []byte {
+	if o.pipe == nil || !o.isWriteEnd || !o.nonblock {
+		return p
+	}
+	if room := ioPipeRoom(o); room > 0 && room < len(p) {
+		return p[:room]
+	}
+	return p
 }
 
 // The fcntl and io/nonblock standard-library extensions are supplied by the VM
