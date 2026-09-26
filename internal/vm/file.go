@@ -178,13 +178,13 @@ func (vm *VM) registerFile() {
 		return object.NewString(fileJoin(parts))
 	})
 	def("expand_path", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(vm.fileExpand(vm.filePathArg(args[0]), args[1:], true))
+		return vm.fileExpandValue(args, true)
 	})
 	// absolute_path resolves a path to an absolute one against an optional base
 	// directory (defaulting to the CWD), like expand_path but without ~ expansion.
 	// Puppet uses it with relative paths and an explicit base, where the two agree.
 	def("absolute_path", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(vm.fileExpand(vm.filePathArg(args[0]), args[1:], false))
+		return vm.fileExpandValue(args, false)
 	})
 	def("absolute_path?", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		return object.Bool(path.IsAbs(toSlash(pathArg(vm, args[0]))))
@@ -851,15 +851,7 @@ func (vm *VM) pathStr(v object.Value) *object.String {
 // ArgumentError ("path name contains null byte"). Path-algebra entry points
 // (File.basename/dirname/extname/split/path and Dir.mkdir …) use this so those
 // two guards fire before the path is examined, matching MRI.
-func (vm *VM) filePathArg(v object.Value) string {
-	s := vm.pathStr(v)
-	vm.checkPathEncoding(s)
-	str := s.Str()
-	if strings.IndexByte(str, 0) >= 0 {
-		raise("ArgumentError", "path name contains null byte")
-	}
-	return str
-}
+func (vm *VM) filePathArg(v object.Value) string { return vm.filePathString(v).Str() }
 
 // checkPathEncoding raises Encoding::CompatibilityError when a path (or glob
 // pattern) string carries an ASCII-incompatible encoding, mirroring MRI's
@@ -885,6 +877,74 @@ func isAbsPath(p string) bool {
 // user's home directory, a relative path is resolved against the optional base
 // (default: the working directory), and the result is cleaned (so .. and . collapse)
 // while a leading run of two or more separators is preserved (POSIX / MRI).
+// fileExpandValue is File.expand_path / File.absolute_path including the part
+// of the answer a Go string cannot carry: its ENCODING.
+//
+// rb_file_expand_path_internal starts from `enc = rb_enc_get(fname)`, and a path
+// that is already absolute keeps it. A RELATIVE one grows a directory in front
+// of it, and append_fspath then runs rb_enc_check(fname, dirname) over the pair.
+// That single call does two things:
+//
+//   - it REFUSES an incompatible combination — an ASCII path expanded while
+//     Encoding.default_external is UTF-16BE is Encoding::CompatibilityError,
+//     because the directory that must go in front cannot be spliced onto it;
+//   - and otherwise it names the result's encoding, which is why "./a" tagged
+//     CP1251 comes back CP1251 instead of picking up the default, and why a path
+//     of raw bytes comes back BINARY.
+//
+// The directory is the second argument when one was given (itself expanded
+// first), else the working directory, which carries the filesystem encoding.
+func (vm *VM) fileExpandValue(args []object.Value, expandTilde bool) object.Value {
+	fname := vm.filePathString(args[0])
+	var baseArg *object.String
+	if len(args) > 1 && args[1] != object.NilV {
+		baseArg = vm.filePathString(args[1])
+	}
+	p := fname.Str()
+	if expandTilde {
+		p = expandTildePath(p)
+	}
+	if isAbsPath(p) {
+		return object.NewStringBytesEnc([]byte(cleanAbs(p)), fname.EncName())
+	}
+	dir := baseArg
+	if dir == nil {
+		wd := ""
+		if w, err := os.Getwd(); err == nil {
+			wd = toSlash(w)
+		}
+		dir = object.NewStringBytesEnc([]byte(wd), vm.fsEncName())
+	}
+	enc := vm.combinedEncName(fname, dir)
+	base := dir.Str()
+	if baseArg != nil {
+		base = vm.fileExpand(base, nil, expandTilde)
+	}
+	return object.NewStringBytesEnc([]byte(cleanAbs(path.Join(base, p))), enc)
+}
+
+// filePathString is filePathArg keeping the String it coerced, so a caller that
+// needs the argument's ENCODING does not have to send #to_path a second time to
+// get it.
+func (vm *VM) filePathString(v object.Value) *object.String {
+	s := vm.pathStr(v)
+	vm.checkPathEncoding(s)
+	if strings.IndexByte(s.Str(), 0) >= 0 {
+		raise("ArgumentError", "path name contains null byte")
+	}
+	return s
+}
+
+// fsEncName is rb_filesystem_encoding(), which Encoding.find("filesystem")
+// resolves to Encoding.default_external here (see encoding.go).
+func (vm *VM) fsEncName() string {
+	name := "UTF-8" // a VM built without the encoding bootstrap has no default
+	if vm.defExternalEnc != nil {
+		name = vm.defExternalEnc.name
+	}
+	return name
+}
+
 func (vm *VM) fileExpand(p string, rest []object.Value, expandTilde bool) string {
 	if expandTilde {
 		p = expandTildePath(p)

@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"bytes"
 	"errors"
 	"io"
 	"io/fs"
@@ -72,6 +73,12 @@ type IOObj struct {
 	rdClosed   bool   // #close_read (or a write-only mode) — reads raise "not opened for reading"
 	wrClosed   bool   // #close_write (or a read-only mode) — writes raise "not opened for writing"
 	appendMode bool   // opened in append mode ("a"/"a+") — every write lands at end-of-buffer
+	// newline is the :newline option's write-side decorator ("crlf" or "cr", ""
+	// for none): io.c turns it into an ECONV_*_NEWLINE_DECORATOR bit that the
+	// write converter applies, translating every "\n" the stream is asked to
+	// write. Only the stream path carries it — #syswrite and #write_nonblock go
+	// to the descriptor and are not decorated.
+	newline string
 	// wbufDirty stands in for MRI's fptr->wbuf.len: bytes a buffered #write has
 	// accepted but not yet put on disk. Only #syswrite reads it, to reproduce
 	// rb_io_syswrite's "syswrite for buffered IO" warning; every flush clears it.
@@ -222,7 +229,25 @@ func (o *IOObj) writeBytes(p []byte) int {
 	return n
 }
 
-func (o *IOObj) writeStr(s string) int { return o.writeBytes([]byte(s)) }
+func (o *IOObj) writeStr(s string) int { return o.writeBytes(o.newlineConv([]byte(s))) }
+
+// newlineConv is the write half of io.c's newline decorators
+// (ECONV_CRLF_NEWLINE_DECORATOR / ECONV_CR_NEWLINE_DECORATOR), which the
+// :newline option asks for: every "\n" written to the stream becomes "\r\n" or
+// "\r". :lf and :universal have no write-side effect — universal is a READ
+// decorator — so they leave the bytes alone, as MRI does.
+func (o *IOObj) newlineConv(p []byte) []byte {
+	var nl string
+	switch o.newline {
+	case "crlf":
+		nl = "\r\n"
+	case "cr":
+		nl = "\r"
+	default:
+		return p
+	}
+	return bytes.ReplaceAll(p, []byte("\n"), []byte(nl))
+}
 
 // syncStr mirrors the working buffer back into the backing String object of a
 // StringIO so that #string (which returns that very object) and any external
@@ -866,7 +891,7 @@ func (vm *VM) openFileArgs(cls *RClass, args []object.Value) *IOObj {
 		}
 	}
 	o := openFileSpec(cls, path, &ms, perm, permGiven)
-	o.extEnc, o.intEnc, o.binmode = ms.extEnc, ms.intEnc, ms.binmode
+	o.extEnc, o.intEnc, o.binmode, o.newline = ms.extEnc, ms.intEnc, ms.binmode, ms.newline
 	return o
 }
 
@@ -1294,7 +1319,7 @@ func (vm *VM) ioWriteAll(o *IOObj, args []object.Value) int64 {
 	ioCheckOpen(o)
 	n := 0
 	for _, s := range strs {
-		n += o.writeBytes(vm.ioWriteEncode(o, s))
+		n += o.writeBytes(o.newlineConv(vm.ioWriteEncode(o, s)))
 	}
 	return int64(n)
 }

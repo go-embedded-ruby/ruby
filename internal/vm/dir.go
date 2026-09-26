@@ -248,13 +248,7 @@ func (vm *VM) dirEncOption(args []object.Value) ([]object.Value, string) {
 			return pos, vm.encodingArg(v).name
 		}
 	}
-	// rb_filesystem_encoding(), which Encoding.find("filesystem") resolves to
-	// Encoding.default_external here (see encoding.go).
-	enc := "UTF-8"
-	if vm.defExternalEnc != nil {
-		enc = vm.defExternalEnc.name
-	}
-	return pos, enc
+	return pos, vm.fsEncName()
 }
 
 // dirExternalStr is what dir.c does to EVERY name it reads —

@@ -553,3 +553,116 @@ func TestIOBufferStringAndFree(t *testing.T) {
 		})
 	}
 }
+
+// TestFileExpandPathEncoding pins the encoding of File.expand_path's answer.
+// rb_file_expand_path_internal starts from `enc = rb_enc_get(fname)`; a relative
+// path grows a directory in front of it and append_fspath then runs
+// rb_enc_check(fname, dirname), where the directory carries the filesystem
+// encoding. That one call both refuses an incompatible pair and names the
+// result's encoding.
+//
+// Every expectation was taken from MRI ruby 4.0.5 running the same source.
+func TestFileExpandPathEncoding(t *testing.T) {
+	for _, c := range []struct{ name, body, want string }{
+		{
+			// The ARGUMENT's encoding wins over the default: both are ASCII-only, so
+			// rb_enc_compatible answers the first one's.
+			"argument_encoding_survives",
+			`Encoding.default_external = Encoding::SHIFT_JIS
+			 p File.expand_path("./a".dup.force_encoding(Encoding::CP1251)).encoding.name`,
+			"\"Windows-1251\"\n",
+		},
+		{
+			// Raw bytes are ASCII-8BIT, and ASCII-8BIT combined with an ASCII-only
+			// directory is ASCII-8BIT.
+			"binary_path_stays_binary",
+			`Encoding.default_external = Encoding::SHIFT_JIS
+			 p File.expand_path([222, 173, 190, 175].pack("C*")).encoding.name`,
+			"\"ASCII-8BIT\"\n",
+		},
+		{
+			// An ASCII-INCOMPATIBLE filesystem encoding cannot be spliced in front of
+			// the path at all, so rb_enc_check raises.
+			"incompatible_default_external_raises",
+			`Encoding.default_external = Encoding::UTF_16BE
+			 begin
+			   File.expand_path("./a")
+			   p :no_raise
+			 rescue Encoding::CompatibilityError
+			   p :compat_error
+			 end`,
+			":compat_error\n",
+		},
+		{
+			// An ABSOLUTE path never grows a directory, so the filesystem encoding is
+			// never consulted and the argument's encoding is simply kept.
+			"absolute_path_never_consults_the_default",
+			`Encoding.default_external = Encoding::UTF_16BE
+			 p File.expand_path("/a/b").encoding.name`,
+			"\"UTF-8\"\n",
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if got := eval(t, c.body+"\n"); got != c.want {
+				t.Errorf("got %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+// TestIONewlineWriteDecorator pins the write half of io.c's newline decorators,
+// which the :newline option asks for (ECONV_CRLF_NEWLINE_DECORATOR /
+// ECONV_CR_NEWLINE_DECORATOR, set by rb_io_extract_modeenc and applied by the
+// write converter). :lf and :universal have no write-side effect — universal is
+// a READ decorator.
+//
+// #syswrite and #write_nonblock go straight to the descriptor, so they are NOT
+// decorated: that is the same boundary rb_io_write_memory sits on.
+func TestIONewlineWriteDecorator(t *testing.T) {
+	dir := ioScratchDir(t)
+	q := func(name string) string {
+		return `"` + strings.ReplaceAll(filepath.Join(dir, name), `\`, `\\`) + `"`
+	}
+	for _, c := range []struct{ name, opts, want string }{
+		{"crlf", `, newline: :crlf`, "\"a\\r\\nb\\r\\n\\r\\nc\\r\\n\"\n"},
+		{"cr", `, newline: :cr`, "\"a\\rb\\r\\rc\\r\"\n"},
+		{"lf_is_a_no_op", `, newline: :lf`, "\"a\\nb\\n\\nc\\n\"\n"},
+		{"universal_is_a_no_op_on_write", `, newline: :universal`, "\"a\\nb\\n\\nc\\n\"\n"},
+		{"no_option", ``, "\"a\\nb\\n\\nc\\n\"\n"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			src := "A = " + q(c.name+".txt") + "\n" +
+				`File.open(A, "wt"` + c.opts + `) { |f| f.write("a\nb\n"); f.puts; f.print "c\n" }` + "\n" +
+				"p File.binread(A)\n"
+			if got := eval(t, src); got != c.want {
+				t.Errorf("got %q, want %q", got, c.want)
+			}
+		})
+	}
+	t.Run("syswrite_is_not_decorated", func(t *testing.T) {
+		src := "A = " + q("sysnl.txt") + "\n" +
+			`File.open(A, "wt", newline: :crlf) { |f| f.syswrite("a\nb\n") }` + "\n" +
+			"p File.binread(A)\n"
+		if got, want := eval(t, src), "\"a\\nb\\n\"\n"; got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	})
+}
+
+// TestFileRealpathRelativeUsesTheCwd covers fileExpand's working-directory
+// branch, which File.expand_path no longer reaches: fileExpandValue supplies its
+// own directory String because it needs that directory's ENCODING as well as its
+// name (see fileExpandValue). File.realpath still goes through fileExpand, and a
+// relative path there is resolved against the working directory — so the
+// relative and absolute spellings must name the same file.
+func TestFileRealpathRelativeUsesTheCwd(t *testing.T) {
+	// The Go test runs with the package directory as its working directory, so
+	// this file is reachable by its bare name.
+	const src = `rel = File.realpath("wave32_ioenc_test.go")
+p [File.absolute_path?(rel), File.basename(rel), rel == File.realpath(File.expand_path("wave32_ioenc_test.go"))]
+`
+	want := "[true, \"wave32_ioenc_test.go\", true]\n"
+	if got := eval(t, src); got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}

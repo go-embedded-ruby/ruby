@@ -258,7 +258,7 @@ func (vm *VM) ioAdoptDescriptor(o, src *IOObj, pos []object.Value, opts *object.
 	ms := vm.ioResolveModeEnc(pos, opts)
 	o.isStr, o.buf, o.path = true, src.buf, src.path
 	o.binmode, o.noAutoclose = ms.binmode, ms.noAutoclose
-	o.extEnc, o.intEnc = ms.extEnc, ms.intEnc
+	o.extEnc, o.intEnc, o.newline = ms.extEnc, ms.intEnc, ms.newline
 	if ms.explicit {
 		// An explicit mode must be compatible with the descriptor's current mode
 		// (io.c io_reopen / rb_update_max_fd path: EINVAL when e.g. a write-only fd

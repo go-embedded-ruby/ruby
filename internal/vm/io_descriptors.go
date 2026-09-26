@@ -735,7 +735,7 @@ func ioReopenPath(vm *VM, o *IOObj, pos []object.Value, opts *object.Hash) objec
 	o.closeOnExecOff = false
 	if explicit {
 		ms := vm.ioResolveModeEnc(pos, opts)
-		o.extEnc, o.intEnc, o.binmode = ms.extEnc, ms.intEnc, ms.binmode
+		o.extEnc, o.intEnc, o.binmode, o.newline = ms.extEnc, ms.intEnc, ms.binmode, ms.newline
 	}
 	return o
 }
