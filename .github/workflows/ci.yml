@@ -141,8 +141,10 @@ jobs:
   # with Go's own lib/wasm/wasm_exec.js — the same glue web/index.html loads — and
   # asserts Ruby ran: see web/smoke.mjs. Measured on an M-series host with a cold
   # GOCACHE, so these are build-from-scratch numbers, not warm ones: build ./...
-  # 14s, vet 18s, the module 97 MB, the node run a few seconds. A GitHub runner is
-  # slower than that host, so budget a handful of minutes; nothing here is
+  # 14s, vet 18s, the module 97 MB, the node run a few seconds. This lane has not
+  # yet had a runner of its own to time, so treat the sibling `wasm (wasip1)` lane
+  # as the scale to expect: 2.0 min end to end on ubuntu-latest, and it does strictly
+  # more (it also installs wazero and runs a test binary). Nothing here is
   # -race-priced and the lane runs in parallel with the others.
   wasm-js:
     name: wasm (js, browser)
@@ -179,10 +181,13 @@ jobs:
   # three tests cover what no other lane does: the nested `go build` the rbgo
   # command performs, that --closed really drops the front-end from the binary, and
   # that a baked program runs. The cost is what makes it its own lane rather than a
-  # step in `test`: these are full cross-compiles of a ~97 MB module, measured at
-  # 35s cold for all three on an M-series host (they share the build cache, so the
-  # third is nearly free) — cheap next to the 20-90 min -race coverage lane, but
-  # not something to add to its critical path.
+  # step in `test`: these are full cross-compiles of a ~97 MB module, 35s cold for
+  # all three on an M-series host (they share the build cache, so the third is
+  # nearly free) and MEASURED ON A RUNNER at 141s of test time, 5.3 min for the
+  # whole job. That is the honest frame: it lands BETWEEN two lanes this file
+  # already pays for — `arch arm64` at 5.9 min and `arch amd64` at 9.4 min on the
+  # same commit — and well under the 20-90 min -race coverage lane. Keeping it in
+  # its own lane is about staying off that lane's critical path, not about price.
   #
   # node is installed because TestClosedWasmBuildIntegration now RUNS the module it
   # builds, and it fails rather than skips if node is missing. A gate that steps
@@ -198,6 +203,13 @@ jobs:
   # build tags, and github.com/go-ruby-rubocop/rubocop imports the parser, so the
   # front-end re-enters the closed dep graph through the RuboCop binding
   # (`go list -deps -tags rbgo_closed ./cmd/rbgo` shows it).
+  #
+  # Confirmed on a GitHub ubuntu runner, not only locally, and it fails for EXACTLY
+  # that one reason: TestBuildIntegration, TestBuildEnv and
+  # TestRunSendsWarningsToTheRealStderr pass, and the only lines in the failure are
+  # the two "still links the front-end" assertions. The node run of the closed wasm
+  # module and both of its JS.log assertions pass there too, so the leak is
+  # platform-independent and nothing else in the lane is broken.
   #
   # The fix is deliberately NOT in this PR: it is a scope decision about what
   # --closed supports (does a closed-world build still answer `require "rubocop"`,
