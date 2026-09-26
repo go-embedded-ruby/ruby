@@ -72,12 +72,14 @@ func (vm *VM) registerUnixSockets(basic *RClass) {
 	vm.consts["UNIXServer"] = srv
 
 	// UNIXSocket.new(path) connects to a listening AF_UNIX socket at path.
-	newSock := func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+	newSock := func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		if len(args) < 1 {
 			raise("ArgumentError", "wrong number of arguments (given %d, expected 1)", len(args))
 		}
 		path := strArg(args[0])
-		conn, err := net.Dial("unix", path)
+		var conn net.Conn
+		var err error
+		ioBlock(vm, func() { conn, err = net.Dial("unix", path) })
 		if err != nil {
 			raise("SocketError", "connect: %s", err.Error())
 		}
@@ -109,9 +111,11 @@ func (vm *VM) registerUnixSockets(basic *RClass) {
 	srv.smethods["new"] = &Method{name: "new", owner: srv, native: newSrv}
 	srv.smethods["open"] = &Method{name: "open", owner: srv, native: newSrv}
 
-	srv.define("accept", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	srv.define("accept", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		s := asUnixServer(self)
-		conn, err := s.ln.Accept()
+		var conn net.Conn
+		var err error
+		ioBlock(vm, func() { conn, err = s.ln.Accept() })
 		if err != nil {
 			raise("IOError", "accept: %s", err.Error())
 		}

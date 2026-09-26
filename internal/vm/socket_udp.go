@@ -129,10 +129,13 @@ func (vm *VM) registerUDPSocket(ip *RClass) {
 
 	// #recvfrom(maxlen) blocks for one datagram and returns [message, sender],
 	// where sender is the MRI 4-tuple [family, port, host, ip].
-	udp.define("recvfrom", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	udp.define("recvfrom", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		s := asUDPSocket(self)
 		buf := make([]byte, udpRecvLen(args))
-		n, addr, err := s.conn.ReadFromUDP(buf)
+		var n int
+		var addr *net.UDPAddr
+		var err error
+		ioBlock(vm, func() { n, addr, err = s.conn.ReadFromUDP(buf) })
 		if err != nil {
 			raise("SocketError", "recvfrom: %s", err.Error())
 		}
@@ -143,10 +146,12 @@ func (vm *VM) registerUDPSocket(ip *RClass) {
 	})
 
 	// #recv(maxlen[, flags]) blocks for one datagram and returns just its payload.
-	udp.define("recv", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	udp.define("recv", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		s := asUDPSocket(self)
 		buf := make([]byte, udpRecvLen(args))
-		n, _, err := s.conn.ReadFromUDP(buf)
+		var n int
+		var err error
+		ioBlock(vm, func() { n, _, err = s.conn.ReadFromUDP(buf) })
 		if err != nil {
 			raise("SocketError", "recv: %s", err.Error())
 		}
