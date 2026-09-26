@@ -2477,7 +2477,7 @@ func (vm *VM) bootstrap() {
 				// A matching Regexp sets $~ (so $1.. and Regexp.last_match are live);
 				// a non-match clears it to nil, as MRI does.
 				if md := re.matcher().Match(s); md != nil && md.Begin(0) == 0 {
-					vm.lastMatch = &MatchData{md: md, subject: s, re: re}
+					vm.lastMatch = &MatchData{md: md, subject: s, re: re, enc: matchEnc(self)}
 					return object.True
 				}
 				vm.lastMatch = object.NilV
@@ -2569,7 +2569,7 @@ func (vm *VM) bootstrap() {
 			return object.NilV
 		}
 		if isRe {
-			return vm.strIndexRegexp(re, s, start)
+			return vm.strIndexRegexp(re, s, matchEnc(self), start)
 		}
 		byteStart := charToByte(s, start)
 		byteIdx := strings.Index(s[byteStart:], needle)
@@ -2596,7 +2596,7 @@ func (vm *VM) bootstrap() {
 			}
 		}
 		if isRe {
-			return vm.strRindexRegexp(re, s, limit)
+			return vm.strRindexRegexp(re, s, matchEnc(self), limit)
 		}
 		return strRindexString(s, needle, limit)
 	})
@@ -2760,7 +2760,7 @@ func (vm *VM) bootstrap() {
 		}
 		var res object.Value
 		if re, ok := args[0].(*Regexp); ok { // s[/re/] / s[/re/, group]
-			res = vm.stringRegexpIndex(strOf(self), re, args[1:])
+			res = vm.stringRegexpIndex(strOf(self), matchEnc(self), re, args[1:])
 		} else {
 			res = stringIndexEnc(strOf(self), vm.coerceStrIndexArgs(args), self.(*object.String).IsBinary())
 		}
@@ -2819,7 +2819,7 @@ func (vm *VM) bootstrap() {
 				vm.lastMatch = object.NilV
 				return object.NewArray(strEncOf(self, s), strEncOf(self, ""), strEncOf(self, ""))
 			}
-			vm.lastMatch = &MatchData{md: md, subject: s, re: re}
+			vm.lastMatch = &MatchData{md: md, subject: s, re: re, enc: enc}
 			b, e := md.Begin(0), md.End(0)
 			return object.NewArray(object.NewStringBytesEnc([]byte(s[:b]), enc),
 				object.NewStringBytesEnc([]byte(s[b:e]), enc), object.NewStringBytesEnc([]byte(s[e:]), enc))
@@ -2835,7 +2835,7 @@ func (vm *VM) bootstrap() {
 		s := strOf(self)
 		enc := self.(*object.String).Enc
 		if re, ok := regexpSep(args[0]); ok {
-			m := vm.lastRegexpMatch(re, s)
+			m := vm.lastRegexpMatch(re, s, matchEnc(self))
 			if m == nil {
 				vm.lastMatch = object.NilV
 				return object.NewArray(strEncOf(self, ""), strEncOf(self, ""), strEncOf(self, s))
@@ -8321,7 +8321,7 @@ func (vm *VM) stringAssignRegexp(s *object.String, re *Regexp, groupArgs []objec
 		vm.lastMatch = object.NilV
 		raise("IndexError", "regexp not matched")
 	}
-	m := &MatchData{md: md, subject: subject, re: re}
+	m := &MatchData{md: md, subject: subject, re: re, enc: s.Enc}
 	vm.lastMatch = m
 	gi := 0
 	if len(groupArgs) > 0 {
@@ -8452,7 +8452,7 @@ func (vm *VM) stringSliceBangRegexp(s *object.String, re *Regexp, rest []object.
 		vm.lastMatch = object.NilV
 		return object.NilV
 	}
-	m := &MatchData{md: md, subject: subject, re: re}
+	m := &MatchData{md: md, subject: subject, re: re, enc: s.Enc}
 	vm.lastMatch = m
 	gi := 0
 	if len(rest) > 0 {

@@ -103,7 +103,7 @@ func (vm *VM) strByteindex(self *object.String, args []object.Value) object.Valu
 			vm.lastMatch = object.NilV
 			return object.NilV
 		}
-		vm.lastMatch = &MatchData{md: md, subject: s, re: needle, byteOff: base}
+		vm.lastMatch = &MatchData{md: md, subject: s, re: needle, byteOff: base, enc: self.Enc}
 		return object.IntValue(int64(base + md.Begin(0)))
 	default:
 		ns := vm.strValueArg(args[0])
@@ -141,7 +141,7 @@ func (vm *VM) strByterindex(self *object.String, args []object.Value) object.Val
 	}
 	switch needle := args[0].(type) {
 	case *Regexp:
-		return vm.byterindexRegexp(s, needle, off)
+		return vm.byterindexRegexp(s, self.Enc, needle, off)
 	default:
 		ns := vm.strValueArg(args[0])
 		vm.combinedEncName(self, ns) // raises Encoding::CompatibilityError if incompatible
@@ -176,11 +176,11 @@ func byterindexString(s, needle string, off, n int) object.Value {
 // offset instead of 0 and \G could not see the real start offset. The character-
 // indexed String#rindex (strRindexRegexp in regexp.go) already uses this shape;
 // this is its byte-indexed twin.
-func (vm *VM) byterindexRegexp(s string, re *Regexp, off int) object.Value {
+func (vm *VM) byterindexRegexp(s, enc string, re *Regexp, off int) object.Value {
 	for p := off; p >= 0; p-- {
 		md := re.matcher().MatchAt(s, p)
 		if md != nil && md.Begin(0) == p {
-			vm.lastMatch = &MatchData{md: md, subject: s, re: re}
+			vm.lastMatch = &MatchData{md: md, subject: s, re: re, enc: enc}
 			return object.IntValue(int64(p))
 		}
 	}
