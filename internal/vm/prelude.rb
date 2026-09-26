@@ -2568,3 +2568,19 @@ module Warning
   end
   extend self
 end
+
+# Kernel#!~ is rb_obj_not_match (object.c): a REAL method, installed on Kernel
+# (`rb_define_method(rb_mKernel, "!~", rb_obj_not_match, 1)`), not something the
+# compiler synthesises. MRI has no specialised instruction for `!~` — idNMatch
+# is absent from compile.c's opt_* table — so every `a !~ b` is an ordinary send
+# that lands here unless the receiver defines its own, which is exactly what
+# makes a user-defined #!~ reachable (issue #663).
+#
+# It lives in the prelude rather than in Go because the body IS Ruby: send #=~
+# and negate the result, so a redefined #=~ (or a mock that expects one) is the
+# thing that runs.
+module Kernel
+  def !~(other)
+    !(self =~ other)
+  end
+end

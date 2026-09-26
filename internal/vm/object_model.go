@@ -1860,6 +1860,95 @@ func (vm *VM) findMethod(recv object.Value, name string) *Method {
 	return nil
 }
 
+// defaultNegation returns the BasicObject definition of "!" or "!=" — the ones
+// rbgo installs for rb_obj_not and rb_obj_not_equal (object.c v3_4_0:264, :280;
+// rb_define_method at :4265-4266). Memoised, because overriddenNegation asks on
+// every unary `!`.
+//
+// A user who REDEFINES BasicObject#! installs a different *Method, which no
+// longer matches the memo, so overriddenNegation reports it as an override and
+// it gets dispatched — which is what MRI does, since vm_opt_not then finds a
+// cfunc other than rb_obj_not.
+func (vm *VM) defaultNegation(name string) *Method {
+	if m, ok := vm.defaultNeg[name]; ok {
+		return m
+	}
+	m := lookupMethod(vm.cBasicObject, name)
+	if m == nil {
+		// Asked before the bootstrap installed it: do not memoise nil, or every
+		// later `!` would see an "override".
+		return nil
+	}
+	if vm.defaultNeg == nil {
+		vm.defaultNeg = map[string]*Method{}
+	}
+	vm.defaultNeg[name] = m
+	return m
+}
+
+// overriddenNegation resolves name ("!" or "!=") through recv's FULL dispatch
+// chain — its singleton class and extended modules first, then its class
+// ancestry — and returns the method only when it is NOT the BasicObject
+// default. nil means "nobody redefined it", so the caller may compute the
+// answer inline.
+//
+// This is vm_method_cfunc_is(iseq, cd, recv, rb_obj_not) (vm_insnhelper.c
+// v3_4_0:7019): MRI's opt_not and opt_neq are SPECIALISATIONS of an ordinary
+// send, and they fall back to that send whenever the receiver's method is not
+// the built-in cfunc. The negation is never simply inlined by the compiler.
+//
+// Resolving through the whole chain is the part rbgo's previous `!=` check
+// missed: it walked vm.classOf(a).super only, so a singleton `def o.!=` and a
+// module-supplied `!=` (o.extend M) were both invisible and the opcode inverted
+// #== instead.
+func (vm *VM) overriddenNegation(recv object.Value, name string) *Method {
+	m := vm.findMethod(recv, name)
+	if m == nil || m == vm.defaultNegation(name) {
+		return nil
+	}
+	return m
+}
+
+// notValue is `!recv`: MRI's opt_not, which dispatches a redefined #! and
+// otherwise negates truthiness in place (vm_insnhelper.c v3_4_0:7019-7027).
+// The interpreter uses notValueCached; this uncached form is what AOT-lowered
+// bodies call.
+func (vm *VM) notValue(recv object.Value) object.Value {
+	if m := vm.overriddenNegation(recv, "!"); m != nil {
+		return vm.invoke(m, recv, nil, nil)
+	}
+	return object.Bool(!recv.Truthy())
+}
+
+// notValueCached is notValue with the per-instruction inline cache MRI's
+// opt_not carries as its CALL_DATA, so the common case — nobody has redefined
+// #! for this receiver's class — costs a class-pointer compare rather than an
+// ancestry walk on every negation.
+//
+// ic.method here means "the OVERRIDE to dispatch", and nil means "negate in
+// place" — not lookupCached's "no method at all". The two readers never meet:
+// an OpNot instruction is never an OpSend site, so its cache slot belongs to
+// this one alone. That is the same argument ic.regexp rests on.
+func (vm *VM) notValueCached(ic *inlineCache, recv object.Value) object.Value {
+	if _, isClass := recv.(*RClass); isClass || vm.objSingleton(recv) != nil {
+		// A per-object method cannot be cached against a shared class.
+		return vm.notValue(recv)
+	}
+	c := vm.classOf(recv)
+	serial := methodSerial()
+	if ic.class != c || ic.serial != serial {
+		m := undefAsNil(lookupMethod(c, "!"))
+		if m == vm.defaultNegation("!") {
+			m = nil // still rb_obj_not, so opt_not stays inline
+		}
+		ic.class, ic.method, ic.serial = c, m, serial
+	}
+	if ic.method != nil {
+		return vm.invoke(ic.method, recv, nil, nil)
+	}
+	return object.Bool(!recv.Truthy())
+}
+
 func (vm *VM) send(recv object.Value, name string, args []object.Value, blk *Proc) object.Value {
 	// A class receiver consults its singleton-method chain (def self.foo, and
 	// inherited class methods) before the generic Class instance methods.

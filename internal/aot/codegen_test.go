@@ -48,7 +48,7 @@ func TestCompileSupported(t *testing.T) {
 		{"arith", "def m(a, b) = a * b + a / b - a % b\nm(1, 2)", "m", "OpMul"},
 		{"cmp", "def m(a, b) = a > b == (a <= b)\nm(1, 2)", "m", "OpGt"},
 		{"cmp2", "def m(a, b) = (a >= b) != (a < b)\nm(1, 2)", "m", "OpGe"},
-		{"not", "def m(a) = !a\nm(1)", "m", "!s0.Truthy()"},
+		{"not", "def m(a) = !a\nm(1)", "m", "vm.notValue(s0)"},
 		{"neg", "def m(a) = -a\nm(1)", "m", "negate("},
 		{"or", "def m(a) = a || 1\nm(1)", "m", "s1.Truthy() { goto"},
 		{"and", "def m(a) = a && 1\nm(1)", "m", "!s1.Truthy() { goto"},

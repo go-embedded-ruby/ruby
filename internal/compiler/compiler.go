@@ -779,11 +779,21 @@ func (c *Compiler) compileNode1(n ast.Node) {
 			return
 		}
 		if v.Op == "!~" {
-			// `a !~ b` is the truthy-negation of `a =~ b`.
+			// `a !~ b` is a SEND of :!~. MRI gives it no specialised instruction at
+			// all — idNMatch is absent from the opt_* table that turns a send into
+			// opt_not / opt_neq / opt_regexpmatch2 (compile.c v3_4_0:4260-4297) — so
+			// every `!~` is an ordinary method call, and Kernel#!~ supplies the
+			// default `!(self =~ other)` (rb_obj_not_match, object.c v3_4_0:1678,
+			// installed at :4427).
+			//
+			// Compiling the negation here instead made a user-defined #!~ DEAD CODE:
+			// the send that would reach it was never emitted, so `a !~ b` silently
+			// ran #=~ and inverted it. That is #663, and it also inverted 11
+			// assertions in the conformance shim, which spells `!~` on its
+			// ShouldProxy.
 			c.compileNode(v.Left)
 			c.compileNode(v.Right)
-			b.emit(bytecode.OpSend, b.addName("=~"), 1)
-			b.emit(bytecode.OpNot, 0, 0)
+			b.emit(bytecode.OpSend, b.addName("!~"), 1)
 			return
 		}
 		// `/…(?<name>…)…/ =~ str`: when the left side is a *literal* regexp with

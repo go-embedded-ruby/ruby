@@ -135,7 +135,10 @@ func (g *gen) emit(pc int) (string, bool) {
 	case bytecode.OpNeg:
 		return line("s%d = negate(s%d)", d-1, d-1), true
 	case bytecode.OpNot:
-		return line("s%d = object.Bool(!s%d.Truthy())", d-1, d-1), true
+		// vm.notValue, not an inline negation: MRI's opt_not dispatches a redefined
+		// #! (vm_insnhelper.c v3_4_0:7019), and a lowered body must answer the same
+		// as the interpreter it replaces.
+		return line("s%d = vm.notValue(s%d)", d-1, d-1), true
 	case bytecode.OpTruthy:
 		return line("s%d = object.Bool(s%d.Truthy())", d-1, d-1), true
 	case bytecode.OpJump:

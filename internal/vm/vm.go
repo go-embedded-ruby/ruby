@@ -464,11 +464,17 @@ type VM struct {
 	regexpTimeout                      object.Value            // Regexp.timeout default (Float seconds or nil)
 	globals                            map[string]object.Value // user-assigned $globals
 	cTrueClass, cFalseClass, cNilClass *RClass
-	cRegexp, cMatchData                *RClass
-	cException                         *RClass
-	backtraceLocationClass             *RClass        // Thread::Backtrace::Location (Exception#backtrace_locations)
-	curExc                             object.Value   // most recently rescued exception (for bare `raise`)
-	catchTags                          []object.Value // active Kernel#catch tags, innermost last (for Kernel#throw)
+	// defaultNeg memoises the BasicObject definitions of "!" and "!=" — the
+	// records rb_obj_not / rb_obj_not_equal correspond to. overriddenNegation
+	// compares against them to decide whether a negation may be computed inline
+	// or must be dispatched, which is what MRI's opt_not / opt_neq do with
+	// vm_method_cfunc_is. See defaultNegation.
+	defaultNeg             map[string]*Method
+	cRegexp, cMatchData    *RClass
+	cException             *RClass
+	backtraceLocationClass *RClass        // Thread::Backtrace::Location (Exception#backtrace_locations)
+	curExc                 object.Value   // most recently rescued exception (for bare `raise`)
+	catchTags              []object.Value // active Kernel#catch tags, innermost last (for Kernel#throw)
 
 	loaded        map[string]bool   // require/require_relative: features loaded once
 	featureHooks  map[string]func() // built-in feature -> body run once on its first require (e.g. shellwords)
@@ -1975,7 +1981,15 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					push(negate(negArg))
 				}
 			case bytecode.OpNot:
-				push(object.Bool(!pop().Truthy()))
+				// MRI's opt_not: a SPECIALISATION of `recv.!`, not an inlining of it.
+				// It negates truthiness only while the receiver's #! is still
+				// rb_obj_not, and otherwise falls back to the send
+				// (vm_insnhelper.c v3_4_0:7019). notValueCached is that check,
+				// carrying the per-instruction cache opt_not carries as CALL_DATA.
+				if caches == nil {
+					caches = iseqCaches(iseq)
+				}
+				push(vm.notValueCached(&caches[pc], pop()))
 			case bytecode.OpTruthy:
 				push(object.Bool(pop().Truthy()))
 			case bytecode.OpRaiseNoMatch:
