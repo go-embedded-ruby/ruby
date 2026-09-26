@@ -19,17 +19,18 @@ import (
 // clock, so mocking time from Ruby transparently mocks all three constructors.
 //
 // A program that never requires "timecop" is unaffected: the clock is created
-// unmocked (its Now seam is nowUnix, the whole-second determinism seam Time.now
-// already honoured), so Current() simply reports the real instant.
+// unmocked (its Now seam is nowWall, the determinism seam Time.now already
+// honoured), so Current() simply reports the real instant, nanoseconds included.
 
 // nowInstant is the single current-time source behind Time.now / Date.today /
-// DateTime.now: the VM's controllable clock. Unmocked it returns nowUnix's real
+// DateTime.now: the VM's controllable clock. Unmocked it returns nowWall's real
 // instant; under a Timecop freeze / travel / scale it returns the mocked instant.
 func (vm *VM) nowInstant() stdtime.Time { return vm.clock.Current() }
 
-// timeFromInstant wraps a Go instant in the Ruby Time value (whole-second
-// resolution, matching Time.now / Time.at), used for the values Timecop.freeze /
-// travel / return_to_baseline hand back and for the block-form yield argument.
+// timeFromInstant wraps a Go instant in the Ruby Time value, used for the values
+// Timecop.freeze / travel / return_to_baseline hand back and for the block-form
+// yield argument. The instant's sub-second part is carried through, matching
+// Time.now / Time.at.
 func timeFromInstant(t stdtime.Time) *Time { return &Time{t: t} }
 
 // timecopInstant resolves the optional time argument of Timecop.freeze / travel
@@ -43,7 +44,10 @@ func (vm *VM) timecopInstant(args []object.Value, i int) stdtime.Time {
 	}
 	switch v := args[i].(type) {
 	case *Time:
-		return stdtime.Unix(v.t.Unix(), 0).UTC()
+		// The whole instant, not stdtime.Unix(v.t.Unix(), 0): freezing at a Time
+		// that carries a sub-second must not silently move the clock back to the
+		// start of that second (#689).
+		return v.t.UTC()
 	case *Date:
 		return dateInstant(v)
 	case object.Integer:

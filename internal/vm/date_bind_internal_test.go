@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"math/big"
 	"testing"
+	stdtime "time"
 
 	date "github.com/go-ruby-date/date"
 
@@ -19,7 +20,7 @@ import (
 
 // evalDate runs src through the full pipeline and returns captured stdout — the
 // in-package counterpart of vm_test.eval, needed for the cases that also pin the
-// nowUnix clock seam (an unexported package symbol).
+// nowWall clock seam (an unexported package symbol).
 func evalDate(t *testing.T, src string) string {
 	t.Helper()
 	prog, err := parser.Parse(src)
@@ -37,20 +38,26 @@ func evalDate(t *testing.T, src string) string {
 	return buf.String()
 }
 
-// TestDateClockSeam pins the nowUnix seam (the same clock Time.now uses) and
+// TestDateClockSeam pins the nowWall seam (the same clock Time.now uses) and
 // checks that Date.today / DateTime.now read it deterministically through the
 // library's SetTodayInstant override — Unix 1782045296 is 2026-06-21 12:34:56
-// UTC. The seam is restored afterwards.
+// UTC. The pinned instant carries a nanosecond part, which Date.today drops
+// (a Date has no time of day) and DateTime.now keeps in #sec_fraction while
+// #to_s still renders whole seconds, exactly as MRI's %FT%T%:z does. The seam
+// is restored afterwards.
 func TestDateClockSeam(t *testing.T) {
-	saved := nowUnix
-	defer func() { nowUnix = saved }()
-	nowUnix = func() int64 { return 1782045296 }
+	saved := nowWall
+	defer func() { nowWall = saved }()
+	nowWall = func() stdtime.Time { return stdtime.Unix(1782045296, 250000000).UTC() }
 
 	if got := evalDate(t, `puts Date.today.to_s`); got != "2026-06-21\n" {
 		t.Errorf("Date.today = %q, want 2026-06-21", got)
 	}
 	if got := evalDate(t, `puts DateTime.now.to_s`); got != "2026-06-21T12:34:56+00:00\n" {
 		t.Errorf("DateTime.now = %q, want the pinned instant", got)
+	}
+	if got := evalDate(t, `puts DateTime.now.sec_fraction`); got != "1/4\n" {
+		t.Errorf("DateTime.now.sec_fraction = %q, want 1/4 (the pinned .25s)", got)
 	}
 }
 

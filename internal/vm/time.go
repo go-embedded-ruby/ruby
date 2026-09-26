@@ -15,10 +15,19 @@ import (
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
 
-// nowUnix is the seam for Time.now's only source of non-determinism — Go's wall
+// nowWall is the seam for Time.now's only source of non-determinism — Go's wall
 // clock — so tests can pin it. The VM's controllable clock (vm.clock, which
 // Timecop drives) reads through this, and Time.now reads vm.nowInstant().
-var nowUnix = func() int64 { return stdtime.Now().Unix() }
+//
+// It hands back a whole instant, nanoseconds included. The seam used to be
+// typed `func() int64` over time.Now().Unix(), which made every reader of the
+// clock whole-second by construction: Time.now, Time.new, Date.today and
+// DateTime.now all reported .0, so the universal Ruby idiom
+// `t = Time.now; work; Time.now - t` measured 0.0 no matter how long the work
+// took (#689). MRI's time_s_now reads clock_gettime(CLOCK_REALTIME) and keeps
+// tv_nsec, so the seam has to be able to carry it — a seconds-typed seam cannot,
+// whatever its callers do.
+var nowWall = func() stdtime.Time { return stdtime.Now() }
 
 // Time is the Ruby Time wrapper around Go's time.Time. Backing Time with the
 // stdlib instant gives nanosecond sub-second precision, fixed-offset zones
@@ -47,6 +56,13 @@ type Time struct {
 	// fields (#nsec, #usec, rendering) read only the whole-nanosecond part and are
 	// unaffected.
 	frac *big.Rat
+}
+
+// exactSeconds returns the Time's instant as an exact Rational number of seconds
+// since the epoch, sub-nanosecond frac included.
+func (t *Time) exactSeconds() *big.Rat {
+	r := new(big.Rat).SetInt64(t.t.Unix())
+	return r.Add(r, t.subsecRat())
 }
 
 // subsecRat returns the Time's exact sub-second as a Rational number of seconds in
@@ -1552,7 +1568,13 @@ func roundFn(add func(z, x, y *big.Int) *big.Int, half bool) NativeFn {
 func (vm *VM) timeArith(op bytecode.Op, a *Time, b object.Value) object.Value {
 	if bt, ok := b.(*Time); ok {
 		if op == bytecode.OpSub {
-			return object.Float(a.t.Sub(bt.t).Seconds())
+			// Exactly, then to Float — not a.t.Sub(bt.t), whose time.Duration is
+			// nanosecond-granular and drops the sub-nanosecond frac both operands
+			// may carry: (t + 0.000001) - t read 9.99e-07 where MRI reads 1.0e-06,
+			// because the 1000th nanosecond lived in frac on one side only.
+			d := new(big.Rat).Sub(a.exactSeconds(), bt.exactSeconds())
+			f, _ := d.Float64()
+			return object.Float(f)
 		}
 		// Adding two Times is meaningless — MRI rejects it outright.
 		raise("TypeError", "time + time?")
@@ -1614,8 +1636,7 @@ func valueToRat(v object.Value) *big.Rat {
 // instant so precision beyond the nanosecond is preserved, with the receiver's
 // location and Ruby timezone object carried onto the result.
 func (t *Time) shiftByRat(delta *big.Rat) *Time {
-	cur := new(big.Rat).SetInt64(t.t.Unix())
-	cur.Add(cur, t.subsecRat())
+	cur := t.exactSeconds()
 	cur.Add(cur, delta)
 	return newTimeExact(cur, t.t.Location(), t.zoneObj)
 }

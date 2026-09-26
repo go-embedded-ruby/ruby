@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+	stdtime "time"
 
 	"github.com/go-embedded-ruby/ruby/internal/compiler"
 	"github.com/go-ruby-parser/parser"
@@ -17,13 +18,13 @@ import (
 // seam test uses, so Timecop's unmocked (real) now is deterministic here too.
 const pinnedNow = 1782045296
 
-// withPinnedNow pins the nowUnix seam (the real-clock source the VM's Timecop
+// withPinnedNow pins the nowWall seam (the real-clock source the VM's Timecop
 // Clock reads through) for the duration of fn, restoring it afterwards, so
 // "real time" in these tests is the fixed pinnedNow instant.
 func withPinnedNow(fn func()) {
-	saved := nowUnix
-	defer func() { nowUnix = saved }()
-	nowUnix = func() int64 { return pinnedNow }
+	saved := nowWall
+	defer func() { nowWall = saved }()
+	nowWall = func() stdtime.Time { return stdtime.Unix(pinnedNow, 0).UTC() }
 	fn()
 }
 
