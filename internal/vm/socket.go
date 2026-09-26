@@ -57,6 +57,18 @@ func (s *tcpServer) ToS() string     { return "#<TCPServer>" }
 func (s *tcpServer) Inspect() string { return "#<TCPServer>" }
 func (s *tcpServer) Truthy() bool    { return true }
 
+// ioBlock runs a blocking socket call with the GVL released, so another Ruby
+// Thread can run while this one waits on the network. MRI releases it around
+// every blocking socket call the same way (rb_io_blocking_region /
+// rb_thread_io_blocking_call, io.c, over rb_thread_call_without_gvl in thread.c),
+// and it is not a throughput optimisation: an accept or a read that keeps the
+// lock DEADLOCKS a program whose peer is another Thread of the same VM, because
+// the peer needs the lock to send the very bytes this call is waiting for.
+//
+// Every caller is a native Ruby method, which always holds the GVL, so there is
+// no nil-vm case to guard: a guard for one would be a branch no test could reach.
+func ioBlock(vm *VM, fn func()) { vm.threadBlock(fn) }
+
 // registerSocket installs the socket transport (require "socket"): the
 // TCPSocket / TCPServer classes over Go net, the BasicSocket / IPSocket / Socket
 // ancestry, the Socket address-family / type constants, and SocketError. It also
@@ -106,7 +118,9 @@ func (vm *VM) registerTCPSocket(tcp *RClass) {
 		}
 		host := strArg(args[0])
 		port := portString(args[1])
-		conn, err := net.Dial("tcp", net.JoinHostPort(host, port))
+		var conn net.Conn
+		var err error
+		ioBlock(vm, func() { conn, err = net.Dial("tcp", net.JoinHostPort(host, port)) })
 		if err != nil {
 			raise("SocketError", "getaddrinfo: %s", err.Error())
 		}
@@ -153,9 +167,11 @@ func (vm *VM) registerTCPServer(srv *RClass) {
 	srv.smethods["new"] = &Method{name: "new", owner: srv, native: newFn}
 	srv.smethods["open"] = &Method{name: "open", owner: srv, native: newFn}
 
-	srv.define("accept", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	srv.define("accept", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		s := asTCPServer(self)
-		conn, err := s.ln.Accept()
+		var conn net.Conn
+		var err error
+		ioBlock(vm, func() { conn, err = s.ln.Accept() })
 		if err != nil {
 			raise("IOError", "accept: %s", err.Error())
 		}
@@ -237,14 +253,14 @@ func (s *tcpSocket) closeConn() error      { return s.conn.Close() }
 // write/print/puts/<</flush/close/closed?/eof?/setsockopt) on cls, resolving the
 // receiver to a streamIO via get.
 func installStreamIO(cls *RClass, get func(object.Value) streamIO) {
-	cls.define("read", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return streamRead(get(self), args)
+	cls.define("read", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return streamRead(vm, get(self), args)
 	})
-	cls.define("gets", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return streamGets(get(self), args)
+	cls.define("gets", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return streamGets(vm, get(self), args)
 	})
-	cls.define("readpartial", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return streamReadpartial(get(self), args)
+	cls.define("readpartial", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return streamReadpartial(vm, get(self), args)
 	})
 	cls.define("write", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return streamWrite(vm, get(self), args)
@@ -304,8 +320,8 @@ func installStreamIO(cls *RClass, get func(object.Value) streamIO) {
 	// whatever is available (an empty ASCII-8BIT String at end of stream), the
 	// BasicSocket#recv datagram-less semantics for a connected stream. flags is
 	// accepted and ignored.
-	cls.define("recv", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return streamRecv(get(self), args)
+	cls.define("recv", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return streamRecv(vm, get(self), args)
 	})
 	// send(mesg[, flags[, dest]]) writes mesg to the stream and returns the byte
 	// count; flags and dest are accepted and ignored for a connected stream.
@@ -322,7 +338,7 @@ func installStreamIO(cls *RClass, get func(object.Value) streamIO) {
 // streamRecv implements #recv(maxlen): read up to maxlen bytes, blocking only
 // when the buffer is empty, and returning an empty ASCII-8BIT String at end of
 // stream (BasicSocket#recv semantics) rather than raising.
-func streamRecv(s streamIO, args []object.Value) object.Value {
+func streamRecv(vm *VM, s streamIO, args []object.Value) object.Value {
 	if len(args) == 0 {
 		raise("ArgumentError", "wrong number of arguments (given 0, expected 1..2)")
 	}
@@ -334,16 +350,18 @@ func streamRecv(s streamIO, args []object.Value) object.Value {
 		return object.NewStringBytesEnc(nil, "ASCII-8BIT")
 	}
 	buf := make([]byte, n)
-	k, _ := s.reader().Read(buf)
+	var k int
+	ioBlock(vm, func() { k, _ = s.reader().Read(buf) })
 	return object.NewStringBytesEnc(buf[:k], "ASCII-8BIT")
 }
 
 // streamRead implements #read: no argument reads to EOF (returning a possibly
 // empty ASCII-8BIT String); an integer length reads up to that many bytes,
 // returning nil at EOF with nothing read, exactly like MRI's IO#read.
-func streamRead(s streamIO, args []object.Value) object.Value {
+func streamRead(vm *VM, s streamIO, args []object.Value) object.Value {
 	if len(args) == 0 || object.IsNil(args[0]) {
-		data, _ := io.ReadAll(s.reader())
+		var data []byte
+		ioBlock(vm, func() { data, _ = io.ReadAll(s.reader()) })
 		return object.NewStringBytesEnc(data, "ASCII-8BIT")
 	}
 	n := int(intArg(args[0]))
@@ -354,7 +372,9 @@ func streamRead(s streamIO, args []object.Value) object.Value {
 		return object.NewStringBytesEnc(nil, "ASCII-8BIT")
 	}
 	buf := make([]byte, n)
-	k, err := io.ReadFull(s.reader(), buf)
+	var k int
+	var err error
+	ioBlock(vm, func() { k, err = io.ReadFull(s.reader(), buf) })
 	if k == 0 && err == io.EOF {
 		return object.NilV
 	}
@@ -363,12 +383,14 @@ func streamRead(s streamIO, args []object.Value) object.Value {
 
 // streamGets implements #gets: read up to and including the separator (default
 // "\n"), returning nil at EOF with nothing buffered.
-func streamGets(s streamIO, args []object.Value) object.Value {
+func streamGets(vm *VM, s streamIO, args []object.Value) object.Value {
 	sep := "\n"
 	if len(args) > 0 && !object.IsNil(args[0]) {
 		sep = strArg(args[0])
 	}
-	data, err := readUntil(s.reader(), sep)
+	var data []byte
+	var err error
+	ioBlock(vm, func() { data, err = readUntil(s.reader(), sep) })
 	if len(data) == 0 && err == io.EOF {
 		return object.NilV
 	}
@@ -378,7 +400,7 @@ func streamGets(s streamIO, args []object.Value) object.Value {
 // streamReadpartial implements #readpartial(n): return whatever is immediately
 // available (at least one byte), blocking only when the buffer is empty, and
 // raising EOFError at end of stream, matching MRI.
-func streamReadpartial(s streamIO, args []object.Value) object.Value {
+func streamReadpartial(vm *VM, s streamIO, args []object.Value) object.Value {
 	if len(args) == 0 {
 		raise("ArgumentError", "wrong number of arguments (given 0, expected 1..2)")
 	}
@@ -390,7 +412,9 @@ func streamReadpartial(s streamIO, args []object.Value) object.Value {
 		return object.NewStringBytesEnc(nil, "ASCII-8BIT")
 	}
 	buf := make([]byte, n)
-	k, err := s.reader().Read(buf)
+	var k int
+	var err error
+	ioBlock(vm, func() { k, err = s.reader().Read(buf) })
 	if k == 0 && err == io.EOF {
 		raise("EOFError", "end of file reached")
 	}

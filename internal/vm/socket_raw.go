@@ -162,7 +162,9 @@ func (vm *VM) registerRawSocket(sock *RClass) {
 		if s.ln == nil {
 			raise("IOError", "accept: socket is not listening (call #bind first)")
 		}
-		conn, err := s.ln.Accept()
+		var conn net.Conn
+		var err error
+		ioBlock(vm, func() { conn, err = s.ln.Accept() })
 		if err != nil {
 			raise("IOError", "accept: %s", err.Error())
 		}
@@ -173,13 +175,15 @@ func (vm *VM) registerRawSocket(sock *RClass) {
 
 	// #connect(sockaddr) connects to the peer packed in sockaddr (net.Dial, for
 	// both stream and datagram sockets).
-	sock.define("connect", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	sock.define("connect", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		s := asRawSocket(self)
 		if len(args) < 1 {
 			raise("ArgumentError", "wrong number of arguments (given %d, expected 1)", len(args))
 		}
 		network, _ := rawSocketNetwork(s.domain, s.typ)
-		conn, err := net.Dial(network, s.resolveAddr(sockaddrBytes(args[0])))
+		var conn net.Conn
+		var err error
+		ioBlock(vm, func() { conn, err = net.Dial(network, s.resolveAddr(sockaddrBytes(args[0]))) })
 		if err != nil {
 			raise("SocketError", "connect: %s", err.Error())
 		}
@@ -222,15 +226,18 @@ func (vm *VM) registerRawSocket(sock *RClass) {
 	// #recv(maxlen [, flags]) reads up to maxlen bytes: from the connected peer
 	// for a connected socket, or one datagram for a bound datagram socket. flags
 	// is accepted and ignored.
-	sock.define("recv", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	sock.define("recv", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		s := asRawSocket(self)
 		buf := make([]byte, rawRecvLen(args))
 		switch {
 		case s.conn != nil:
-			k, _ := s.r.Read(buf)
+			var k int
+			ioBlock(vm, func() { k, _ = s.r.Read(buf) })
 			return object.NewStringBytesEnc(buf[:k], "ASCII-8BIT")
 		case s.pconn != nil:
-			k, _, err := s.pconn.ReadFrom(buf)
+			var k int
+			var err error
+			ioBlock(vm, func() { k, _, err = s.pconn.ReadFrom(buf) })
 			if err != nil {
 				raise("SocketError", "recv: %s", err.Error())
 			}
@@ -250,13 +257,17 @@ func (vm *VM) registerRawSocket(sock *RClass) {
 		aiCls := vm.consts["Addrinfo"].(*RClass)
 		switch {
 		case s.pconn != nil:
-			k, addr, err := s.pconn.ReadFrom(buf)
+			var k int
+			var addr net.Addr
+			var err error
+			ioBlock(vm, func() { k, addr, err = s.pconn.ReadFrom(buf) })
 			if err != nil {
 				raise("SocketError", "recvfrom: %s", err.Error())
 			}
 			return object.NewArray(object.NewStringBytesEnc(buf[:k], "ASCII-8BIT"), s.addrinfoOf(aiCls, addr))
 		case s.conn != nil:
-			k, _ := s.r.Read(buf)
+			var k int
+			ioBlock(vm, func() { k, _ = s.r.Read(buf) })
 			return object.NewArray(object.NewStringBytesEnc(buf[:k], "ASCII-8BIT"), s.addrinfoOf(aiCls, s.conn.RemoteAddr()))
 		default:
 			raise("SocketError", "recvfrom: socket is neither connected nor bound")

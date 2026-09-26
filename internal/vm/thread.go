@@ -104,6 +104,31 @@ type RThread struct {
 	// result. Written and read only under the GVL, like pendingRaise.
 	killed bool
 
+	// intr is the wakeup edge an asynchronous interrupt (Thread#kill, Thread#raise)
+	// sends so this thread leaves whatever blocking wait it is in. It is the
+	// counterpart of MRI's registered unblocking function: thread.c's
+	// threadptr_interrupt_locked sets the interrupt flag AND calls
+	// th->unblock.func, because the flag alone cannot reach a thread that is
+	// asleep. The flag here is killed / pendingRaise; this channel is only the
+	// edge. Buffered so an interrupter never blocks, and drained under the GVL
+	// before each wait so a leftover token can never wake the wrong wait.
+	intr chan struct{}
+
+	// shielded counts the nested uninterruptible regions this thread is inside.
+	// While it is non-zero an interrupt stays QUEUED rather than being delivered:
+	// MRI's do_mutex_lock with interruptible_p == 0 saves the pending interrupts,
+	// finishes acquiring the mutex, and restores them afterwards
+	// (mutex_lock_uninterruptible, thread_sync.c). Leaving the killed /
+	// pendingRaise flags set is that save, and not consuming them is that restore.
+	shielded int
+
+	// held is every Mutex this thread currently owns, in MRI's keeping_mutexes
+	// order (thread_sync.c thread_mutex_insert / thread_mutex_remove). A thread
+	// that dies hands all of them on, which is what makes a Mutex survive its
+	// owner's death (rb_threadptr_unlock_all_locking_mutexes, thread.c). Touched
+	// only under the GVL.
+	held []*RMutex
+
 	// reportOnException mirrors Thread#report_on_exception (default true in MRI):
 	// whether a thread terminating with an unhandled exception prints a warning.
 	// rbgo does not print the warning, but the accessor is honoured for programs
@@ -127,6 +152,13 @@ func (vm *VM) serviceSafepoint(t *RThread) { vm.serviceSafepointAt(t, false) }
 // called from is a blocking one (a genuine wait, not a bare Thread.pass), which
 // is what Thread.handle_interrupt's :on_blocking timing keys on.
 func (vm *VM) serviceSafepointAt(t *RThread, blocking bool) {
+	if t.shielded > 0 {
+		// Inside an uninterruptible region: the interrupt stays queued and fires at
+		// the first safepoint after the region ends. MRI does the same with
+		// interruptible_p == 0 (do_mutex_lock), which is what lets rb_mutex_sleep's
+		// ensure clause reacquire the mutex for a thread that has been killed.
+		return
+	}
 	if t.killed {
 		// Clear the flag before unwinding so ensure blocks that themselves reach a
 		// yield point are not re-killed mid-run; the killSignal carries the unwind.
@@ -198,6 +230,107 @@ func (t *RThread) wakeParked() {
 		close(t.wake)
 		t.wake = nil
 	}
+}
+
+// interruptCh returns this thread's interrupt channel, allocating it on first
+// use so a thread built by any construction path has one. Caller holds the GVL.
+func (t *RThread) interruptCh() chan struct{} {
+	if t.intr == nil {
+		t.intr = make(chan struct{}, 1)
+	}
+	return t.intr
+}
+
+// interrupt delivers the wakeup edge for an interrupt already queued on t
+// (killed or pendingRaise): every blocking wait selects on this channel, so the
+// wait returns and its loop reaches a safepoint. This is MRI's unblocking
+// function (thread.c threadptr_interrupt_locked), and like MRI it is separate
+// from the interrupt flag itself. A parked sleep is also woken, which is how a
+// Kernel#sleep or Thread.stop learns of the interrupt. Caller holds the GVL.
+func (t *RThread) interrupt() {
+	select {
+	case t.interruptCh() <- struct{}{}:
+	default: // a token is already queued; one edge is enough
+	}
+	t.wakeParked()
+}
+
+// drainInterrupt hands back the interrupt channel with any stale token cleared,
+// ready for one wait. Both this drain and every send happen under the GVL, so a
+// wait can never be woken by an edge meant for an earlier one. MRI tolerates
+// spurious wakeups (SLEEP_ALLOW_SPURIOUS) and its loops re-check their own
+// predicate; rbgo keeps the loops and removes the spurious edge, so a witness
+// for an interruption bug is deterministic rather than timing-dependent.
+func (t *RThread) drainInterrupt() <-chan struct{} {
+	ch := t.interruptCh()
+	select {
+	case <-ch:
+	default:
+	}
+	return ch
+}
+
+// threadInterrupted reports whether t has an asynchronous interrupt that a
+// blocking wait must act on now: MRI's RUBY_VM_INTERRUPTED together with the
+// pending-interrupt mask (rb_threadptr_pending_interrupt_check_mask, thread.c).
+// A raise the current Thread.handle_interrupt frame defers is NOT one — the wait
+// must go back to sleep, which is what do_mutex_lock's loop does when its
+// interrupt check does not raise. Caller holds the GVL.
+func (vm *VM) threadInterrupted(t *RThread) bool {
+	if t.shielded > 0 {
+		return false
+	}
+	if t.killed {
+		return true
+	}
+	if t.pendingRaise == nil {
+		return false
+	}
+	// blocking=true: a wait is a blocking yield point, so :on_blocking counts.
+	return vm.interruptTiming(t, t.pendingRaise) != "never"
+}
+
+// interruptibleWait releases the GVL and waits until ch fires or this thread is
+// interrupted, reporting whether ch fired. It is the Go counterpart of MRI's
+// native_sleep with an unblocking function registered (thread.c sleep_forever,
+// thread_join_sleep; thread_sync.c do_mutex_lock and queue_sleep all reach the
+// same primitive): the wait ends on an interrupt and the CALLER's loop then
+// reaches a safepoint, which is MRI's RUBY_VM_CHECK_INTS_BLOCKING.
+//
+// Go's own blocking primitives cannot do this. A `sync.Mutex` acquisition and a
+// bare channel receive are not interruptible and expose no unblocking hook, so a
+// Ruby-level Mutex cannot BE a sync.Mutex if Thread#kill must interrupt it; it
+// has to be a wait queue whose waits go through here, which is also how MRI
+// builds it (a waitq plus the general thread sleep).
+func (vm *VM) interruptibleWait(ch <-chan struct{}) (fired bool) {
+	intr := vm.currentThread.drainInterrupt()
+	vm.threadBlock(func() {
+		select {
+		case <-ch:
+			fired = true
+		case <-intr:
+		}
+	})
+	return fired
+}
+
+// interruptibleWaitFor is interruptibleWait bounded by d, reporting whether ch
+// fired and whether the bound elapsed. MRI's bounded waits pass a limit to
+// native_sleep the same way (thread_join_sleep, queue_sleep).
+func (vm *VM) interruptibleWaitFor(ch <-chan struct{}, d time.Duration) (fired, timedOut bool) {
+	intr := vm.currentThread.drainInterrupt()
+	vm.threadBlock(func() {
+		tm := time.NewTimer(d)
+		defer tm.Stop()
+		select {
+		case <-ch:
+			fired = true
+		case <-tm.C:
+			timedOut = true
+		case <-intr:
+		}
+	})
+	return fired, timedOut
 }
 
 // initFibers gives the thread its root fiber and points the current/resume-chain
@@ -339,6 +472,32 @@ func (vm *VM) eagerStart(t *RThread) {
 	cur.restoreCtx(vm)
 }
 
+// abortMainThread raises a dead thread's unhandled exception in the main thread,
+// which is what Thread#abort_on_exception= and Thread.abort_on_exception= promise:
+// thread_start_func_2 (thread.c) ends with
+//
+//	if (RB_TYPE_P(errinfo, T_OBJECT)) rb_threadptr_raise(ractor_main_th, 1, &errinfo);
+//
+// and rb_threadptr_raise enqueues the exception and then interrupts, which is why
+// the main thread's `sleep` ends instead of running to completion. Until now the
+// flag was written by its setter and read by its getter and by nothing else, so it
+// was a stored value equal to its own default and no program could observe it.
+//
+// The guard mirrors MRI's: only a real exception object propagates. A Go-level
+// failure wrapped as a RuntimeError has no Ruby object, and MRI has no such case,
+// so it stays what it already is -- re-raised in whoever joins the thread.
+func (vm *VM) abortMainThread(t *RThread) {
+	main := vm.mainThread
+	// MRI queues pending interrupts where rbgo holds one slot, so the FIRST abort to
+	// reach the main thread is the one it raises. A main thread that has already
+	// finished has nothing left to interrupt, and main == t cannot happen because
+	// only a spawned thread's goroutine reaches here.
+	if main != t && !main.isDone() && main.pendingRaise == nil {
+		main.pendingRaise = t.err.Obj
+		main.interrupt()
+	}
+}
+
 // threadCaptureErr turns a panic recovered in a thread's goroutine into the
 // RubyError to re-raise on join: a Ruby exception is preserved as-is; any other
 // panic (a Go-level failure) is wrapped as a RuntimeError rather than crashing
@@ -395,6 +554,14 @@ func (vm *VM) registerThreadClass() {
 	// thread starts its #report_on_exception / #abort_on_exception with, and the
 	// deadlock-detector switch. They live here (one set per VM) because they are
 	// read only through these accessors and by spawn.
+	// reportDefault is Thread.report_on_exception, which a new thread INHERITS
+	// (thread.c thread_create_core copies th->vm->thread_report_on_exception).
+	// abortDefault is Thread.abort_on_exception, which it does NOT: nothing in
+	// thread_create_core touches th->abort_on_exception, and termination tests the
+	// two independently ("th->vm->thread_abort_on_exception || th->abort_on_exception",
+	// thread.c). Seeding the per-thread flag from the class-level one made
+	// `Thread.abort_on_exception = true; Thread.new {}.abort_on_exception` answer
+	// true where MRI 4.0.5 answers false.
 	reportDefault, abortDefault, ignoreDeadlock := true, false, false
 
 	spawn := func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
@@ -404,7 +571,7 @@ func (vm *VM) registerThreadClass() {
 		t := &RThread{
 			blk: blk, args: append([]object.Value{}, args...),
 			done: make(chan struct{}), status: "run", handback: make(chan struct{}),
-			reportOnException: reportDefault, abort: abortDefault,
+			reportOnException: reportDefault,
 		}
 		t.initFibers()
 		// A new thread's root fiber starts from a copy of the CREATING fiber's
@@ -433,7 +600,19 @@ func (vm *VM) registerThreadClass() {
 				t.result = vm.callBlock(t.blk, t.args)
 			}()
 			t.status = "dead"
-			close(t.done)
+			close(t.done) // MRI: rb_threadptr_join_list_wakeup, before the two below
+			// A dying thread gives up the mutexes it still holds, then -- if its
+			// unhandled exception is one abort_on_exception asked to be fatal -- raises
+			// that exception in the MAIN thread. Both are what MRI's
+			// thread_start_func_2 (thread.c) does at exactly this point.
+			vm.releaseHeldMutexes(t)
+			// MRI's guard is RB_TYPE_P(errinfo, T_OBJECT): only a real exception object
+			// propagates. A Go-level failure captured as a RuntimeError has no Ruby
+			// object and no MRI counterpart, so it stays what it already is -- re-raised
+			// in whoever joins the thread.
+			if t.err != nil && t.err.Obj != nil && (t.abort || abortDefault) {
+				vm.abortMainThread(t)
+			}
 			t.firstPark() // release the spawner if the thread never blocked
 			vm.gvl.Unlock()
 		}()
@@ -766,12 +945,11 @@ func (vm *VM) registerThreadClass() {
 			panic(vm.excError(vm.captureBacktrace(exc)))
 		}
 		t.pendingRaise = exc
-		// Wake a target parked in a sleep so it leaves its blocking wait and reaches
-		// the next safepoint; a target blocked elsewhere (join/mutex) services the
-		// raise when that wait returns.
-		if t.wake != nil {
-			t.wakeParked()
-		}
+		// Deliver the unblocking edge so the target leaves whatever blocking wait it
+		// is in — a parked sleep, but equally a Mutex#lock, Queue#pop or Thread#join
+		// — and reaches its next safepoint. MRI does exactly this in
+		// rb_threadptr_raise: enqueue the exception, then rb_threadptr_interrupt.
+		t.interrupt()
 		return t
 	})
 	cThread.define("report_on_exception", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -797,9 +975,13 @@ func (vm *VM) registerThreadClass() {
 			panic(killSignal{})
 		}
 		t.killed = true
-		if t.wake != nil {
-			t.wakeParked() // a sleeping target leaves its wait and reaches its next yield point
-		}
+		// rb_thread_kill (thread.c) enqueues the kill and then calls
+		// rb_threadptr_interrupt, whose unblocking function pulls the target out of
+		// ANY blocking wait. Waking only a parked sleep left a target blocked in
+		// Mutex#lock, Queue#pop or Thread#join waiting for an event that its killer
+		// had just made impossible, so the kill never landed and a join on it never
+		// returned.
+		t.interrupt()
 		return t
 	}
 	cThread.define("kill", kill)
@@ -913,8 +1095,14 @@ func (vm *VM) registerThreadClass() {
 // threadJoin blocks the current thread until t finishes, then re-raises t's
 // unhandled exception (if any) in the joining thread, as MRI does.
 func (vm *VM) threadJoin(t *RThread) {
-	if !t.isDone() {
-		vm.threadBlock(func() { <-t.done })
+	self := vm.currentThread
+	// MRI's thread_join_sleep (thread.c) is a loop: sleep, then
+	// RUBY_VM_CHECK_INTS_BLOCKING, then re-test whether the target finished. The
+	// check is what lets a Thread#kill or Thread#raise aimed at the JOINER end the
+	// join; without it a join waits on a target that may never finish.
+	for !t.isDone() {
+		vm.interruptibleWait(t.done)
+		vm.serviceSafepointAt(self, true)
 	}
 	vm.serviceMaskedSafepoint()
 	if t.err != nil {
@@ -938,17 +1126,22 @@ func (vm *VM) serviceMaskedSafepoint() {
 // exactly as an untimed join does; a timeout leaves the thread running and the
 // caller returns nil.
 func (vm *VM) threadJoinLimit(t *RThread, secs float64) bool {
-	if !t.isDone() {
-		vm.threadBlock(func() {
-			select {
-			case <-t.done:
-			case <-time.After(time.Duration(secs * float64(time.Second))):
-			}
-		})
+	self := vm.currentThread
+	// An ABSOLUTE deadline, so a wait cut short by an interrupt that turns out to
+	// be masked does not restart the clock: MRI's thread_join_sleep computes `end`
+	// once and calls hrtime_update_expire on every turn of the loop.
+	end := time.Now().Add(time.Duration(secs * float64(time.Second)))
+	for !t.isDone() {
+		d := time.Until(end)
+		if d <= 0 {
+			return false
+		}
+		vm.interruptibleWaitFor(t.done, d)
+		vm.serviceSafepointAt(self, true)
 	}
-	if !t.isDone() {
-		return false
-	}
+	// Past the loop the thread HAS finished: the only other way out is the deadline
+	// return above. The old post-loop re-test belonged to the single-shot wait this
+	// replaced and became unreachable with the loop.
 	vm.serviceMaskedSafepoint()
 	if t.err != nil {
 		panic(*t.err)
@@ -1052,6 +1245,17 @@ func (vm *VM) registerMutex() {
 		t := vm.currentThread
 		ch := t.parkWake()
 		start := time.Now()
+		// rb_mutex_sleep wraps the sleep in rb_ensure whose ensure clause is
+		// mutex_lock_uninterruptible, so the mutex comes back however the sleep ends
+		// -- including through a raise delivered inside it.
+		relocked := false
+		relock := func() {
+			if !relocked {
+				relocked = true
+				vm.mutexLockUninterruptible(m)
+			}
+		}
+		defer relock()
 		if hasDur {
 			vm.threadBlock(func() {
 				select {
@@ -1063,7 +1267,7 @@ func (vm *VM) registerMutex() {
 			vm.threadBlock(func() { <-ch }) // park until Thread#wakeup/#run
 		}
 		t.unpark()
-		vm.mutexLock(m)        // MRI re-acquires the mutex before the raise propagates
+		relock()               // MRI re-acquires the mutex before the raise propagates
 		vm.serviceSafepoint(t) // a Thread#raise that woke the park fires here (mutex held)
 		return object.IntValue(int64(time.Since(start).Seconds() + 0.5))
 	})
@@ -1181,20 +1385,128 @@ func (vm *VM) mutexLock(m *RMutex) {
 	t := vm.currentThread
 	if m.owner == nil {
 		m.owner = t
+		t.held = append(t.held, m)
 		return
 	}
 	if m.owner == t {
 		raise("ThreadError", "deadlock; recursive locking")
 	}
-	w := mutexWaiter{t: t, ch: make(chan struct{})}
-	m.waitq = append(m.waitq, w)
-	vm.threadBlock(func() { <-w.ch })
+	// One queue entry for the whole wait: a continue re-waits on the SAME entry,
+	// because a deferred interrupt does not consume it.
+	w := m.enqueue(t)
+	// MRI wraps the wait in the equivalent of an ensure clause so a waiter leaving
+	// through an interrupt unlinks itself from the queue (do_mutex_lock's
+	// ccan_list_del, and the comment there that an rb_ensure would be needed).
+	// Without it an unlock hands the mutex to a thread that is gone and the mutex
+	// stays locked for the rest of the program.
+	locked := false
+	defer func() {
+		if !locked {
+			m.leave(t)
+		}
+	}()
+	// do_mutex_lock (thread_sync.c) loops `while (mutex->fiber != fiber)`: sleep,
+	// check interrupts, and only then decide whether the lock is held. rbgo needs
+	// the same loop for the same reason — the wait can end without the lock.
+	for m.owner != t {
+		vm.interruptibleWait(w.ch)
+		if !vm.threadInterrupted(t) {
+			continue
+		}
+		// "release mutex before checking for interrupts...as interrupt checking
+		// code might call rb_raise()" (do_mutex_lock). Whether the unlock handed us
+		// the mutex a moment ago or we are still queued, leave cleanly first.
+		m.leave(t)
+		// This does not return: threadInterrupted is true exactly when the safepoint
+		// raises -- a kill unwinds, and a raise the current Thread.handle_interrupt
+		// frame defers reads as NOT interrupted and takes the continue above instead.
+		// So there is no re-registration after this point; the raise unwinds through
+		// the deferred leave, which is the only cleanup any exit needs.
+		vm.serviceSafepointAt(t, true)
+	}
+	locked = true
 	// On wake, mutexUnlock has already transferred ownership to t.
+	t.held = append(t.held, m) // MRI: mutex_locked -> thread_mutex_insert
 }
 
-func (vm *VM) mutexUnlock(m *RMutex) {
-	if m.owner != vm.currentThread {
-		raise("ThreadError", "Attempt to unlock a mutex which is not locked")
+// mutexLockUninterruptible acquires m and defers any interrupt that arrives while
+// it waits until the mutex is held. It is MRI's mutex_lock_uninterruptible --
+// do_mutex_lock(self, 0) -- and it has one caller, for one reason: rb_mutex_sleep
+// uses it as its ensure clause, so a thread killed after being signalled still
+// REACQUIRES the lock before it unwinds. core/conditionvariable/wait_spec.rb names
+// that outright ("reacquires the lock even if the thread is killed after being
+// signaled"), and with the interruptible form the kill landed on the relock, the
+// thread unwound without the mutex, and the Ruby ensure clause's unlock raised
+// "Attempt to unlock a mutex which is not locked".
+func (vm *VM) mutexLockUninterruptible(m *RMutex) {
+	t := vm.currentThread
+	t.shielded++
+	defer func() { t.shielded-- }()
+	vm.mutexLock(m)
+}
+
+// enqueue registers t as a waiter on m and returns its wait slot. Caller holds
+// the GVL.
+func (m *RMutex) enqueue(t *RThread) mutexWaiter {
+	w := mutexWaiter{t: t, ch: make(chan struct{})}
+	m.waitq = append(m.waitq, w)
+	return w
+}
+
+// leave takes t off m: if t had already been handed ownership it is passed on to
+// the next waiter, otherwise t's queue entries are dropped. It is idempotent, so
+// the deferred cleanup and the in-loop interrupt path can both call it.
+func (m *RMutex) leave(t *RThread) {
+	if m.owner == t {
+		m.handOn()
+		return
+	}
+	kept := m.waitq[:0:0]
+	for _, w := range m.waitq {
+		if w.t != t {
+			kept = append(kept, w)
+		}
+	}
+	m.waitq = kept
+}
+
+// forget drops m from the thread's owned-mutex list (MRI's thread_mutex_remove,
+// thread_sync.c). Caller holds the GVL.
+func (t *RThread) forget(m *RMutex) {
+	for i, h := range t.held {
+		if h == m {
+			t.held = append(t.held[:i:i], t.held[i+1:]...)
+			return
+		}
+	}
+}
+
+// releaseHeldMutexes gives up every Mutex this thread still owns as it dies:
+// MRI's rb_threadptr_unlock_all_locking_mutexes (thread.c), which walks the
+// keeping_mutexes list and unlocks each one, waking its waiters. Without it a
+// Mutex whose owner was killed, or died on an unhandled exception, stayed locked
+// for the rest of the program, so the next Mutex#lock waited on a thread that no
+// longer existed -- a hang that survived making the wait interruptible, because
+// nothing was ever going to interrupt it.
+func (vm *VM) releaseHeldMutexes(t *RThread) {
+	held := t.held
+	t.held = nil
+	for _, m := range held {
+		// Every entry is one this thread owns -- held is appended to only on a
+		// successful acquire and pruned by forget whenever ownership leaves -- so the
+		// test states the invariant rather than handling a case that cannot arise.
+		if m.owner == t {
+			m.handOn() // MRI: rb_mutex_unlock_th, which also wakes the next waiter
+		}
+	}
+}
+
+// handOn passes ownership to the head of the wait queue, or clears it when
+// nobody is waiting. It is the tail of mutexUnlock without the ownership check,
+// shared with the interrupt path that must give the mutex back.
+func (m *RMutex) handOn() {
+	if m.owner != nil {
+		m.owner.forget(m) // MRI: thread_mutex_remove, inside rb_mutex_unlock_th
 	}
 	if len(m.waitq) > 0 {
 		w := m.waitq[0]
@@ -1204,6 +1516,13 @@ func (vm *VM) mutexUnlock(m *RMutex) {
 		return
 	}
 	m.owner = nil
+}
+
+func (vm *VM) mutexUnlock(m *RMutex) {
+	if m.owner != vm.currentThread {
+		raise("ThreadError", "Attempt to unlock a mutex which is not locked")
+	}
+	m.handOn()
 }
 
 // threadWaitFor is rb_thread_wait_for (thread.c): park the current thread for
