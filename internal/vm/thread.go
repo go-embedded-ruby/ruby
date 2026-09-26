@@ -114,6 +114,14 @@ type RThread struct {
 	// before each wait so a leftover token can never wake the wrong wait.
 	intr chan struct{}
 
+	// shielded counts the nested uninterruptible regions this thread is inside.
+	// While it is non-zero an interrupt stays QUEUED rather than being delivered:
+	// MRI's do_mutex_lock with interruptible_p == 0 saves the pending interrupts,
+	// finishes acquiring the mutex, and restores them afterwards
+	// (mutex_lock_uninterruptible, thread_sync.c). Leaving the killed /
+	// pendingRaise flags set is that save, and not consuming them is that restore.
+	shielded int
+
 	// held is every Mutex this thread currently owns, in MRI's keeping_mutexes
 	// order (thread_sync.c thread_mutex_insert / thread_mutex_remove). A thread
 	// that dies hands all of them on, which is what makes a Mutex survive its
@@ -144,6 +152,13 @@ func (vm *VM) serviceSafepoint(t *RThread) { vm.serviceSafepointAt(t, false) }
 // called from is a blocking one (a genuine wait, not a bare Thread.pass), which
 // is what Thread.handle_interrupt's :on_blocking timing keys on.
 func (vm *VM) serviceSafepointAt(t *RThread, blocking bool) {
+	if t.shielded > 0 {
+		// Inside an uninterruptible region: the interrupt stays queued and fires at
+		// the first safepoint after the region ends. MRI does the same with
+		// interruptible_p == 0 (do_mutex_lock), which is what lets rb_mutex_sleep's
+		// ensure clause reacquire the mutex for a thread that has been killed.
+		return
+	}
 	if t.killed {
 		// Clear the flag before unwinding so ensure blocks that themselves reach a
 		// yield point are not re-killed mid-run; the killSignal carries the unwind.
@@ -262,6 +277,9 @@ func (t *RThread) drainInterrupt() <-chan struct{} {
 // must go back to sleep, which is what do_mutex_lock's loop does when its
 // interrupt check does not raise. Caller holds the GVL.
 func (vm *VM) threadInterrupted(t *RThread) bool {
+	if t.shielded > 0 {
+		return false
+	}
 	if t.killed {
 		return true
 	}
@@ -1226,6 +1244,17 @@ func (vm *VM) registerMutex() {
 		t := vm.currentThread
 		ch := t.parkWake()
 		start := time.Now()
+		// rb_mutex_sleep wraps the sleep in rb_ensure whose ensure clause is
+		// mutex_lock_uninterruptible, so the mutex comes back however the sleep ends
+		// -- including through a raise delivered inside it.
+		relocked := false
+		relock := func() {
+			if !relocked {
+				relocked = true
+				vm.mutexLockUninterruptible(m)
+			}
+		}
+		defer relock()
 		if hasDur {
 			vm.threadBlock(func() {
 				select {
@@ -1237,7 +1266,7 @@ func (vm *VM) registerMutex() {
 			vm.threadBlock(func() { <-ch }) // park until Thread#wakeup/#run
 		}
 		t.unpark()
-		vm.mutexLock(m)        // MRI re-acquires the mutex before the raise propagates
+		relock()               // MRI re-acquires the mutex before the raise propagates
 		vm.serviceSafepoint(t) // a Thread#raise that woke the park fires here (mutex held)
 		return object.IntValue(int64(time.Since(start).Seconds() + 0.5))
 	})
@@ -1393,6 +1422,22 @@ func (vm *VM) mutexLock(m *RMutex) {
 	locked = true
 	// On wake, mutexUnlock has already transferred ownership to t.
 	t.held = append(t.held, m) // MRI: mutex_locked -> thread_mutex_insert
+}
+
+// mutexLockUninterruptible acquires m and defers any interrupt that arrives while
+// it waits until the mutex is held. It is MRI's mutex_lock_uninterruptible --
+// do_mutex_lock(self, 0) -- and it has one caller, for one reason: rb_mutex_sleep
+// uses it as its ensure clause, so a thread killed after being signalled still
+// REACQUIRES the lock before it unwinds. core/conditionvariable/wait_spec.rb names
+// that outright ("reacquires the lock even if the thread is killed after being
+// signaled"), and with the interruptible form the kill landed on the relock, the
+// thread unwound without the mutex, and the Ruby ensure clause's unlock raised
+// "Attempt to unlock a mutex which is not locked".
+func (vm *VM) mutexLockUninterruptible(m *RMutex) {
+	t := vm.currentThread
+	t.shielded++
+	defer func() { t.shielded-- }()
+	vm.mutexLock(m)
 }
 
 // enqueue registers t as a waiter on m and returns its wait slot. Caller holds

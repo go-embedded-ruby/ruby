@@ -198,6 +198,40 @@ p t.join(5).equal?(t)`, "nil\ntrue\n"},
 		{"no_abort_does_not_interrupt_main", `Thread.new { raise "boom" }
 sleep 0.2
 puts "main survived"`, "main survived\n"},
+		// The relock at the end of ConditionVariable#wait / Mutex#sleep is
+		// UNINTERRUPTIBLE, so a thread killed while blocked acquiring the mutex still
+		// gets it before it unwinds -- MRI's rb_mutex_sleep uses
+		// mutex_lock_uninterruptible as its ensure clause (thread_sync.c), and
+		// core/conditionvariable/wait_spec.rb asserts exactly this.
+		//
+		// This one PASSES on unmodified main: it is a regression guard, not a witness
+		// for a new defect. Making the relock interruptible along with every other
+		// wait broke it, and the Ruby ensure clause's unlock then raised "Attempt to
+		// unlock a mutex which is not locked" -- caught by the corpus, one example.
+		{"relock_after_condvar_wait_is_uninterruptible", `m = Mutex.new
+cv = ConditionVariable.new
+in_sync = false
+owned = nil
+th = Thread.new do
+  m.synchronize do
+    in_sync = true
+    begin
+      cv.wait(m)
+    ensure
+      owned = m.owned?
+    end
+  end
+end
+Thread.pass until in_sync
+Thread.pass until th.stop?
+m.synchronize do
+  cv.signal
+  sleep 0.05
+  th.kill
+end
+th.join
+p owned
+p m.locked?`, "true\nfalse\n"},
 		// A raise masked by Thread.handle_interrupt(:never) does not end the wait it
 		// arrives during — the wait goes back to sleep, as do_mutex_lock's loop does.
 		{"masked_raise_does_not_end_the_wait", `q = Queue.new
