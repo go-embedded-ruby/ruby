@@ -226,7 +226,10 @@ func TestSignalExceptionConstruction(t *testing.T) {
 		// #signm is an alias of #message (rb_alias in Init_signal).
 		{"signm aliases message", `e = SignalException.new(15, "boom"); p e.signm == e.message`, "true\n"},
 		// interrupt_init fixes the signal at SIGINT and leaves the message empty.
-		{"Interrupt", `e = Interrupt.new; puts "#{e.message.inspect} #{e.signo}"`, "\"\" 2\n"},
+		// Interrupt.new leaves the message unset, so Exception#message falls back
+		// to the class name. The Interrupt rb_interrupt() raises carries an explicit
+		// empty message instead — see TestInterruptMessageFallsBackToTheClassName.
+		{"Interrupt", `e = Interrupt.new; puts "#{e.message.inspect} #{e.signo}"`, "\"Interrupt\" 2\n"},
 		{"Interrupt with a message", `e = Interrupt.new("ouch"); puts "#{e.message} #{e.signo}"`, "ouch 2\n"},
 		// Errors. A name nothing matches, and a number outside NSIG.
 		{"unknown name", `begin; SignalException.new("NOPE"); rescue ArgumentError => e; puts e.message; end`,
@@ -380,5 +383,142 @@ Process.kill(:HUP, Process.pid)`, "called 1\n"},
 				t.Errorf("output = %q, want %q", out, tc.want)
 			}
 		})
+	}
+}
+
+// TestTrapRefusesReservedAndUntrappableSignals covers signal.c sig_trap's two
+// refusals, which happen BEFORE it looks at the handler: reserved_signal_p names
+// the signals MRI needs its own handlers for, and SIGKILL/SIGSTOP are the two
+// sigaction(2) rejects outright, which trap() reports as Errno::EINVAL through
+// rb_sys_fail_str rather than as ArgumentError.
+func TestTrapRefusesReservedAndUntrappableSignals(t *testing.T) {
+	for _, tc := range []struct{ name, src, want string }{
+		{"SEGV", `begin; Signal.trap(:SEGV) {}; rescue ArgumentError => e; puts e.message; end`,
+			"can't trap reserved signal: SIGSEGV\n"},
+		{"BUS", `begin; Signal.trap(:BUS) {}; rescue ArgumentError => e; puts e.message; end`,
+			"can't trap reserved signal: SIGBUS\n"},
+		{"ILL", `begin; Signal.trap(:ILL) {}; rescue ArgumentError => e; puts e.message; end`,
+			"can't trap reserved signal: SIGILL\n"},
+		{"FPE", `begin; Signal.trap(:FPE) {}; rescue ArgumentError => e; puts e.message; end`,
+			"can't trap reserved signal: SIGFPE\n"},
+		{"VTALRM", `begin; Signal.trap(:VTALRM) {}; rescue ArgumentError => e; puts e.message; end`,
+			"can't trap reserved signal: SIGVTALRM\n"},
+		// Errno::EINVAL, not ArgumentError: the refusal comes from the kernel.
+		{"KILL", `begin; Signal.trap(:KILL) {}; rescue StandardError => e; puts e.class; end`,
+			"Errno::EINVAL\n"},
+		{"STOP", `begin; Signal.trap(:STOP) {}; rescue StandardError => e; puts e.class; end`,
+			"Errno::EINVAL\n"},
+		// The refusal comes first: a reserved signal is refused even with a handler
+		// that trap_handler would have accepted.
+		{"reserved beats the handler", `begin; Signal.trap(:SEGV, "IGNORE"); rescue ArgumentError => e; puts "refused"; end`,
+			"refused\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, out, err := runSrcErr(t, tc.src)
+			if err != nil {
+				t.Fatalf("run: %v (output %q)", err, out)
+			}
+			if out != tc.want {
+				t.Errorf("output = %q, want %q", out, tc.want)
+			}
+		})
+	}
+}
+
+// TestTrapSignalArgumentCoercion is signal.c trap_signm plus signm2signo's
+// argument coercion. The two negatives matter most and are easy to get backwards:
+// trap_signm tests FIXNUM_P, so #to_int is NEVER called (a Float is a bad type,
+// not a truncated number), while signm2signo DOES call #to_str. A single
+// "coerce to a number somehow" implementation passes the positive rows and fails
+// both negatives, which is what origin/main did.
+func TestTrapSignalArgumentCoercion(t *testing.T) {
+	for _, tc := range []struct{ name, src, want string }{
+		{"a String name", `p Signal.trap("HUP", "IGNORE")`, "\"DEFAULT\"\n"},
+		{"a prefixed name", `p Signal.trap("SIGHUP", "IGNORE")`, "\"DEFAULT\"\n"},
+		{"a Symbol name", `p Signal.trap(:HUP, "IGNORE")`, "\"DEFAULT\"\n"},
+		{"an Integer", `p Signal.trap(Signal.list["HUP"], "IGNORE")`, "\"DEFAULT\"\n"},
+		// EXIT / 0 is legal for trap (signm2signo's exit = TRUE) ...
+		{"EXIT is a trappable name", `p Signal.trap(:EXIT, "IGNORE")`, "\"SYSTEM_DEFAULT\"\n"},
+		{"signal 0 is trappable", `p Signal.trap(0, "IGNORE")`, "\"SYSTEM_DEFAULT\"\n"},
+		// ... but NOT for SignalException, whose esignal_init passes exit = FALSE.
+		{"EXIT is not a SignalException name",
+			`begin; SignalException.new("EXIT"); rescue ArgumentError => e; puts e.message; end`,
+			"unsupported signal 'SIGEXIT'\n"},
+		// #to_str is consulted.
+		{"#to_str", `o = Object.new
+def o.to_str; "HUP"; end
+p Signal.trap(o, "IGNORE")`, "\"DEFAULT\"\n"},
+		// #to_int is NOT.
+		{"#to_int is never called", `o = Object.new
+def o.to_int; raise "to_int must not be called"; end
+begin; Signal.trap(o, "IGNORE"); rescue ArgumentError => e; puts e.message; end`,
+			"bad signal type Object\n"},
+		// rb_obj_classname, so nil is NilClass rather than "nil".
+		{"nil names its class", `begin; Signal.trap(nil, "IGNORE"); rescue ArgumentError => e; puts e.message; end`,
+			"bad signal type NilClass\n"},
+		{"a Float is a bad type, not a truncation",
+			`begin; Signal.trap(100.0, "IGNORE"); rescue ArgumentError => e; puts e.message; end`,
+			"bad signal type Float\n"},
+		{"true names its class", `begin; Signal.trap(true, "IGNORE"); rescue ArgumentError => e; puts e.message; end`,
+			"bad signal type TrueClass\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, out, err := runSrcErr(t, tc.src)
+			if err != nil {
+				t.Fatalf("run: %v (output %q)", err, out)
+			}
+			if out != tc.want {
+				t.Errorf("output = %q, want %q", out, tc.want)
+			}
+		})
+	}
+}
+
+// TestTrapNilReportsNilNotIgnore pins trap()'s oldcmd switch, which has an
+// explicit `case Qnil: break` that leaves a nil handler reporting back as nil —
+// where "IGNORE" and "" both rewrite it to the string "IGNORE". Both DISPOSITIONS
+// are the same (the signal is discarded), so a test that only checked the
+// behaviour would pass with them collapsed.
+func TestTrapNilReportsNilNotIgnore(t *testing.T) {
+	src := `Signal.trap(:HUP, nil)
+p Signal.trap(:HUP, "DEFAULT")
+Signal.trap(:HUP, "IGNORE")
+p Signal.trap(:HUP, "DEFAULT")
+Signal.trap(:HUP, "")
+p Signal.trap(:HUP, "DEFAULT")
+Signal.trap(:TERM, nil)
+Process.kill(:TERM, Process.pid)
+puts "a nil handler still discards the signal"`
+	want := "nil\n\"IGNORE\"\n\"IGNORE\"\na nil handler still discards the signal\n"
+	_, out, err := runSrcErr(t, src)
+	if err != nil {
+		t.Fatalf("run: %v (output %q)", err, out)
+	}
+	if out != want {
+		t.Errorf("output = %q, want %q", out, want)
+	}
+}
+
+// TestInterruptMessageFallsBackToTheClassName pins the difference measured on MRI
+// 4.0.5 between the two ways an Interrupt comes into being: Interrupt.new leaves
+// the message unset, so Exception#message answers the class name ("Interrupt"),
+// while the one rb_interrupt() raises carries an explicit EMPTY message. Setting
+// @message unconditionally in #initialize satisfies the raised case and breaks
+// core/exception/interrupt_spec.rb, which is how it was found.
+func TestInterruptMessageFallsBackToTheClassName(t *testing.T) {
+	src := `p Interrupt.new.message, Interrupt.new.signm, Interrupt.new.signo
+p Interrupt.new("x").message
+begin
+  Process.kill(:INT, Process.pid)
+rescue Interrupt => e
+  p e.message, e.signo
+end`
+	want := "\"Interrupt\"\n\"Interrupt\"\n2\n\"x\"\n\"\"\n2\n"
+	_, out, err := runSrcErr(t, src)
+	if err != nil {
+		t.Fatalf("run: %v (output %q)", err, out)
+	}
+	if out != want {
+		t.Errorf("output = %q, want %q", out, want)
 	}
 }

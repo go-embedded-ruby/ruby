@@ -8,7 +8,16 @@ import "testing"
 
 // TestSignalModule covers the Signal module and Kernel#trap: name normalisation
 // across Symbol/String("SIG"-prefixed and bare)/Integer designators, the
-// previous-handler return value of #trap, #list and #signame, all pinned to MRI.
+// previous-handler return value of #trap, #list and #signame.
+//
+// Five rows here PINNED rbgo's own divergence while the comment said they were
+// pinned to MRI: Signal.signame("x") answered nil where MRI raises TypeError,
+// Signal.signame with no argument answered nil where MRI raises ArgumentError,
+// Signal.trap(987654) invented a slot where MRI range-checks against NSIG,
+// Signal.trap(:QUIT) with no block recorded DEFAULT where MRI calls
+// rb_block_proc() and fails, and an object with only #to_s was accepted where
+// signm2signo coerces through #to_str. Each replacement below was MEASURED
+// against MRI 4.0.5 (ruby 4.0.5 (2026-05-20) +PRISM [arm64-darwin25]) and says so.
 func TestSignalModule(t *testing.T) {
 	cases := []struct{ src, want string }{
 		// First trap returns "DEFAULT"; a second returns the prior Proc.
@@ -25,20 +34,35 @@ func TestSignalModule(t *testing.T) {
 		{`p Signal.list.class`, "Hash\n"},
 		{`p Signal.signame(2)`, "\"INT\"\n"},
 		{`p Signal.signame(987654)`, "nil\n"},
-		{`p Signal.signame("x")`, "nil\n"},
-		{`p Signal.signame`, "nil\n"},
-		// An unknown Integer designator falls back to its decimal string.
-		{`Signal.trap(987654) { }; p Signal.trap(987654, "DEFAULT").class`, "Proc\n"},
+		// MEASURED on MRI 4.0.5: sig_signame takes NUM2INT, so a String is a
+		// TypeError, not nil. This row read "nil" and claimed to be pinned to MRI.
+		{`begin; Signal.signame("x"); rescue TypeError => e; puts e.message; end`,
+			"no implicit conversion of String into Integer\n"},
+		// MEASURED on MRI 4.0.5: ArgumentError, not nil.
+		{`begin; Signal.signame; rescue ArgumentError => e; puts e.message; end`,
+			"wrong number of arguments (given 0, expected 1)\n"},
+		// MEASURED on MRI 4.0.5: trap_signm range-checks against NSIG, so an
+		// out-of-range number is an ArgumentError rather than a fresh slot named
+		// after its decimal string.
+		{`begin; Signal.trap(987654) { }; rescue ArgumentError => e; puts e.message; end`,
+			"invalid signal number (987654)\n"},
 		// Kernel#trap reaches the same machinery without the Signal receiver.
 		{`p trap("USR1") { }`, "\"DEFAULT\"\n"},
 		// Defaulting with two args and no block records the literal handler.
 		{`Signal.trap(:HUP, "DEFAULT"); p Signal.trap(:HUP, "IGNORE")`, "\"DEFAULT\"\n"},
-		// A no-block, single-arg trap records DEFAULT.
-		{`Signal.trap(:QUIT); p Signal.trap(:QUIT, "DEFAULT")`, "\"DEFAULT\"\n"},
-		// A designator that is neither Symbol/String/Integer is accepted via its
-		// string form, returning the prior handler ("DEFAULT") for that fresh slot.
+		// MEASURED on MRI 4.0.5: sig_trap calls rb_block_proc() for a one-argument
+		// trap, which without a block is an ArgumentError — it does not record
+		// DEFAULT.
+		{`begin; Signal.trap(:QUIT); rescue ArgumentError => e; puts e.message; end`,
+			"tried to create Proc object without a block\n"},
+		// MEASURED on MRI 4.0.5: signm2signo coerces through #to_str (via
+		// rb_check_string_type), NOT #to_s, so an object with only #to_s is a
+		// "bad signal type" naming its class. This row accepted it as a fresh slot.
 		{`class SigName; def to_s; "CUSTOMSIG"; end; end
-p Signal.trap(SigName.new) { }`, "\"DEFAULT\"\n"},
+begin; Signal.trap(SigName.new) { }; rescue ArgumentError => e; puts e.message; end`,
+			"bad signal type SigName\n"},
+		{`class SigStr; def to_str; "HUP"; end; end
+p Signal.trap(SigStr.new, "IGNORE")`, "\"DEFAULT\"\n"},
 	}
 	for _, c := range cases {
 		if got := eval(t, c.src); got != c.want {

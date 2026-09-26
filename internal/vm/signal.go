@@ -5,6 +5,8 @@
 package vm
 
 import (
+	"syscall"
+
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
 
@@ -20,7 +22,8 @@ type trapKind int
 
 const (
 	trapDefault       trapKind = iota // no handler installed: default_handler(sig)
-	trapIgnore                        // "IGNORE" / "SIG_IGN" / "" / nil
+	trapIgnore                        // "IGNORE" / "SIG_IGN" / ""
+	trapNil                           // trap(sig, nil): ignores, and reports back nil
 	trapExit                          // "EXIT"
 	trapSystemDefault                 // "SYSTEM_DEFAULT": SIG_DFL, the OS acts
 	trapCommand                       // a Proc (or a command String) to run
@@ -61,6 +64,27 @@ func signalFatal(sig int) bool {
 	return false
 }
 
+// signalReserved is signal.c reserved_signal_p: the signals MRI refuses to let a
+// program trap at all, because it needs its own handlers for them. SEGV, BUS,
+// ILL and FPE are synchronous and cannot be delivered to the main thread, and
+// VTALRM is the interrupt the thread scheduler itself runs on.
+func signalReserved(sig int) bool {
+	switch sig {
+	case sigNumber("SEGV"), sigNumber("BUS"), sigNumber("ILL"),
+		sigNumber("FPE"), sigNumber("VTALRM"):
+		return true
+	}
+	return false
+}
+
+// signalUntrappable are the two signals sigaction(2) refuses outright, so MRI's
+// trap() -> ruby_signal() gets SIG_ERR and calls rb_sys_fail_str(name), raising
+// Errno::EINVAL rather than ArgumentError. POSIX fixes both numbers, so this
+// needs no host table.
+func signalUntrappable(sig int) bool {
+	return sig == sigNumber("KILL") || sig == sigNumber("STOP")
+}
+
 // registerSignal installs the Signal module, Kernel#trap, and the SignalException
 // / Interrupt methods that carry a signal's identity (#signo, #signm).
 //
@@ -85,6 +109,18 @@ func (vm *VM) registerSignal() {
 			return raise("ArgumentError", "wrong number of arguments (given 0, expected 1..2)")
 		}
 		sig := vm.trapSignm(args[0])
+		// sig_trap refuses a reserved signal before it looks at the handler.
+		if signalReserved(sig) {
+			if name, ok := signalNameOf(sig); ok {
+				return raise("ArgumentError", "can't trap reserved signal: SIG%s", name)
+			}
+			return raise("ArgumentError", "can't trap reserved signal: %d", sig)
+		}
+		// SIGKILL and SIGSTOP cannot be caught or ignored: sigaction(2) fails
+		// EINVAL, which trap() turns into Errno::EINVAL through rb_sys_fail_str.
+		if signalUntrappable(sig) {
+			sysFail(syscall.EINVAL, signoToSignm(sig))
+		}
 		var next trapCmd
 		switch {
 		case blk != nil:
@@ -178,8 +214,13 @@ func (vm *VM) registerSignalException() {
 			if len(args) != 1 {
 				return raise("ArgumentError", "wrong number of arguments (given %d, expected 1)", len(args))
 			}
-			name := args[0].ToS()
-			num, found := signalNumberOf(name)
+			// esignal_init calls signm2signo with exit = FALSE, so "EXIT" is not a
+			// signal name here even though Signal.trap(:EXIT) is legal.
+			name, named := vm.signalNameArg(args[0])
+			if !named {
+				return raise("ArgumentError", "bad signal type %s", vm.objClassName(args[0]))
+			}
+			num, found := signalNumberOfEx(name, false)
 			if !found {
 				return raise("ArgumentError", "unsupported signal '%s'", withSIG(name))
 			}
@@ -207,11 +248,15 @@ func (vm *VM) registerSignalException() {
 			if !isObj {
 				return object.NilV
 			}
-			msg := ""
+			// Interrupt.new with no argument leaves the message UNSET, so
+			// Exception#message falls back to the class name and #signm reads
+			// "Interrupt" (core/exception/interrupt_spec.rb). The Interrupt that
+			// rb_interrupt() raises is built with an explicit empty message instead,
+			// which is why a rescued one reports "" — measured on MRI 4.0.5, where
+			// Interrupt.new.message is "Interrupt" and the raised one's is "".
 			if len(args) > 0 {
-				msg = args[0].ToS()
+				o.ivars["@message"] = object.NewString(args[0].ToS())
 			}
-			o.ivars["@message"] = object.NewString(msg)
 			o.ivars["@signo"] = object.IntValue(int64(sigNumber("INT")))
 			return object.NilV
 		})
@@ -220,20 +265,59 @@ func (vm *VM) registerSignalException() {
 
 // trapSignm coerces Signal.trap's first argument to a signal number, applying
 // signal.c trap_signm: a Fixnum is range-checked against NSIG, anything else
-// goes through signm2signo with exit = TRUE, so "EXIT"/0 is accepted.
+// goes through signm2signo with exit = TRUE, so "EXIT" and 0 are accepted.
+//
+// Note what it does NOT do: trap_signm tests FIXNUM_P, so there is no #to_int
+// conversion anywhere on this path — core/signal/trap_spec.rb asserts that
+// explicitly with a mock that fails if #to_int is called, and a Float is a
+// "bad signal type" rather than a truncated number.
 func (vm *VM) trapSignm(v object.Value) int {
-	if n, isInt := vm.toIntMaybe(v); isInt {
-		if n < 0 || n > int64(sigMaxNumber) {
-			raise("ArgumentError", "invalid signal number (%d)", n)
+	if n, isInt := v.(object.Integer); isInt {
+		if n < 0 || int64(n) > int64(sigMaxNumber) {
+			raise("ArgumentError", "invalid signal number (%d)", int64(n))
 		}
 		return int(n)
 	}
-	name := v.ToS()
-	if num, ok := signalNumberOf(name); ok {
+	return vm.signm2signo(v, true)
+}
+
+// signm2signo is signal.c signm2signo with negative = FALSE: a Symbol becomes its
+// name, a String is used as is, anything else must answer #to_str (through
+// rb_check_string_type, so an object that does not is a "bad signal type" naming
+// its CLASS, not a conversion failure), the "SIG" prefix is optional, and a name
+// no entry carries is "unsupported signal".
+//
+// allowExit is the C parameter `exit`: FOREACH_SIGNAL skips the first table entry
+// when it is false, and that entry is EXIT — so Signal.trap accepts :EXIT while
+// SignalException.new and Process.kill do not.
+func (vm *VM) signm2signo(v object.Value, allowExit bool) int {
+	name, ok := vm.signalNameArg(v)
+	if !ok {
+		raise("ArgumentError", "bad signal type %s", vm.objClassName(v))
+	}
+	if num, found := signalNumberOfEx(name, allowExit); found {
 		return num
 	}
 	raise("ArgumentError", "unsupported signal '%s'", withSIG(name))
 	return 0
+}
+
+// signalNameArg is signm2signo's argument coercion alone: a Symbol, a String, or
+// an object whose #to_str returns one. It reports false for anything else so the
+// caller can raise the "bad signal type" ArgumentError naming the class.
+func (vm *VM) signalNameArg(v object.Value) (string, bool) {
+	switch t := v.(type) {
+	case object.Symbol:
+		return string(t), true
+	case *object.String:
+		return string(t.Bytes()), true
+	}
+	if vm.respondsToDynamic(v, "to_str") {
+		if s, isStr := vm.send(v, "to_str", nil, nil).(*object.String); isStr {
+			return string(s.Bytes()), true
+		}
+	}
+	return "", false
 }
 
 // trapHandler maps Signal.trap's second argument to a disposition, following
@@ -243,7 +327,10 @@ func (vm *VM) trapSignm(v object.Value) int {
 // and anything else is a command to run.
 func (vm *VM) trapHandler(v object.Value) trapCmd {
 	if v == object.NilV {
-		return trapCmd{kind: trapIgnore, cmd: object.NilV}
+		// trap_handler leaves *cmd as Qnil for a nil handler, and trap()'s oldcmd
+		// switch has an explicit `case Qnil: break` that does NOT rewrite it — so a
+		// signal whose handler was set to nil reports back nil, not "IGNORE".
+		return trapCmd{kind: trapNil, cmd: object.NilV}
 	}
 	if p, isProc := v.(*Proc); isProc {
 		return trapCmd{kind: trapCommand, cmd: p}
@@ -283,6 +370,8 @@ func (vm *VM) trapPrevious(sig int) object.Value {
 		return object.NewString("SYSTEM_DEFAULT")
 	case trapIgnore:
 		return object.NewString("IGNORE")
+	case trapNil:
+		return object.NilV
 	case trapSystemDefault:
 		return object.NewString("SYSTEM_DEFAULT")
 	case trapExit:
@@ -337,7 +426,7 @@ func (vm *VM) selfSignal(sig int) (handled bool) {
 		cmd = trapCmd{kind: trapDefault}
 	}
 	switch cmd.kind {
-	case trapIgnore:
+	case trapIgnore, trapNil:
 		// signal_ignored() == 1: MRI neither sends nor runs anything.
 		return true
 	case trapSystemDefault:
@@ -458,10 +547,21 @@ func sigNumber(name string) int {
 	return n
 }
 
-// signalNumberOf is signal.c signm2signo: it accepts "TERM", "SIGTERM" or
-// :TERM and reports whether the name is one Ruby knows.
+// signalNumberOf is signalNumberOfEx allowing EXIT, for callers that only need
+// the lookup.
 func signalNumberOf(name string) (int, bool) {
-	n, ok := signalNumbers[stripSIG(name)]
+	return signalNumberOfEx(name, true)
+}
+
+// signalNumberOfEx looks a name up in siglist, accepting "TERM", "SIGTERM" or
+// :TERM. allowExit is signm2signo's FOREACH_SIGNAL(sigs, !exit): with it false
+// the EXIT entry is skipped, so "EXIT" is unsupported.
+func signalNumberOfEx(name string, allowExit bool) (int, bool) {
+	bare := stripSIG(name)
+	if !allowExit && bare == "EXIT" {
+		return 0, false
+	}
+	n, ok := signalNumbers[bare]
 	return n, ok
 }
 
@@ -536,4 +636,16 @@ func (vm *VM) toIntMaybe(v object.Value) (int64, bool) {
 		}
 	}
 	return 0, false
+}
+
+// objClassName is MRI's rb_obj_classname: the name of the object's CLASS, which
+// for nil is "NilClass" and not "nil". classNameOf answers the type name a format
+// string wants, which differs for exactly the values signm2signo's error message
+// is most likely to be handed (nil, true, false) — core/signal/trap_spec.rb reads
+// the difference.
+func (vm *VM) objClassName(v object.Value) string {
+	if c := vm.classOf(v); c != nil {
+		return c.name
+	}
+	return classNameOf(v)
 }
