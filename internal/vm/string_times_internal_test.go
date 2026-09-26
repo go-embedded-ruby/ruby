@@ -26,24 +26,24 @@ func TestStringTimes(t *testing.T) {
 		{`p("" * (2**63 - 1) == "")`, "true"},
 		{`p("" * 0)`, `""`},
 		// Negative count raises ArgumentError (Integer, Float, and a boxed -2**63).
-		{`p(("cool" * -3) rescue $!.class)`, "ArgumentError"},
-		{`p(("cool" * -3.14) rescue $!.class)`, "ArgumentError"},
-		{`p(("cool" * (-(2**63))) rescue $!.class)`, "ArgumentError"},
+		{`p((("cool" * -3) rescue $!.class))`, "ArgumentError"},
+		{`p((("cool" * -3.14) rescue $!.class))`, "ArgumentError"},
+		{`p((("cool" * (-(2**63))) rescue $!.class))`, "ArgumentError"},
 		// The minimum-long literal reaches the operator boxed as a Bignum that still
 		// fits a machine long: it converts, then the negative check raises.
-		{`p(("cool" * -0x8000_0000_0000_0000) rescue $!.class)`, "ArgumentError"},
+		{`p((("cool" * -0x8000_0000_0000_0000) rescue $!.class))`, "ArgumentError"},
 		// A genuinely out-of-range Bignum raises RangeError.
-		{`p(("cool" * 999999999999999999999) rescue $!.class)`, "RangeError"},
-		{`p(("" * 999999999999999999999) rescue $!.class)`, "RangeError"},
+		{`p((("cool" * 999999999999999999999) rescue $!.class))`, "RangeError"},
+		{`p((("" * 999999999999999999999) rescue $!.class))`, "RangeError"},
 		// A result too large for a machine long raises ArgumentError, not a panic.
-		{`p(("abc" * (2**63 - 1)) rescue $!.class)`, "ArgumentError"},
+		{`p((("abc" * (2**63 - 1)) rescue $!.class))`, "ArgumentError"},
 		// A non-finite Float count is out of integer range (FloatDomainError, a
 		// RangeError); assert the family so the exact class need not be pinned.
-		{`p(("a" * (0.0 / 0.0))  rescue $!.is_a?(RangeError))`, "true"},
-		{`p(("a" * (1.0 / 0.0))  rescue $!.is_a?(RangeError))`, "true"},
-		{`p(("a" * (-1.0 / 0.0)) rescue $!.is_a?(RangeError))`, "true"},
+		{`p((("a" * (0.0 / 0.0))  rescue $!.is_a?(RangeError)))`, "true"},
+		{`p((("a" * (1.0 / 0.0))  rescue $!.is_a?(RangeError)))`, "true"},
+		{`p((("a" * (-1.0 / 0.0)) rescue $!.is_a?(RangeError)))`, "true"},
 		// An object with no integer coercion raises TypeError (the default path).
-		{`p(("a" * :sym) rescue $!.class)`, "TypeError"},
+		{`p((("a" * :sym) rescue $!.class))`, "TypeError"},
 		// The result keeps the receiver's encoding.
 		{`p(("\xE3\x81\x82".dup.force_encoding(Encoding::UTF_8) * 2).encoding)`, "#<Encoding:UTF-8>"},
 		// A String subclass repeat returns a base String instance.
