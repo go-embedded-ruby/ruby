@@ -1139,9 +1139,9 @@ func (vm *VM) threadJoinLimit(t *RThread, secs float64) bool {
 		vm.interruptibleWaitFor(t.done, d)
 		vm.serviceSafepointAt(self, true)
 	}
-	if !t.isDone() {
-		return false
-	}
+	// Past the loop the thread HAS finished: the only other way out is the deadline
+	// return above. The old post-loop re-test belonged to the single-shot wait this
+	// replaced and became unreachable with the loop.
 	vm.serviceMaskedSafepoint()
 	if t.err != nil {
 		panic(*t.err)
