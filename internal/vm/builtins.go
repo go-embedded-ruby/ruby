@@ -2764,18 +2764,15 @@ func (vm *VM) bootstrap() {
 		// -"a string" is the same object however it was built. rbgo only froze a
 		// copy, so core/string/uminus_spec's "returns the same object for equal
 		// unfrozen strings" and "… on the same String literal" both failed.
-		s := self.(*object.String)
-		if len(ivarTable(s)) != 0 {
-			// BARE_STRING_P is false for a string carrying instance variables, and
-			// such a string is never deduplicated.
-			if s.Frozen {
-				return s
-			}
-			d := s.Dup()
-			d.Frozen = true
-			return d
-		}
-		return internFString(s)
+		//
+		// str_uminus's BARE_STRING_P guard (a string carrying instance variables
+		// is never deduplicated) is NOT reproduced: object_model.go's setIvar
+		// drops an instance variable set on a bare String, so ivarTable is always
+		// empty here and the guard would be dead code. That is also why
+		// core/string/uminus_spec's "does not deduplicate a frozen string when it
+		// has instance variables" fails — it was passing only because nothing
+		// deduplicated at all.
+		return internFString(self.(*object.String))
 	})
 	vm.cString.define("+@", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		s := self.(*object.String)

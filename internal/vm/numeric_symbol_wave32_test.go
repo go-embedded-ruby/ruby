@@ -68,6 +68,21 @@ func TestNumericGenericMethods(t *testing.T) {
 		{"remainder_negative_positive", `p NegSub.new.remainder(3)`, "-4.0\n"},
 		// ... and its infinite-divisor escape hatch, which answers the receiver.
 		{"remainder_infinite_divisor", `p NegSub.new.remainder(Float::INFINITY).class`, "NegSub\n"},
+		// The `rb_equal(z, INT2FIX(0))` short-circuit: a zero modulo is the answer,
+		// and neither operand is asked #< or #>.
+		{"remainder_zero_modulo", `
+class ZeroRem < Numeric
+  def %(o) = 0
+end
+p ZeroRem.new.remainder(3)`, "0\n"},
+		// num_modulo / num_divmod go through #div, and so through #/ and #floor.
+		{"modulo", `
+class Mod < Numeric
+  def /(o) = 7.5
+  def -(o) = :minus
+  def *(o) = :times
+end
+p [Mod.new.modulo(2), Mod.new % 2, Mod.new.divmod(2)]`, "[:minus, :minus, [7, :minus]]\n"},
 		// A non-Numeric operand goes through do_coerce first.
 		{"remainder_coerces", `
 class Coercer
@@ -93,7 +108,15 @@ p PosSub.new.remainder(Coercer.new)`, "1.0\n"},
 // receiver has no #< / #>, and rb_Float's / rb_convert_type's TypeError.
 func TestNumericGenericErrors(t *testing.T) {
 	cases := []struct{ name, src, class, msg string }{
+		// Numeric includes Comparable, so a bare subclass DOES answer #< — and
+		// Comparable#< raises the very same message once #<=> gives nil. The
+		// rb_check_funcall arm is only reached when #< is undefined outright.
 		{"abs_without_less_than", `Bare.new.abs`, "ArgumentError", "comparison of Bare with 0 failed"},
+		{"abs_with_undefined_less_than", `
+class NoCmp < Numeric
+  undef_method :<
+end
+NoCmp.new.abs`, "ArgumentError", "comparison of NoCmp with 0 failed"},
 		{"positive_without_greater_than", `Bare.new.positive?`, "ArgumentError", "comparison of Bare with 0 failed"},
 		{"div_by_zero", `Sub.new.div(0)`, "ZeroDivisionError", "divided by 0"},
 		{"div_by_float_zero", `Sub.new.div(0.0)`, "ZeroDivisionError", "divided by 0"},
@@ -314,6 +337,21 @@ class InfObj
   end
 end
 p(inf <=> InfObj.new)`, "0\n"},
+		{"infinite_reports_zero", `
+class InfZeroNum
+  def infinite? = 0
+end
+p(inf <=> InfZeroNum.new)`, "1\n"},
+		{"infinite_reports_less_than_zero", `
+class InfLt
+  def infinite?
+    o = Object.new
+    def o.>(x) = false
+    def o.<(x) = true
+    o
+  end
+end
+p(inf <=> InfLt.new)`, "1\n"},
 		{"infinite_reports_zeroish", `
 class InfZero
   def infinite?
