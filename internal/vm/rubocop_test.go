@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+//go:build !rbgo_closed
+
 package vm_test
 
 import (
