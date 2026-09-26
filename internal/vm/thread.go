@@ -488,17 +488,14 @@ func (vm *VM) eagerStart(t *RThread) {
 // so it stays what it already is -- re-raised in whoever joins the thread.
 func (vm *VM) abortMainThread(t *RThread) {
 	main := vm.mainThread
-	exc := t.err.Obj
-	if main == nil || main == t || exc == nil || main.isDone() {
-		return
+	// MRI queues pending interrupts where rbgo holds one slot, so the FIRST abort to
+	// reach the main thread is the one it raises. A main thread that has already
+	// finished has nothing left to interrupt, and main == t cannot happen because
+	// only a spawned thread's goroutine reaches here.
+	if main != t && !main.isDone() && main.pendingRaise == nil {
+		main.pendingRaise = t.err.Obj
+		main.interrupt()
 	}
-	if main.pendingRaise != nil {
-		// MRI queues pending interrupts; rbgo holds one, so the first abort to reach
-		// the main thread is the one it raises, rather than the last.
-		return
-	}
-	main.pendingRaise = exc
-	main.interrupt()
 }
 
 // threadCaptureErr turns a panic recovered in a thread's goroutine into the
@@ -609,7 +606,11 @@ func (vm *VM) registerThreadClass() {
 			// that exception in the MAIN thread. Both are what MRI's
 			// thread_start_func_2 (thread.c) does at exactly this point.
 			vm.releaseHeldMutexes(t)
-			if t.err != nil && (t.abort || abortDefault) {
+			// MRI's guard is RB_TYPE_P(errinfo, T_OBJECT): only a real exception object
+			// propagates. A Go-level failure captured as a RuntimeError has no Ruby
+			// object and no MRI counterpart, so it stays what it already is -- re-raised
+			// in whoever joins the thread.
+			if t.err != nil && t.err.Obj != nil && (t.abort || abortDefault) {
 				vm.abortMainThread(t)
 			}
 			t.firstPark() // release the spawner if the thread never blocked
@@ -1484,13 +1485,15 @@ func (t *RThread) forget(m *RMutex) {
 // longer existed -- a hang that survived making the wait interruptible, because
 // nothing was ever going to interrupt it.
 func (vm *VM) releaseHeldMutexes(t *RThread) {
-	for len(t.held) > 0 {
-		m := t.held[0]
+	held := t.held
+	t.held = nil
+	for _, m := range held {
+		// Every entry is one this thread owns -- held is appended to only on a
+		// successful acquire and pruned by forget whenever ownership leaves -- so the
+		// test states the invariant rather than handling a case that cannot arise.
 		if m.owner == t {
-			m.handOn() // also removes m from t.held
-			continue
+			m.handOn() // MRI: rb_mutex_unlock_th, which also wakes the next waiter
 		}
-		t.forget(m)
 	}
 }
 

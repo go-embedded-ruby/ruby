@@ -65,15 +65,9 @@ func (s *tcpServer) Truthy() bool    { return true }
 // lock DEADLOCKS a program whose peer is another Thread of the same VM, because
 // the peer needs the lock to send the very bytes this call is waiting for.
 //
-// It is called from native Ruby methods, which always hold the GVL. vm is nil
-// only in a VM-less unit test, where there is no lock to release.
-func ioBlock(vm *VM, fn func()) {
-	if vm == nil {
-		fn()
-		return
-	}
-	vm.threadBlock(fn)
-}
+// Every caller is a native Ruby method, which always holds the GVL, so there is
+// no nil-vm case to guard: a guard for one would be a branch no test could reach.
+func ioBlock(vm *VM, fn func()) { vm.threadBlock(fn) }
 
 // registerSocket installs the socket transport (require "socket"): the
 // TCPSocket / TCPServer classes over Go net, the BasicSocket / IPSocket / Socket

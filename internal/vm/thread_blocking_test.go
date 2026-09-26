@@ -232,6 +232,65 @@ end
 th.join
 p owned
 p m.locked?`, "true\nfalse\n"},
+		// A join with a zero timeout never waits at all and reports the thread as
+		// unfinished: the absolute deadline is already past on the first turn of the
+		// loop (MRI's thread_join_sleep computes `end` once and calls
+		// hrtime_update_expire per turn, so a spurious wake cannot extend it).
+		{"zero_timeout_join", `t = Thread.new { sleep }
+p t.join(0)
+t.kill`, "nil\n"},
+		// A waiter killed while a mask is in effect reaches its safepoint INSIDE the
+		// uninterruptible relock, where the kill must stay queued rather than fire.
+		{"masked_kill_during_the_relock", `m = Mutex.new
+cv = ConditionVariable.new
+in_sync = false
+owned = nil
+th = Thread.new do
+  Thread.handle_interrupt(RuntimeError => :immediate) do
+    m.synchronize do
+      in_sync = true
+      begin
+        cv.wait(m)
+      ensure
+        owned = m.owned?
+      end
+    end
+  end
+end
+Thread.pass until in_sync
+Thread.pass until th.stop?
+m.synchronize { cv.signal; sleep 0.05; th.kill }
+th.join
+p owned`, "true\n"},
+		// Killing a waiter that is neither the head nor the tail of the wait queue
+		// leaves the others queued, so both survivors still get the mutex.
+		{"kill_a_middle_waiter", `m = Mutex.new
+m.lock
+a = Thread.new { m.lock; m.unlock }
+sleep 0.05
+b = Thread.new { m.lock; m.unlock }
+sleep 0.05
+c = Thread.new { m.lock; m.unlock }
+sleep 0.05
+b.kill
+b.join
+m.unlock
+a.join
+c.join
+puts "done"`, "done\n"},
+		// A waiter that has already been HANDED the mutex but killed before it could
+		// run gives it back rather than dying with it: MRI releases the mutex before
+		// the interrupt check because the check may raise (do_mutex_lock).
+		{"kill_a_waiter_that_was_already_handed_the_mutex", `m = Mutex.new
+m.lock
+b = Thread.new { m.lock; m.unlock }
+sleep 0.05
+m.unlock
+b.kill
+b.join
+p m.locked?
+m.lock
+puts "relocked"`, "false\nrelocked\n"},
 		// A raise masked by Thread.handle_interrupt(:never) does not end the wait it
 		// arrives during — the wait goes back to sleep, as do_mutex_lock's loop does.
 		{"masked_raise_does_not_end_the_wait", `q = Queue.new

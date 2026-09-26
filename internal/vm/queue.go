@@ -239,9 +239,8 @@ func num2dblName(v object.Value) string {
 	return classNameOf(v)
 }
 
-// queueBlock releases the GVL and waits on ch, optionally bounded by a timer. It
-// reports whether the wait ended on the timeout rather than a wake. fn runs in
-// the calling goroutine, so timedOut is written and read without a data race.
+// queueBlock releases the GVL and waits on ch, optionally bounded by a timer, and
+// reports whether the wait ended on the timeout rather than a wake.
 func (vm *VM) queueBlock(ch chan struct{}, timeout float64, hasTimeout bool) (timedOut bool) {
 	// The wait must be interruptible: MRI's queue_do_pop sleeps through
 	// rb_thread_sleep_deadly_allow_spurious_wakeup (thread_sync.c queue_sleep),
