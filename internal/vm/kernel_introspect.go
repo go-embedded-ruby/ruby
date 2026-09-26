@@ -223,7 +223,7 @@ func (vm *VM) registerKernelIntrospection() {
 		return vm.raiseSystemExit(vm.exitStatusArg(args, 0), "exit")
 	})
 	vm.cObject.define("exit!", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return vm.raiseSystemExit(vm.exitStatusArg(args, 1), "exit")
+		return vm.raiseSystemExitImmediate(vm.exitStatusArg(args, 1), "exit")
 	})
 	// abort(message = nil): MRI's rb_f_abort (process.c) puts the message —
 	// through StringValue, so a non-String converts with #to_str — on $stderr and
@@ -666,6 +666,14 @@ func (vm *VM) frameFileLabel(i int) string {
 // is swallowed so the remaining handlers still run (MRI reports it but keeps
 // going); other control-flow signals propagate.
 func (vm *VM) runAtExit() {
+	// Kernel#exit! / Process.exit! runs none of them: process.c rb_f_exit_bang
+	// calls _exit(2), which is precisely "terminate without running the exit
+	// handlers". Measured against MRI 4.0.5: `at_exit { puts "x" }; exit!(4)`
+	// prints nothing and exits 4.
+	if vm.exitImmediate {
+		vm.atExit = nil
+		return
+	}
 	for i := len(vm.atExit) - 1; i >= 0; i-- {
 		vm.runAtExitOne(vm.atExit[i])
 	}
@@ -675,7 +683,17 @@ func (vm *VM) runAtExit() {
 func (vm *VM) runAtExitOne(blk *Proc) {
 	defer func() {
 		if r := recover(); r != nil {
-			if _, ok := r.(RubyError); ok {
+			if rerr, ok := r.(RubyError); ok {
+				// An at_exit handler that itself calls exit sets the process's status,
+				// and overrides one an earlier exit had already asked for: eval.c
+				// rb_ec_cleanup reads ec->errinfo AFTER rb_ec_teardown has run the
+				// handlers, and exiting_split gives that reading (mode0) precedence
+				// over the pre-teardown one (mode1). Measured against MRI 4.0.5:
+				// `at_exit { exit 7 }; exit 3` exits 7, and `at_exit { exit 7 }` on a
+				// program that ends normally exits 7 too.
+				if vm.isSystemExit(rerr.Class) {
+					vm.terminalExit = &rerr
+				}
 				return // swallow: a failing at_exit hook must not abort the others
 			}
 			panic(r)
@@ -823,4 +841,131 @@ func (vm *VM) registerGvarTracing() {
 		h.Delete(key)
 		return object.NewArrayFromSlice(append([]object.Value(nil), elems...))
 	})
+}
+
+// ExitDisposition is how a terminal exception ends the process. It is the result
+// of eval_error.c's exiting_split, the function rb_ec_cleanup calls to split an
+// uncaught exception into "exit with this status", "die by this signal" and
+// "print this exception first":
+//
+//	SystemExit          -> EXITING_WITH_STATUS, status = the @status ivar, no message
+//	SignalException     -> EXITING_WITH_SIGNAL, sig = the @signo ivar; a message
+//	                       ONLY for SIGSEGV or for a SUBCLASS of SignalException
+//	                       (`!rb_obj_is_instance_of(errinfo, rb_eSignal)`), which
+//	                       is why an uncaught Interrupt prints and an uncaught
+//	                       bare SignalException does not
+//	anything else       -> EXITING_WITH_STATUS | EXITING_WITH_MESSAGE, status 1
+//
+// rb_ec_cleanup then returns Status as main()'s exit code, and — last of all,
+// after every finalizer — calls ruby_default_signal(Signal) when a signal was
+// named, which restores SIG_DFL and re-raises it so the process really dies BY
+// the signal and a shell reports 128+signo with WIFSIGNALED set.
+type ExitDisposition struct {
+	Status  int  // the process exit status
+	Signal  int  // the signal to die by, or 0
+	Message bool // print the exception MRI-style before exiting
+}
+
+// ExitingSplit classifies an error that propagated out of Run, reporting false
+// when it is not a Ruby exception at all (a parse, compile or host IO error),
+// which the caller reports and exits 1 for as before.
+//
+// This is the whole of issue #676's front-end half: the VM already raised the
+// right SystemExit with the right @status, and nothing translated it into the
+// process's exit code — so `rbgo -e 'exit 3'` exited 0. It is also the terminal
+// half of #691: an uncaught SignalException must leave the process dead by its
+// signal, not exited 0 or 1.
+func (vm *VM) ExitingSplit(err error) (ExitDisposition, bool) {
+	rerr, ok := err.(RubyError)
+	if !ok {
+		return ExitDisposition{}, false
+	}
+	switch {
+	case vm.classIsA(rerr.Class, "SystemExit"):
+		return ExitDisposition{Status: int(vm.exitStatusOf(rerr.Obj))}, true
+	case vm.classIsA(rerr.Class, "SignalException"):
+		signo := int(vm.signoOf(rerr.Obj))
+		// A signal number of 0 is Signal.trap(:EXIT)'s slot and cannot kill
+		// anything; treat it as a plain failure rather than re-raising signal 0,
+		// which kill(2) defines as a liveness probe.
+		if signo == 0 {
+			return ExitDisposition{Status: 1, Message: true}, true
+		}
+		segv, isSegv := signalNumberOf("SEGV")
+		return ExitDisposition{
+			Signal:  signo,
+			Status:  128 + signo, // the status to fall back to if the re-raise cannot run
+			Message: (isSegv && signo == segv) || rerr.Class != "SignalException",
+		}, true
+	default:
+		return ExitDisposition{Status: 1, Message: true}, true
+	}
+}
+
+// classIsA reports whether the named class is name or a descendant of it, the
+// rb_obj_is_kind_of test exiting_split applies. An unknown class name can only
+// match itself, which keeps a raise() from a native method (which carries a name
+// rather than an object) classifiable.
+func (vm *VM) classIsA(className, ancestor string) bool {
+	c, ok := vm.consts[className].(*RClass)
+	if !ok {
+		return className == ancestor
+	}
+	for ; c != nil; c = c.super {
+		if c.name == ancestor {
+			return true
+		}
+	}
+	return false
+}
+
+// exitStatusOf reads SystemExit#status off the exception object (eval_error.c
+// sysexit_status, which is rb_ivar_get(exc, id_status)). A SystemExit raised
+// through raise() rather than Kernel#exit has no object, and MRI's
+// SystemExit.new defaults @status to 0.
+func (vm *VM) exitStatusOf(exc object.Value) int64 {
+	if exc == nil {
+		return 0
+	}
+	if s, ok := getIvar(exc, "@status").(object.Integer); ok {
+		return int64(s)
+	}
+	return 0
+}
+
+// signoOf reads SignalException#signo off the exception object
+// (rb_ivar_get(errinfo, id_signo)).
+func (vm *VM) signoOf(exc object.Value) int64 {
+	if exc == nil {
+		return 0
+	}
+	if s, ok := getIvar(exc, "@signo").(object.Integer); ok {
+		return int64(s)
+	}
+	return 0
+}
+
+// raiseSystemExitImmediate is raiseSystemExit for Kernel#exit! / Process.exit!,
+// which process.c rb_f_exit_bang implements as _exit(2): the status still travels
+// on a SystemExit (so it is rescuable and reportable the same way), but no
+// at_exit handler runs. MRI also skips `ensure` blocks, which needs an unwinding
+// path the exception machinery does not have here; that remainder is recorded
+// rather than pretended away.
+func (vm *VM) raiseSystemExitImmediate(status int64, message string) object.Value {
+	vm.exitImmediate = true
+	return vm.raiseSystemExit(status, message)
+}
+
+// TerminalExit reports the SystemExit that ended the run, if one did. Run
+// returns no error for a SystemExit — a program that calls exit is terminating,
+// not crashing, and an embedded host must not see a failure — but the @status it
+// carries IS the process's exit code, so a host that owns a process asks for it
+// here. It is MRI's ec->errinfo as rb_ec_cleanup finds it after rb_ec_teardown:
+// an at_exit handler that itself calls exit overwrites the status, which is why
+// this is read AFTER Run returns rather than captured at the raise site.
+func (vm *VM) TerminalExit() (error, bool) {
+	if vm.terminalExit == nil {
+		return nil, false
+	}
+	return *vm.terminalExit, true
 }

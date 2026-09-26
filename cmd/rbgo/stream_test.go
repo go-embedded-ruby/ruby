@@ -44,7 +44,7 @@ func TestRunSendsWarningsToTheRealStderr(t *testing.T) {
 	go func() { b, _ := io.ReadAll(outR); outCh <- string(b) }()
 	go func() { b, _ := io.ReadAll(errR); errCh <- string(b) }()
 
-	runErr := run(program, script)
+	_, runErr := run(program, script)
 
 	outW.Close()
 	errW.Close()

@@ -60,20 +60,25 @@ func runCmd(args []string) {
 		usage()
 	}
 
-	if err := run(src, name); err != nil {
-		reportError(err)
-		os.Exit(1)
-	}
+	// finish never returns: it is MRI's ruby_run_node -> rb_ec_cleanup, which
+	// turns the terminal exception into this process's exit status (or death by
+	// signal) rather than always exiting 0 or 1. See exit_status.go.
+	finish(run(src, name))
 }
 
-func run(src, name string) error {
+// run compiles and interprets one program, returning the machine it ran on
+// alongside the error, because the terminal exception has to be classified
+// against that machine's class hierarchy (vm.ExitingSplit). The machine is
+// non-nil whenever the program actually ran; a parse or compile failure returns
+// nil, which finish handles.
+func run(src, name string) (*vm.VM, error) {
 	prog, err := parser.Parse(src)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	iseq, err := compiler.CompileWithEncoding(prog, compiler.MagicSourceEncoding(src))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	iseq.Name = name
 	// Program output goes to stdout; every diagnostic MRI puts on fd 2 — warnings,
@@ -89,29 +94,7 @@ func run(src, name string) error {
 		machine.SetScriptPath(name) // so require/require_relative resolve relative to the script
 	}
 	_, err = machine.Run(iseq)
-	return err
-}
-
-// reportError prints an uncaught error to stderr. A Ruby exception (vm.RubyError)
-// is rendered MRI-style — "<frame>: <message> (<Class>)" with a "\tfrom <frame>"
-// line per outer frame from its backtrace — so a crashing program shows the call
-// chain that led to the raise. A non-Ruby error (parse/compile/IO) prints plainly.
-func reportError(err error) {
-	rerr, ok := err.(vm.RubyError)
-	if !ok {
-		fmt.Fprintf(os.Stderr, "%v\n", err)
-		return
-	}
-	frames := rerr.Backtrace()
-	body := rerr.Message + " (" + rerr.Class + ")"
-	if len(frames) == 0 {
-		fmt.Fprintln(os.Stderr, body)
-		return
-	}
-	fmt.Fprintf(os.Stderr, "%s: %s\n", frames[0], body)
-	for _, f := range frames[1:] {
-		fmt.Fprintf(os.Stderr, "\tfrom %s\n", f)
-	}
+	return machine, err
 }
 
 func usage() {

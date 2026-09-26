@@ -3,7 +3,6 @@
 package main
 
 import (
-	"fmt"
 	"os"
 
 	"github.com/go-embedded-ruby/ruby/internal/vm"
@@ -26,8 +25,7 @@ import (
 func main() {
 	machine := vm.New(os.Stdout)
 	if _, err := machine.Run(embeddedProgram()); err != nil {
-		fmt.Fprintf(os.Stderr, "%v\n", err)
-		os.Exit(1)
+		finish(machine, err) // never returns; see exit_status.go
 	}
 	select {} // keep the Go runtime alive so JS event/animation callbacks keep firing
 }
