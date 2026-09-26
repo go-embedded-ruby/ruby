@@ -1364,7 +1364,11 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 	// MRI's min_argc is lead_num + post_num whether or not there is a rest
 	// parameter (setup_parameters_complex, vm_args.c v3_4_0:595), so a post
 	// parameter with no splat is required too: `def m(a=1, b)` rejects m().
-	minReq := iseqRequiredPositional(iseq) + iseq.PostCount
+	//
+	// iseqRequiredPositional IS that sum, in both shapes (it reads iseqPostCount,
+	// the same npost above). Adding iseq.PostCount to it as well would count the
+	// no-splat post run TWICE and reject `def m(a=1, b)` called as m(9).
+	minReq := iseqRequiredPositional(iseq)
 	if len(args) < minReq || (iseq.SplatIndex < 0 && len(args) > len(iseq.Params)) {
 		var expected string
 		switch {

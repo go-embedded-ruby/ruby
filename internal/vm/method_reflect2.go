@@ -216,19 +216,28 @@ func methodParameters(m *Method) object.Value {
 // Method#parameters and Proc#parameters. reqKind selects the symbol used for a
 // required positional (:req for a method or a lambda, :opt for a non-lambda
 // proc, which never enforces its positionals). The positional shape — leading
-// required, optionals, a *rest, then post-splat required — is read from the
-// iseq, followed by the keyword, keyword-rest and block parameters. A nil iseq
-// is a native (ISeq-less) callable: MRI reports a single catch-all rest.
+// required, optionals, a *rest, then the POST required — is read from the iseq,
+// followed by the keyword, keyword-rest and block parameters. A nil iseq is a
+// native (ISeq-less) callable: MRI reports a single catch-all rest.
+//
+// The post run is the one rb_iseq_parameters walks last among the positionals,
+// [post_start, post_start+post_num), emitting :req for each (iseq.c
+// v3_4_0:3629-3641). It exists WITHOUT a splat too — `def m(a=1, b)` has
+// lead_num 0, opt_num 1, post_num 1 — which is what iseqPostStart reports and
+// what this loop used to miss: it treated everything after the leading required
+// run as optional unless a splat separated it, so `def m(a=1, b)` answered
+// [[:opt, :a], [:opt, :b]] where MRI answers [[:opt, :a], [:req, :b]].
 func buildParamsList(is *bytecode.ISeq, reqKind string) []object.Value {
 	if is == nil {
 		return []object.Value{object.NewArray(object.Symbol("rest"))}
 	}
 	var out []object.Value
+	postStart := iseqPostStart(is)
 	for i, name := range is.Params {
 		switch {
 		case i == is.SplatIndex:
 			out = append(out, paramPair("rest", displayAnon(name, fwdRestSentinel, "*")))
-		case i < is.NumRequired || (is.SplatIndex >= 0 && i > is.SplatIndex):
+		case i < is.NumRequired || i >= postStart:
 			out = append(out, positionalParam(reqKind, name))
 		default:
 			out = append(out, positionalParam("opt", name))

@@ -165,26 +165,36 @@ func methodISeq(m *Method) *bytecode.ISeq {
 	}
 }
 
-// iseqRequiredPositional counts an ISeq's required positional parameters: the
-// NumRequired leading ones plus any required parameters after a *splat (the
-// "post" params, which occupy the Params slots following SplatIndex).
+// iseqRequiredPositional counts an ISeq's required positional parameters:
+// MRI's lead_num + post_num (rb_iseq_min_max_arity, proc.c v3_4_0:1073-1079).
+// The post ones are those after a *splat AND — when there is none — the
+// trailing required run of `def m(a=1, b)`, which iseqPostCount reports in
+// both shapes.
 func iseqRequiredPositional(is *bytecode.ISeq) int {
-	req := is.NumRequired
-	if is.SplatIndex >= 0 {
-		req += len(is.Params) - is.SplatIndex - 1
-	}
-	return req
+	return is.NumRequired + iseqPostCount(is)
+}
+
+// iseqPostStart is the index of the first post parameter in Params: the slot
+// after a *splat, or — with no splat — the start of the trailing required run.
+// It is len(Params) when there are none, so `i >= iseqPostStart(is)` is false
+// for every parameter. MRI keeps it as param.post_start (vm_core.h) and
+// rb_iseq_parameters walks [post_start, post_start+post_num) as :req
+// (iseq.c v3_4_0:3629-3641).
+func iseqPostStart(is *bytecode.ISeq) int {
+	return len(is.Params) - iseqPostCount(is)
 }
 
 // iseqHasOptional reports whether an ISeq has at least one optional positional
-// parameter: with a splat, the slots between NumRequired and SplatIndex; without
-// one, everything after NumRequired (post-without-splat is treated as optional,
-// which the ISeq encoding does not distinguish).
+// parameter: MRI's opt_num > 0. With a splat those are the slots between
+// NumRequired and SplatIndex; without one they are the slots between
+// NumRequired and the start of the post run — NOT everything after NumRequired,
+// which counted `def m(a=1, b)`'s required b as an optional and cost the method
+// side of #arity a whole argument.
 func iseqHasOptional(is *bytecode.ISeq) bool {
 	if is.SplatIndex >= 0 {
 		return is.SplatIndex > is.NumRequired
 	}
-	return len(is.Params) > is.NumRequired
+	return iseqPostStart(is) > is.NumRequired
 }
 
 // keywordCounts reports how many of an ISeq's keyword parameters are required

@@ -2010,11 +2010,16 @@ func (p *Proc) arityVal() int {
 		return p.nativeArity
 	}
 	is := p.iseq
-	// Required count: the leading required positionals PLUS the trailing post ones
-	// (rb_iseq_min_max_arity returns lead_num + post_num, proc.c v3_4_0), plus one
-	// when any keyword is mandatory (a single required-keyword group counts as one
-	// required arg).
-	req := is.NumRequired + is.PostCount
+	// Required count: the leading required positionals PLUS the post ones
+	// (rb_iseq_min_max_arity returns lead_num + post_num, proc.c v3_4_0:1079),
+	// plus one when any keyword is mandatory (a single required-keyword group
+	// counts as one required arg).
+	//
+	// param.post_num is the count in BOTH shapes — after a splat and, with no
+	// splat, the trailing required run — which is what iseqPostCount reports.
+	// Reading is.PostCount directly saw only the second: PostCount is 0 whenever
+	// there IS a splat, so `proc { |a, *b, c| }.arity` answered -2 for MRI's -3.
+	req := is.NumRequired + iseqPostCount(is)
 	hasReqKw, hasOptKw := false, is.KwRestSlot >= 0
 	for _, r := range is.KwRequired {
 		if r {
@@ -2029,13 +2034,13 @@ func (p *Proc) arityVal() int {
 	// A *splat is always variadic. For a lambda, an optional positional, an
 	// optional keyword or a keyword-rest also makes it variadic; a non-lambda proc
 	// stays fixed on those and reports the positive required count.
-	end := len(is.Params)
-	if is.SplatIndex >= 0 {
-		end = is.SplatIndex
-	}
+	//
+	// "Has an optional positional" is opt_num > 0, which iseqHasOptional answers
+	// for both shapes; counting every slot past NumRequired would count a post
+	// parameter as an optional.
 	variadic := is.SplatIndex >= 0
 	if p.isLambda {
-		variadic = variadic || end > is.NumRequired || hasOptKw
+		variadic = variadic || iseqHasOptional(is) || hasOptKw
 	}
 	if variadic {
 		return -(req + 1)
