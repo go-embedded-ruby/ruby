@@ -145,14 +145,22 @@ func findYield(vm *VM, emit func(object.Value), path string) (yieldErr error) {
 	fileStackDepth := len(vm.fileStack)
 	frameNamesDepth := len(vm.frameNames)
 	frameFilesDepth := len(vm.frameFiles)
+	// frameCrefs and frameMethods mirror frameNames one for one, so they are
+	// restored WITH it: index i means the same frame in all three only while the
+	// three are the same length, and frameLabel now reads all three (#649). See
+	// Kernel#catch, which keeps the same six depths.
+	frameCrefsDepth := len(vm.frameCrefs)
+	frameMethodsDepth := len(vm.frameMethods)
 	requireDirsDepth := len(vm.requireDirs)
 	defer func() {
 		if r := recover(); r != nil {
 			if sig, ok := r.(throwSignal); ok && sig.tag == pruneTag {
-				vm.fileStack = vm.fileStack[:fileStackDepth]
-				vm.frameNames = vm.frameNames[:frameNamesDepth]
-				vm.frameFiles = vm.frameFiles[:frameFilesDepth]
-				vm.requireDirs = vm.requireDirs[:requireDirsDepth]
+				vm.fileStack = truncFrames(vm.fileStack, fileStackDepth)
+				vm.frameNames = truncFrames(vm.frameNames, frameNamesDepth)
+				vm.frameFiles = truncFrames(vm.frameFiles, frameFilesDepth)
+				vm.frameCrefs = truncFrames(vm.frameCrefs, frameCrefsDepth)
+				vm.frameMethods = truncFrames(vm.frameMethods, frameMethodsDepth)
+				vm.requireDirs = truncFrames(vm.requireDirs, requireDirsDepth)
 				yieldErr = find.ErrPrune
 				return
 			}
