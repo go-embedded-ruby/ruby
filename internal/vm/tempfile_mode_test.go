@@ -160,6 +160,22 @@ p File.read(dst.path)
 src.close!; dst.close!`,
 			want: "\"prelude body\"\n",
 		},
+		// The SOURCE side takes the same rb_io_check_io step, and it is observable:
+		// read through the handle the copy starts at its current position and leaves
+		// it advanced, where the path branch would have re-read from byte 0.
+		{
+			name: "source_is_read_through_its_handle",
+			src: `require "tempfile"
+src = Tempfile.new("rbgo-cs-src6", mode: File::RDONLY)
+src.write("HEADbody"); src.flush
+src.rewind; src.read(4)
+dst = Tempfile.new("rbgo-cs-dst6", mode: File::RDONLY)
+n = IO.copy_stream(src, dst)
+dst.flush
+p [n, File.read(dst.path), src.pos]
+src.close!; dst.close!`,
+			want: "[4, \"body\", 8]\n",
+		},
 		// The conversion must stay inside the String/#to_path branch: an object that
 		// answers #to_io but NOT #to_path has no fptr in MRI and goes to
 		// copy_stream_fallback's duck-typed #write instead.
