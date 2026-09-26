@@ -326,3 +326,99 @@ p res
 		t.Errorf("got %q, want %q", got, want)
 	}
 }
+
+// TestDirEntryEncoding pins dir.c's handling of the names a directory hands
+// back. dir_initialize records dp->enc — the `encoding:` keyword, else
+// rb_filesystem_encoding() — and dir_read / dir_each_entry pass every name
+// through rb_external_str_new_with_enc, which tags it with that encoding and
+// then converts it to Encoding.default_internal when one is set.
+//
+// The conversion is rb_str_conv_enc, not String#encode: its last line is
+// "/* some error, return original */ return str;", so a name that cannot be
+// represented in the internal encoding comes back AS IS rather than raising.
+//
+// Every expectation was taken from MRI ruby 4.0.5 running the same source.
+func TestDirEntryEncoding(t *testing.T) {
+	dir := ioScratchDir(t)
+	// One plain ASCII name and one that no Korean encoding can represent, so both
+	// halves of the best-effort conversion are exercised by the same listing.
+	for _, n := range []string{"a.txt", "\U0001F389.txt"} {
+		if err := os.WriteFile(filepath.Join(dir, n), nil, 0o644); err != nil {
+			t.Fatalf("fixture %q: %v", n, err)
+		}
+	}
+	lit := `"` + strings.ReplaceAll(dir, `\`, `\\`) + `"`
+
+	for _, c := range []struct{ name, body, want string }{
+		{
+			"children_encoding_keyword",
+			`p Dir.children(D, encoding: "euc-jp").sort.map { |s| s.encoding.name }`,
+			"[\"EUC-JP\", \"EUC-JP\"]\n",
+		},
+		{
+			"entries_encoding_keyword",
+			`p Dir.entries(D, encoding: Encoding::ISO_8859_1).sort.first.encoding.name`,
+			"\"ISO-8859-1\"\n",
+		},
+		{
+			// The keyword must survive the BLOCK-LESS form too, which goes through
+			// an Enumerator rather than the yield loop.
+			"foreach_enumerator_keeps_the_keyword",
+			`p Dir.foreach(D, encoding: "iso-8859-1").to_a.map { |s| s.encoding.name }.uniq`,
+			"[\"ISO-8859-1\"]\n",
+		},
+		{
+			"each_child_enumerator_keeps_the_keyword",
+			`p Dir.each_child(D, encoding: "iso-8859-1").to_a.map { |s| s.encoding.name }.uniq`,
+			"[\"ISO-8859-1\"]\n",
+		},
+		{
+			"handle_carries_its_encoding",
+			`d = Dir.new(D, encoding: "euc-jp")
+			 r = [d.children.sort.first.encoding.name, d.read.encoding.name]
+			 d.close; p r`,
+			"[\"EUC-JP\", \"EUC-JP\"]\n",
+		},
+		{
+			// dp->path is the argument as it was passed, kept before
+			// rb_str_encode_ospath, so #to_path round-trips its encoding.
+			"to_path_keeps_the_arguments_encoding",
+			`d = Dir.open(D.dup.force_encoding(Encoding::IBM866))
+			 r = d.to_path.encoding.name; d.close; p r`,
+			"\"IBM866\"\n",
+		},
+		{
+			// rb_external_str_with_enc's own special case: a US-ASCII handle
+			// encoding over bytes that are not ASCII gives ASCII-8BIT instead.
+			"us_ascii_handle_falls_back_to_binary",
+			`p Dir.children(D, encoding: "us-ascii").sort.map { |s| [s.encoding.name, s.bytesize] }`,
+			"[[\"US-ASCII\", 5], [\"ASCII-8BIT\", 8]]\n",
+		},
+		{
+			// FilePathValue coerces first, so dp->path is the COERCED String: a
+			// Pathname argument leaves a plain UTF-8 path, not its own encoding.
+			"to_path_of_a_coerced_argument",
+			`require "pathname"
+			 d = Dir.open(Pathname.new(D)); r = [d.to_path == D, d.to_path.encoding.name]
+			 d.close; p r`,
+			"[true, \"UTF-8\"]\n",
+		},
+		{
+			// The convertible name becomes EUC-KR; the one that cannot be
+			// represented comes back untouched, in the filesystem encoding.
+			"unconvertible_name_comes_back_as_is",
+			`Encoding.default_internal = Encoding::EUC_KR
+			 r = Dir.children(D).sort.map { |s| s.encoding.name }
+			 Encoding.default_internal = nil
+			 p r`,
+			"[\"EUC-KR\", \"UTF-8\"]\n",
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			src := "D = " + lit + "\n" + c.body + "\n"
+			if got := eval(t, src); got != c.want {
+				t.Errorf("got %q, want %q", got, c.want)
+			}
+		})
+	}
+}
