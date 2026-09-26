@@ -201,6 +201,11 @@ module Enumerable
     raise ArgumentError, "wrong number of arguments (given #{args.length}, expected 0..1)" if args.length > 1
     n = 0
     if !args.empty?
+      # enum.c v3_4_0 enum_count: an item argument makes the block dead, and MRI
+      # says so through rb_warn. `warn ..., uplevel: 1` IS rb_warn here -- same
+      # gate (Kernel#warn is `!NIL_P(ruby_verbose)`), same sink (Warning.warn) and
+      # the caller's "path:lineno: warning: " rather than this prelude's.
+      warn "given block not used", uplevel: 1 if block_given?
       item = args[0]
       each { |*a| n = n + 1 if __pack(a) == item }
     elsif block_given?
@@ -350,6 +355,11 @@ module Enumerable
     has_init = false
     init = nil
     if args.length == 2
+      # enum.c v3_4_0 enum_inject, the two-argument arm: the block is dead and MRI
+      # warns -- but through rb_warning, not rb_warn, so ONLY a true $VERBOSE
+      # prints it. The explicit `$VERBOSE` test is what turns Kernel#warn's
+      # non-nil gate into rb_warning's RTEST one.
+      warn "given block not used", uplevel: 1 if block_given? && $VERBOSE
       init = args[0]
       sym = args[1]
       has_init = true
@@ -393,6 +403,9 @@ module Enumerable
   # records whether a pattern was actually passed.
   def any?(pattern = (no_pat = true; nil))
     blk = block_given?
+    # enum.c v3_4_0 WARN_UNUSED_BLOCK(argc): a pattern argument makes the block
+    # dead. rb_warn, so the default $VERBOSE == false still prints it.
+    warn "given block not used", uplevel: 1 if blk && !no_pat
     catch(:__enum_any) do
       each { |*a|
         truth = no_pat ? (blk ? yield(*a) : __pack(a)) : (pattern === __pack(a))
@@ -404,6 +417,9 @@ module Enumerable
 
   def all?(pattern = (no_pat = true; nil))
     blk = block_given?
+    # enum.c v3_4_0 WARN_UNUSED_BLOCK(argc): a pattern argument makes the block
+    # dead. rb_warn, so the default $VERBOSE == false still prints it.
+    warn "given block not used", uplevel: 1 if blk && !no_pat
     catch(:__enum_all) do
       each { |*a|
         truth = no_pat ? (blk ? yield(*a) : __pack(a)) : (pattern === __pack(a))
@@ -415,6 +431,9 @@ module Enumerable
 
   def none?(pattern = (no_pat = true; nil))
     blk = block_given?
+    # enum.c v3_4_0 WARN_UNUSED_BLOCK(argc): a pattern argument makes the block
+    # dead. rb_warn, so the default $VERBOSE == false still prints it.
+    warn "given block not used", uplevel: 1 if blk && !no_pat
     catch(:__enum_none) do
       each { |*a|
         truth = no_pat ? (blk ? yield(*a) : __pack(a)) : (pattern === __pack(a))
@@ -430,6 +449,8 @@ module Enumerable
   # matches against the packed value.
   def one?(pattern = (no_pat = true; nil))
     blk = block_given?
+    # enum.c v3_4_0 WARN_UNUSED_BLOCK(argc), as in any?/all?/none? above.
+    warn "given block not used", uplevel: 1 if blk && !no_pat
     n = 0
     catch(:__enum_one) do
       each { |*a|
@@ -641,6 +662,8 @@ module Enumerable
   def find_index(*args)
     raise ArgumentError, "wrong number of arguments (given #{args.length}, expected 0..1)" if args.length > 1
     return enum_for(:find_index) { nil } if args.empty? && !block_given?
+    # enum.c v3_4_0 enum_find_index: a value argument makes the block dead.
+    warn "given block not used", uplevel: 1 if !args.empty? && block_given?
     idx = nil
     i = 0
     each { |*a|
@@ -2258,7 +2281,12 @@ module Slim
     end
   end
 
-  Engine = Template
+  # Slim::Engine is NOT assigned here: slim.go's registerSlim already binds it to
+  # this same Template class, and re-assigning a constant that is already
+  # initialised is exactly what MRI's const_tbl_update warns about. It stayed
+  # invisible while rb_warn was gated on an unset $VERBOSE slot; with the gate
+  # fixed it printed "already initialized constant Slim::Engine" on EVERY run,
+  # a warning MRI never emits.
 end
 
 # ---------------------------------------------------------------------------
@@ -2344,7 +2372,8 @@ module Haml
     end
   end
 
-  Engine = Template
+  # Haml::Engine: as with Slim above, haml.go's registerHaml already binds it to
+  # this Template class, so assigning it here only warned.
 end
 
 # ---------------------------------------------------------------------------
@@ -2414,7 +2443,8 @@ class OptionParser
                       :conv, :desc, :block)
 end
 
-OptParse = OptionParser
+# OptParse: optparse.go's registerOptionParser already binds both OptParse and
+# OptionParser::OptParse to this class, so assigning it here only warned.
 
 # ---------------------------------------------------------------------------
 # Tempfile (tempfile): a from-scratch pure-Ruby temporary file built over File

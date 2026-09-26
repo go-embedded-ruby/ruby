@@ -133,8 +133,12 @@ func TestIOBinmodeTextmodeAutoclose(t *testing.T) {
 // TestIOEncodingOptions covers extractEncodingOption / isDashString / rbWarn: the
 // :external_encoding / :internal_encoding / :encoding options, the nil and "-"
 // internal-encoding forms, the int==ext collapse, and the "Ignoring encoding
-// parameter" override (whose external/internal wording is exercised both with
-// $VERBOSE set, so the warning fires, and unset, so rbWarn early-returns).
+// parameter" override. io.c ruby_4_0:6852 warns through rb_warn, so the DEFAULT
+// $VERBOSE (false) prints it with the caller's position — measured on MRI 4.0.5:
+// `ruby -e 'IO.new(1, "w", external_encoding: "ibm866", encoding: "utf-8")'`
+// prints "-e:1: warning: Ignoring encoding parameter …". The unset row below used
+// to assert silence and the $VERBOSE = true rows a bare "Ignoring …"; both were
+// rbgo's divergence.
 func TestIOEncodingOptions(t *testing.T) {
 	cases := []struct{ body, want string }{
 		{`io = IO.new(wo, "w", external_encoding: "utf-8", internal_encoding: "ibm866"); p [io.external_encoding.to_s, io.internal_encoding.to_s]`, "[\"UTF-8\", \"IBM866\"]\n"},
@@ -146,10 +150,10 @@ func TestIOEncodingOptions(t *testing.T) {
 		{`io = IO.new(wo, "w", external_encoding: "utf-8", internal_encoding: "utf-8"); p io.internal_encoding.to_s`, "\"\"\n"},
 		{`io = IO.new(wo, "w", encoding: "utf-8:utf-8"); p io.internal_encoding.to_s`, "\"\"\n"},
 		// :encoding is ignored when :external_encoding is present (external wording).
-		{`io = IO.new(wo, "w", external_encoding: "ibm866", encoding: "utf-8"); p io.external_encoding.to_s`, "\"IBM866\"\n"},
-		{`$VERBOSE = true; io = IO.new(wo, "w", external_encoding: "ibm866", encoding: "utf-8"); p io.external_encoding.to_s`, "Ignoring encoding parameter 'utf-8': external_encoding is used\n\"IBM866\"\n"},
+		{`io = IO.new(wo, "w", external_encoding: "ibm866", encoding: "utf-8"); p io.external_encoding.to_s`, "(rbgo):7: warning: Ignoring encoding parameter 'utf-8': external_encoding is used\n\"IBM866\"\n"},
+		{`$VERBOSE = true; io = IO.new(wo, "w", external_encoding: "ibm866", encoding: "utf-8"); p io.external_encoding.to_s`, "(rbgo):7: warning: Ignoring encoding parameter 'utf-8': external_encoding is used\n\"IBM866\"\n"},
 		// :encoding is ignored when :internal_encoding is present (internal wording).
-		{`$VERBOSE = true; io = IO.new(wo, "w", internal_encoding: "ibm866", encoding: "utf-8"); p io.internal_encoding.to_s`, "Ignoring encoding parameter 'utf-8': internal_encoding is used\n\"IBM866\"\n"},
+		{`$VERBOSE = true; io = IO.new(wo, "w", internal_encoding: "ibm866", encoding: "utf-8"); p io.internal_encoding.to_s`, "(rbgo):7: warning: Ignoring encoding parameter 'utf-8': internal_encoding is used\n\"IBM866\"\n"},
 	}
 	for _, c := range cases {
 		if got := eval(t, ioFdProg(c.body)); got != c.want {
@@ -221,16 +225,21 @@ func TestIOOpenBlock(t *testing.T) {
 	}
 }
 
-// TestIORbWarnSilentByDefault confirms rbWarn's $VERBOSE gate: with no warning
-// level set the ignored-encoding override is silent, yet still resolves the
-// external encoding to the winning option. $VERBOSE itself READS false, not nil
-// — ruby.c v3_4_0 ruby_prog_init binds it to ruby_verbose, which the interpreter
-// starts at Qfalse and only -W0 moves to nil (`ruby -e "p $VERBOSE"` prints
-// false on 4.0.5). rbgo's rb_warn gate still keys on the raw, unset slot, which
-// is why nothing is printed here.
-func TestIORbWarnSilentByDefault(t *testing.T) {
+// TestIORbWarnSpeaksAtTheDefaultLevel is the same probe this file used to run
+// under the name TestIORbWarnSilentByDefault, inverted, because the behaviour it
+// asserted was rbgo's defect and its own comment said so: "rbgo's rb_warn gate
+// still keys on the raw, unset slot, which is why nothing is printed here".
+//
+// $VERBOSE READS false, not nil — ruby.c ruby_prog_init binds it to ruby_verbose,
+// which starts at Qfalse and only -W0 moves to nil — and error.c rb_warn fires on
+// anything non-nil. So MRI prints the override warning with no -w at all, and the
+// interesting property is that $VERBOSE still reads false while it does: the value
+// a program can SEE has one representation now, and the gate reads that one.
+func TestIORbWarnSpeaksAtTheDefaultLevel(t *testing.T) {
 	got := eval(t, ioFdProg(`io = IO.new(wo, "w", external_encoding: "ibm866", encoding: "utf-8"); p [$VERBOSE, io.external_encoding.to_s]`))
-	if want := fmt.Sprintf("[false, %q]\n", "IBM866"); got != want {
-		t.Errorf("silent warn: got %q want %q", got, want)
+	want := "(rbgo):7: warning: Ignoring encoding parameter 'utf-8': external_encoding is used\n" +
+		fmt.Sprintf("[false, %q]\n", "IBM866")
+	if got != want {
+		t.Errorf("default-level warn: got %q want %q", got, want)
 	}
 }

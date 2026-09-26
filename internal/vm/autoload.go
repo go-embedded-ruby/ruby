@@ -257,18 +257,22 @@ func (vm *VM) tryAutoload(cls *RClass, name string) bool {
 // It goes through rb_warning, not rb_warn, so only $VERBOSE == true shows it —
 // the same gate warnCircularRequire applies — and it is emitted at most once
 // per registration because the caller has already retired the entry.
+//
+// rbWarning, not a curStderr() write: rb_warning ends in rb_write_warning_str
+// like every other internal warning, so an overridden Warning.warn intercepts
+// this one too, and it carries the file:lineno prefix warning_string composes. The
+// gate was ALSO reading vm.globals["$VERBOSE"] out of the map, which is unset
+// until a program assigns it, so a Bool type assertion there could never be true
+// on a run that only passed -w.
 func (vm *VM) warnAutoloadDidNotDefine(cls *RClass, name, path string) {
 	if _, defined := cls.consts[name]; defined {
-		return
-	}
-	if v, ok := vm.globals["$VERBOSE"].(object.Bool); !ok || !bool(v) {
 		return
 	}
 	qualified := name
 	if cls != vm.cObject {
 		qualified = vm.moduleToSStr(cls) + "::" + name
 	}
-	vm.curStderr().writeStr("warning: Expected " + path + " to define " + qualified + " but it didn't\n")
+	vm.rbWarning("Expected " + path + " to define " + qualified + " but it didn't")
 }
 
 // featureLoaded reports whether path names a file that has already been loaded,

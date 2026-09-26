@@ -85,7 +85,7 @@ func TestWave28FileNewWarnsOnBlock(t *testing.T) {
 	dir := fdOpenScratch(t)
 	src := "Dir.chdir(" + rubyString(dir) + ")\n$VERBOSE = true\n" +
 		"$stderr = $stdout\nFile.new(\"f.txt\") { |f| 1 }\n"
-	const want = "warning: File::new() does not take block; use File::open() instead\n"
+	const want = "(rbgo):4: warning: File::new() does not take block; use File::open() instead\n"
 	if got := eval(t, src); got != want {
 		t.Errorf("got=%q\nwant=%q", got, want)
 	}

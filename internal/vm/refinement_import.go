@@ -90,7 +90,7 @@ func refinementImportMethods(vm *VM, self object.Value, args []object.Value, _ *
 	}
 	for _, mod := range mods {
 		if len(mod.includes) > 0 || len(mod.prepends) > 0 {
-			vm.rbWarn("warning: %s has ancestors, but Refinement#import_methods doesn't import their methods",
+			vm.rbWarnf("%s has ancestors, but Refinement#import_methods doesn't import their methods",
 				vm.moduleToSStr(mod))
 		}
 	}

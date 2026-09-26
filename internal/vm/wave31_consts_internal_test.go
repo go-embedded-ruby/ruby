@@ -33,7 +33,12 @@ p M.const_source_location(:NOPE)
 	// The file is empty because eval() compiles a source string with no path, so
 	// every location records line-only — which is exactly the shape that must
 	// read back as the EMPTY array rather than as ["", n].
-	want := "[]\n[]\n[]\n[]\nnil\n"
+	//
+	// Line 3's re-assignment of A also warns, which is variable.c's const_tbl_update
+	// doing its other job on the same code path this test exercises; there is no
+	// second "previous definition" line because the recorded location has no file,
+	// which is the very shape being asserted above (MRI's `!NIL_P(ce->file)` guard).
+	want := "[]\n(rbgo):3: warning: already initialized constant A\n[]\n[]\n[]\nnil\n"
 	if got := eval(t, src); got != want {
 		t.Errorf("got %q want %q", got, want)
 	}

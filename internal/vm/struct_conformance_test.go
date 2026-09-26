@@ -232,11 +232,18 @@ func TestStructConformanceErrors(t *testing.T) {
 }
 
 // TestStructNamedRedefineWarns checks that Struct.new(name, …) overwriting an
-// existing constant emits the "already initialized constant" warning (to $stderr,
-// which the harness folds into the captured stream) and rebinds the constant.
+// existing constant warns and rebinds the constant. The wording is struct.c's own
+// (ruby_4_0 struct.c new_struct: rb_warn("redefining constant %s::%s")), NOT
+// const_tbl_update's "already initialized constant …", because new_struct removes
+// the old constant before defining the new one. Measured on MRI 4.0.5:
+//
+//	$ ruby -e 'Struct.new("Dup1", :a); Struct.new("Dup1", :b)'
+//	-e:1: warning: redefining constant Struct::Dup1
+//
+// This assertion used to name the other message, pinning rbgo's divergence.
 func TestStructNamedRedefineWarns(t *testing.T) {
 	out := eval(t, `Struct.new("Dup1", :a); Struct.new("Dup1", :b); p Struct::Dup1.members`)
-	if !strings.Contains(out, "already initialized constant Struct::Dup1") {
+	if !strings.Contains(out, "warning: redefining constant Struct::Dup1") {
 		t.Errorf("out=%q, want redefine warning", out)
 	}
 	if !strings.Contains(out, "[:b]") {

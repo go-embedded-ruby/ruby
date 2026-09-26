@@ -116,8 +116,14 @@ func TestENVWave16(t *testing.T) {
 		{`ENV.clear; ENV["A"]="1"; p ENV.fetch("A")`, `"1"`},
 		{`ENV.clear; p ENV.fetch("X","d")`, `"d"`},
 		// block + default: the block supersedes the default (and MRI warns).
-		{`ENV.clear; ENV["A"]="1"; p ENV.fetch("A","d"){|k| "blk"}`, `"1"`},
-		{`ENV.clear; p ENV.fetch("X","d"){|k| "blk:#{k}"}`, `"blk:X"`},
+		// hash.c env_fetch warns through rb_warn when a default AND a block are given,
+		// so the default $VERBOSE (false) prints it, prefixed with the caller's
+		// position. Measured on MRI 4.0.5. These two rows asserted silence, which was
+		// only true while rbgo's rb_warn gate read an unset slot.
+		{`ENV.clear; ENV["A"]="1"; p ENV.fetch("A","d"){|k| "blk"}`,
+			"(rbgo):1: warning: block supersedes default value argument\n" + `"1"`},
+		{`ENV.clear; p ENV.fetch("X","d"){|k| "blk:#{k}"}`,
+			"(rbgo):1: warning: block supersedes default value argument\n" + `"blk:X"`},
 		{`ENV.clear; p ENV.fetch("X"){|k| "blk:#{k}"}`, `"blk:X"`},
 		{`ENV.clear; begin; ENV.fetch("X"); rescue KeyError => e; p [e.message, e.key, e.receiver.equal?(ENV)]; end`,
 			`["key not found: \"X\"", "X", true]`},

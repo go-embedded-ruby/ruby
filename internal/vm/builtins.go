@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"fmt"
 	"math"
 	"math/big"
 	"sort"
@@ -1706,13 +1707,12 @@ func (vm *VM) bootstrap() {
 		name := vm.coerceConstName(args[0])
 		// Overwriting an already-initialised constant (a real value, not a pending
 		// autoload — those live in cls.autoloads, so cls.consts misses them and no
-		// warning fires) warns "already initialized constant X". MRI uses rb_warn
-		// here, which fires whenever $VERBOSE is non-nil (false or true), suppressed
-		// only when $VERBOSE is nil. Reference: ruby/ruby v3_4_0 variable.c
-		// rb_const_set → const_set_raise / rb_warn on the already-set case.
-		if _, existed := cls.consts[name]; existed && !object.IsNil(vm.globals["$VERBOSE"]) {
-			vm.warnRedefineConst(cls, name)
-		}
+		// warning fires) is variable.c's const_tbl_update redefinition arm, the same
+		// one a syntactic `X = 2` reaches, so it goes through the same helper: both
+		// lines, the file:lineno prefix, and rb_warn's gate. This used to open-code a
+		// third behaviour of its own — a raw vm.globals read for the gate (never
+		// seeded, so always silent) and Kernel#warn for the sink.
+		vm.warnAlreadyInitialized(cls, name)
 		// Route through assignConstIn so an anonymous class/module bound here gains
 		// the qualified name of its constant (Ruby's "permanent name on first
 		// constant binding" rule) — the same path a `Foo::Bar = ...` literal takes.
@@ -3103,7 +3103,7 @@ func (vm *VM) bootstrap() {
 			// rb_ary_initialize uses rb_warning here, not rb_warn, so this one is
 			// only heard under -w / $VERBOSE = true.
 			if blk != nil {
-				vm.rbWarning1("given block not used")
+				vm.rbWarning("given block not used")
 			}
 			return self
 		}
@@ -3132,7 +3132,7 @@ func (vm *VM) bootstrap() {
 		// Build the array incrementally so that if the block calls break, the array
 		// is left holding the elements produced before the break, as MRI does.
 		if blk != nil && len(args) == 2 {
-			vm.rbWarn1("block supersedes default value argument")
+			vm.rbWarn("block supersedes default value argument")
 		}
 		arr.Elems = make([]object.Value, 0, n)
 		for i := int64(0); i < n; i++ {
@@ -3258,7 +3258,7 @@ func (vm *VM) bootstrap() {
 		//     if (block_given && argc == 2) rb_warn("block supersedes default value argument");
 		// so the warning fires whether or not the index is in range.
 		if blk != nil && len(args) == 2 {
-			vm.rbWarn1("block supersedes default value argument")
+			vm.rbWarn("block supersedes default value argument")
 		}
 		v, orig, ok := vm.arrayFetchAt(a, args[0])
 		if ok {
@@ -4425,7 +4425,7 @@ func (vm *VM) bootstrap() {
 		// array.c v3_4_0 rb_ary_index: with a value argument the block is dead,
 		// and MRI says so — `if (rb_block_given_p()) rb_warn("given block not used");`
 		if len(args) > 0 && blk != nil {
-			vm.rbWarn1("given block not used")
+			vm.rbWarn("given block not used")
 		}
 		for i := 0; i < len(a.Elems); i++ {
 			var match bool
@@ -4453,7 +4453,7 @@ func (vm *VM) bootstrap() {
 		}
 		// rb_ary_rindex warns for the dead block exactly as rb_ary_index does.
 		if len(args) > 0 && blk != nil {
-			vm.rbWarn1("given block not used")
+			vm.rbWarn("given block not used")
 		}
 		for i := len(a.Elems) - 1; i >= 0; i-- {
 			// A block may shrink the array; realign to the new end and re-check size
@@ -5036,7 +5036,7 @@ func (vm *VM) bootstrap() {
 		// hash.c v3_4_0 rb_hash_fetch_m warns on the clash before the lookup:
 		//     if (block_given && argc == 2) rb_warn("block supersedes default value argument");
 		if blk != nil && len(args) == 2 {
-			vm.rbWarn1("block supersedes default value argument")
+			vm.rbWarn("block supersedes default value argument")
 		}
 		if v, ok := self.(*object.Hash).Get(args[0]); ok {
 			return v
@@ -12215,34 +12215,85 @@ func (vm *VM) qualifiedConstName(scope *RClass, name string) string {
 	return vm.moduleToSStr(scope) + "::" + name
 }
 
-// rbWarn1 is error.c's rb_warn at tag v3_4_0 (error.c:466): the message gets the
-// CALLING frame's "path:lineno: warning: " in front (rb_warn builds it through
-// rb_warning_string, which starts at the current frame), it is silenced only
-// under -W0 where $VERBOSE is nil (`if (!NIL_P(ruby_verbose))`), and it is then
-// handed to rb_write_warning_str. `ruby -e 'p [1].index(1){}'` prints
-// "-e:1: warning: given block not used".
+// rbWarn is error.c's rb_warn at tag v3_4_0 (error.c:466). Three things happen
+// here and NOWHERE else, because a rule restated at its call sites drifts — and
+// this one had drifted three ways at once:
 //
-// It emits through writeWarningStr — Warning.warn — and NOT to curStderr(), which
-// was the defect: rb_warn reaches $stderr only via the default Warning.warn's
-// `$stderr.write(message)`, so an overridden Warning.warn intercepts it and a
-// $stderr that merely answers #write collects it. See writeWarningStr in io.go
-// for the C chain and for why a StringIO double could witness neither.
-func (vm *VM) rbWarn1(msg string) {
-	if object.IsNil(vm.gvar("$VERBOSE")) {
+//  1. the gate is warnEnabled (`!NIL_P(ruby_verbose)`), so the default
+//     $VERBOSE == false speaks and only -W0's nil silences it;
+//  2. the message is composed by warningString, which is error.c's
+//     warning_string → warn_vsprintf → err_vcatf: the CURRENT Ruby frame's
+//     "path:lineno: ", then the literal "warning: ", then the text, then "\n".
+//     Callers pass the text ALONE — no "warning: " of their own;
+//  3. the sink is writeWarningStr, error.c's rb_write_warning_str, which is
+//     `rb_funcallv(Warning, :warn, str)` — so an overridden Warning.warn
+//     intercepts it and a $stderr that merely answers #write collects it.
+//
+// `ruby -e 'p [1].index(1){}'` prints "-e:1: warning: given block not used".
+func (vm *VM) rbWarn(msg string) {
+	if !vm.warnEnabled() {
 		return
 	}
-	vm.writeWarningStr(vm.warnUplevelPrefix(0) + msg + "\n")
+	vm.writeWarningStr(vm.warningString(msg))
 }
 
-// rbWarning1 is error.c's rb_warning (error.c:497), the quieter sibling of
-// rb_warn: it prints only when $VERBOSE is TRUE (ruby -w), which is why the specs
-// that assert one of these pass `verbose: true` to `complain`. Same sink as
-// rbWarn1 — rb_warning also ends in rb_write_warning_str.
-func (vm *VM) rbWarning1(msg string) {
-	if v := vm.gvar("$VERBOSE"); v != object.True {
+// rbWarnf is rbWarn with a format string. It exists only so a caller building a
+// message out of values does not reach for fmt itself; the gate, the prefix and
+// the sink are still rbWarn's.
+func (vm *VM) rbWarnf(format string, a ...any) {
+	vm.rbWarn(fmt.Sprintf(format, a...))
+}
+
+// rbWarning is error.c's rb_warning (error.c:497), the quieter sibling of
+// rb_warn: same composition and same sink, but the stricter RTEST gate, so it
+// prints only when $VERBOSE is TRUE (ruby -w). This is why the specs that assert
+// one of these pass `verbose: true` to `complain`.
+func (vm *VM) rbWarning(msg string) {
+	if !vm.warningEnabled() {
 		return
 	}
-	vm.writeWarningStr(vm.warnUplevelPrefix(0) + msg + "\n")
+	vm.writeWarningStr(vm.warningString(msg))
+}
+
+// rbWarningf is rbWarning with a format string, standing to rbWarning as rbWarnf
+// stands to rbWarn.
+func (vm *VM) rbWarningf(format string, a ...any) {
+	vm.rbWarning(fmt.Sprintf(format, a...))
+}
+
+// rbCompileWarn is error.c's rb_compile_warn (error.c:397): rb_warn's gate and
+// rb_warn's sink, but an EXPLICIT source position instead of the current frame's.
+// MRI uses it for a diagnostic that points where the interpreter is not standing
+// any more — the "previous definition of X was here" line beside a constant
+// redefinition, whose position is the entry's own ce->file / ce->line.
+func (vm *VM) rbCompileWarn(file string, line int, msg string) {
+	if !vm.warnEnabled() {
+		return
+	}
+	vm.writeWarningStr(warningStringAt(file, line, msg))
+}
+
+// warningString is error.c's warning_string (error.c:450): warn_vsprintf over the
+// position rb_source_location_cstr reports for the current frame.
+func (vm *VM) warningString(msg string) string {
+	return vm.warnUplevelPrefix(0) + msg + "\n"
+}
+
+// warningStringAt is warn_vsprintf (error.c:381) with a caller-supplied position,
+// formatted by err_vcatf (error.c:125): the file, then ":line" only when the line
+// is non-zero, then ": ", then "warning: ". A file of "" drops the whole location
+// — err_vcatf tests `if (file)` — leaving the bare "warning: " prefix, which is
+// also what a constant defined by this VM's own bootstrap has (MRI: a ce->file of
+// nil, so no second line at all — see warnAlreadyInitialized).
+func warningStringAt(file string, line int, msg string) string {
+	if file == "" {
+		return "warning: " + msg + "\n"
+	}
+	loc := file
+	if line != 0 {
+		loc += ":" + strconv.Itoa(line)
+	}
+	return loc + ": warning: " + msg + "\n"
 }
 
 // symbolNames interns the frozen String that Symbol#name answers. MRI's symbol

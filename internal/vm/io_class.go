@@ -5,7 +5,6 @@
 package vm
 
 import (
-	"fmt"
 	"os"
 	"strings"
 
@@ -1071,7 +1070,7 @@ func (vm *VM) extractEncodingOption(opts *object.Hash, ms *ioModeSpec) bool {
 		if !hasExt {
 			which = "internal"
 		}
-		vm.rbWarn("Ignoring encoding parameter '%s': %s_encoding is used", vm.displayStr(encV), which)
+		vm.rbWarnf("Ignoring encoding parameter '%s': %s_encoding is used", vm.displayStr(encV), which)
 		hasEnc = false
 	}
 	extName := ""
@@ -1123,24 +1122,6 @@ func recoverAny(fn func()) (rec any) {
 func isDashString(v object.Value) bool {
 	s, ok := v.(*object.String)
 	return ok && s.Str() == "-"
-}
-
-// rbWarn emits an MRI rb_warn-style warning line, but only when $VERBOSE is
-// non-nil (false or true) — the gate rb_warn applies. Used for the encoding
-// options that IO.new silently overrides.
-//
-// It goes through writeWarningStr (error.c rb_write_warning_str → Warning.warn),
-// like every other rb_warn here. It used to write to curStderr() instead, and the
-// comment that justified it — "still honouring a $stderr reassigned to a StringIO
-// (mspec's `complain` matcher)" — names the reason the defect survived: a StringIO
-// IS an *IOObj in rbgo, so it satisfied the type assertion curStderr() makes and
-// the harness's own double could never show the warning being dropped for a
-// $stderr that merely answers #write.
-func (vm *VM) rbWarn(format string, a ...any) {
-	if object.IsNil(vm.globals["$VERBOSE"]) {
-		return
-	}
-	vm.writeWarningStr(fmt.Sprintf(format, a...) + "\n")
 }
 
 // ioOptEncoding returns the canonical encoding name selected by the :encoding /
