@@ -168,6 +168,9 @@ func scrubScannerFor(enc string) (scrubScan, bool) {
 // the automaton is transcribed rather than derived from the grammar comment: the
 // EncLen_EmacsMule table is only an upper bound on a character's length, and MRI
 // judges validity with the automaton (precise_mbc_enc_len), not with EncLen.
+//
+// The table's S3 is not transcribed: no S0 transition reaches it, so it can never
+// be entered for any input.
 const (
 	emacsMuleAccept = -1
 	emacsMuleFail   = -2
