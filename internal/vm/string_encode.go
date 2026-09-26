@@ -498,25 +498,45 @@ func encodeUTF32(u string, be bool) []byte {
 // raising — #encode reports an unusable destination as a missing converter, not as
 // the unknown-encoding ArgumentError that Encoding.find would raise.
 func (vm *VM) encodeEncName(v object.Value) string {
-	resolve := func(s string) string {
-		if e, ok := vm.findEncoding(s); ok {
-			return e.name
-		}
-		return s
-	}
 	switch e := v.(type) {
 	case *encodingObj:
 		return e.name
 	case *object.String:
-		return resolve(e.Str())
+		return vm.canonicalEncName(e.Str())
 	}
 	if vm.respondsToDynamic(v, "to_str") {
 		if s, ok := vm.send(v, "to_str", nil, nil).(*object.String); ok {
-			return resolve(s.Str())
+			return vm.canonicalEncName(s.Str())
 		}
 	}
 	raise("TypeError", "no implicit conversion of %s into String", classNameOf(v))
 	return ""
+}
+
+// canonicalEncName resolves an encoding name to the registry's canonical spelling
+// ("iso-8859-9" -> "ISO-8859-9", "binary" -> "ASCII-8BIT"), leaving a name the
+// registry does not know as written.
+//
+// MRI needs no such step because a String carries an encoding INDEX, never a name:
+// rb_enc_associate_index (encoding.c) resolves the spelling once — at the point a
+// `# encoding:` magic comment or #force_encoding is honoured — and every later
+// comparison is index equality. rbgo tags a String with the name it was given, so
+// a tag has to be resolved before it can key a codec table; otherwise
+// `# encoding: iso-8859-9` produces literals that #encoding reports correctly (it
+// goes through the registry) yet no converter can be found for.
+func (vm *VM) canonicalEncName(name string) string {
+	if e, ok := vm.findEncoding(name); ok {
+		return e.name
+	}
+	return name
+}
+
+// hasDecorator reports whether any newline or xml decorator is requested. MRI
+// gates the same-encoding short-circuits of str_transcode0 (transcode.c) on
+// exactly this set: a decorator rewrites the text, so the conversion has to run
+// even when the encodings match.
+func (o transcodeOpts) hasDecorator() bool {
+	return o.crNewline || o.crlfNewline || o.universalNewline || o.xml != ""
 }
 
 // encAsciiCompat reports whether the registered encoding `name` is
@@ -539,8 +559,8 @@ func (vm *VM) stringEncode(s *object.String, args []object.Value) *object.String
 		positional = args
 	}
 
-	to := s.EncName()
-	from := s.EncName()
+	to := vm.canonicalEncName(s.EncName())
+	from := to
 	if len(positional) >= 1 {
 		to = vm.encodeEncName(positional[0])
 	} else if vm.defInternalEnc != nil {
@@ -555,6 +575,21 @@ func (vm *VM) stringEncode(s *object.String, args []object.Value) *object.String
 	repl := opts.replace
 	if !opts.hasReplace {
 		repl = defaultReplacement(to)
+	}
+
+	// str_transcode0 (transcode.c) short-circuits BEFORE any code converter is
+	// looked up when the source and destination encodings are the same and no
+	// decorator is in play: with an explicit `invalid:` the result is
+	// rb_enc_str_scrub in that one encoding, and otherwise the bytes are returned
+	// unchanged. So `#encode(invalid: :replace)` cleans up a string in an encoding
+	// rbgo has no converter for (Emacs-Mule, say) instead of raising
+	// ConverterNotFoundError — no converter is involved at all.
+	if from == to && !opts.hasDecorator() {
+		out := append([]byte(nil), s.Bytes()...)
+		if opts.invalidReplace {
+			out = scrubBytesIn(out, to, opts)
+		}
+		return object.NewStringBytesEnc(out, to)
 	}
 
 	// A destination rbgo cannot transcode into (a dummy encoding like Emacs-Mule,

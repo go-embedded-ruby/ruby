@@ -43,6 +43,20 @@ func validInEncoding(b []byte, enc string) bool {
 	case "UTF-32BE":
 		return validUTF32(b, true)
 	}
+	// An encoding with a scrub scanner has a character automaton, and
+	// rb_enc_str_coderange (string.c) asks that same automaton whether the string is
+	// BROKEN: validity and scrubbing cannot be allowed to disagree about what a
+	// well-formed character is, so both read the one scanner.
+	if scan, ok := scrubScannerFor(enc); ok {
+		for i := 0; i < len(b); {
+			n, valid := scan(b[i:])
+			if !valid {
+				return false
+			}
+			i += n
+		}
+		return true
+	}
 	if _, ok := xtextEncodings[enc]; ok {
 		return xtextValid(b, enc)
 	}
@@ -132,8 +146,113 @@ func scrubScannerFor(enc string) (scrubScan, bool) {
 		return func(b []byte) (int, bool) { return scanUTF32Token(b, false) }, true
 	case "UTF-32BE":
 		return func(b []byte) (int, bool) { return scanUTF32Token(b, true) }, true
+	case "Emacs-Mule":
+		return scanEmacsMuleToken, true
 	}
 	return nil, false
+}
+
+// emacsMuleNext is one step of the Emacs-Mule character automaton transcribed from
+// the `trans` table in enc/emacs_mule.c. It returns the next state for byte c, or
+// emacsMuleAccept when the character is complete and emacsMuleFail when the byte
+// cannot continue it. The grammar the table encodes is stated in that file:
+//
+//	CHARACTER        := ASCII_CHAR | MULTIBYTE_CHAR
+//	PRIMARY_CHAR_1   := LEADING_CODE_PRI C1              (0x81..0x8F + one C byte)
+//	PRIMARY_CHAR_2   := LEADING_CODE_PRI C1 C2           (0x90..0x99 + two C bytes)
+//	SECONDARY_CHAR   := LEADING_CODE_SEC LEADING_CODE_EXT C1 [C2]
+//	C1, C2, LEADING_CODE_EXT := 0xA0..0xFF
+//
+// The three secondary leads take DIFFERENT extension ranges (0x9A/0x9B accept
+// 0xE0..0xEF, 0x9C accepts 0xF0..0xF4 and 0x9D accepts 0xF5..0xFE), which is why
+// the automaton is transcribed rather than derived from the grammar comment: the
+// EncLen_EmacsMule table is only an upper bound on a character's length, and MRI
+// judges validity with the automaton (precise_mbc_enc_len), not with EncLen.
+const (
+	emacsMuleAccept = -1
+	emacsMuleFail   = -2
+)
+
+func emacsMuleNext(state int, c byte) int {
+	switch state {
+	case 0: // S0: the first byte of a character
+		switch {
+		case c <= 0x7F:
+			return emacsMuleAccept
+		case c >= 0x81 && c <= 0x8F:
+			return 1
+		case c >= 0x90 && c <= 0x99:
+			return 2
+		case c == 0x9A || c == 0x9B:
+			return 4
+		case c == 0x9C:
+			return 5
+		case c == 0x9D:
+			return 6
+		}
+	case 1: // S1: the last C byte
+		if c >= 0xA0 {
+			return emacsMuleAccept
+		}
+	case 2: // S2: a C byte with one more to follow
+		if c >= 0xA0 {
+			return 1
+		}
+	case 4: // S4: the extension byte after 0x9A / 0x9B
+		if c >= 0xE0 && c <= 0xEF {
+			return 1
+		}
+	case 5: // S5: the extension byte after 0x9C
+		if c >= 0xF0 && c <= 0xF4 {
+			return 2
+		}
+	case 6: // S6: the extension byte after 0x9D
+		if c >= 0xF5 && c <= 0xFE {
+			return 2
+		}
+	}
+	return emacsMuleFail
+}
+
+// scanEmacsMuleToken is the scrub scanner for Emacs-Mule: it runs the automaton
+// over the head of b. An ill-formed head reports the maximal subpart consumed
+// before the automaton failed (at least one byte, so the walk always advances),
+// and a character cut off by the end of the input is ill-formed too.
+func scanEmacsMuleToken(b []byte) (int, bool) {
+	state := 0
+	for i := 0; i < len(b); i++ {
+		switch next := emacsMuleNext(state, b[i]); next {
+		case emacsMuleAccept:
+			return i + 1, true
+		case emacsMuleFail:
+			if i == 0 {
+				return 1, false
+			}
+			return i, false // the bytes already consumed are the ill-formed subpart
+		default:
+			state = next
+		}
+	}
+	return len(b), false // the input ended mid-character
+}
+
+// scrubBytesIn is rb_enc_str_scrub over raw bytes: every ill-formed token in
+// encoding enc becomes the transcoding options' `replace:` string, or the
+// encoding's own default replacement when none was given. String#encode's
+// same-encoding path reaches for it because str_transcode0 (transcode.c) calls
+// rb_enc_str_scrub there rather than building a converter. An encoding rbgo has no
+// scanner for is left untouched, which is how #scrub already treats it.
+func scrubBytesIn(b []byte, enc string, opts transcodeOpts) []byte {
+	scan, ok := scrubScannerFor(enc)
+	if !ok {
+		return b
+	}
+	rep := scrubDefaultRepl(enc)
+	if opts.hasReplace {
+		rep = []byte(opts.replace)
+	}
+	out, _ := scrubWalk(b, scan, func([]byte) []byte { return rep })
+	return out
 }
 
 func scanUTF8Token(b []byte) (int, bool) {
