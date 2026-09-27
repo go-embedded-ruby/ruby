@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"github.com/go-embedded-ruby/ruby/internal/bytecode"
+	"github.com/go-embedded-ruby/ruby/internal/compiler"
+	"github.com/go-ruby-parser/parser"
 )
 
 // TestEvalLocationArguments is the WITNESS for the (file, line) pair every eval
@@ -58,6 +60,15 @@ func TestEvalLocationReachesDefinedThings(t *testing.T) {
 		{`c = Class.new { eval('def self.m; end', nil, "foo", 100) }; p c.method(:m).source_location`, `["foo", 100]`},
 		{`c = Class.new { eval('def m; end', nil, "foo", 100) }; p c.instance_method(:m).source_location`, `["foo", 100]`},
 		{`p Object.new.instance_eval("proc {}", "q.rb", 5).source_location`, `["q.rb", 5]`},
+		// The binding path too: the eval scope is a CHILD of a synthetic
+		// locals-holding parent, so its own first line has to be seeded on that
+		// parent for the block below it to be placed at all. It reported nil.
+		{`b = binding; p b.eval("proc {}").source_location`, `["(eval)", 1]`},
+		{`b = binding; p b.eval("proc {}", "z.rb", 30).source_location`, `["z.rb", 30]`},
+		{`b = binding; p eval("
+
+proc {}", b, "m.rb", 10).source_location`, `["m.rb", 12]`},
+		{`b = binding; p b.eval("def bm; end; method(:bm)").source_location`, `["(eval)", 1]`},
 		// The line map reaches the BACKTRACE too, which is what
 		// instance_eval("raise", "a_file", 10) is pinned on.
 		{`e = (Object.new.instance_eval("raise", "a_file", 10) rescue $!); p e.backtrace.first.split(":")[0..1]`, `["a_file", "10"]`},
@@ -265,6 +276,43 @@ func TestParseErrorLine(t *testing.T) {
 		n, rest, ok := parseErrorLine(c.msg)
 		if n != c.n || rest != c.rest || ok != c.ok {
 			t.Errorf("parseErrorLine(%q) = (%d, %q, %v), want (%d, %q, %v)", c.msg, n, rest, ok, c.n, c.rest, c.ok)
+		}
+	}
+}
+
+// TestCompileEvalFirstLine pins the eval ISeq's OWN first line, which
+// rb_iseq_new_eval is handed along with the path (vm_eval.c ruby_4_0:1963). It is
+// asserted here directly because nothing in the Ruby surface can yet see it: the
+// top eval scope's first_lineno is what MRI's Binding#source_location reports, and
+// rbgo's Binding carries no line at all (it answers 0). Without this the
+// binding path's seeding of that line would be unwitnessed.
+func TestCompileEvalFirstLine(t *testing.T) {
+	prog, err := parser.Parse("1\n2\n")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	for _, c := range []struct {
+		name  string
+		build func() (*bytecode.ISeq, error)
+		want  int
+	}{
+		{"top, default", func() (*bytecode.ISeq, error) { return compiler.CompileEval(prog, "", 1) }, 1},
+		{"top, given", func() (*bytecode.ISeq, error) { return compiler.CompileEval(prog, "", 30) }, 30},
+		{"top, negative", func() (*bytecode.ISeq, error) { return compiler.CompileEval(prog, "", -7) }, -7},
+		{"binding, default", func() (*bytecode.ISeq, error) { return compiler.CompileEvalWithLocals(prog, nil, 1) }, 1},
+		{"binding, given", func() (*bytecode.ISeq, error) { return compiler.CompileEvalWithLocals(prog, nil, 30) }, 30},
+		{"binding, negative", func() (*bytecode.ISeq, error) { return compiler.CompileEvalWithLocals(prog, nil, -7) }, -7},
+	} {
+		is, err := c.build()
+		if err != nil {
+			t.Fatalf("%s: compile: %v", c.name, err)
+		}
+		if is.FirstLine != c.want {
+			t.Errorf("%s: FirstLine = %d, want %d", c.name, is.FirstLine, c.want)
+		}
+		// And the line map counts from there, not from 1.
+		if got := is.LineAt(0); got != c.want {
+			t.Errorf("%s: LineAt(0) = %d, want %d", c.name, got, c.want)
 		}
 	}
 }
