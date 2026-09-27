@@ -389,6 +389,18 @@ func (s *ISeq) LineAt(pc int) int {
 	return s.Lines[lo].Line
 }
 
+// ErrinfoCell is the reserved global-variable name the compiler uses to read and
+// write the interpreter's errinfo cell — the value Ruby's `$!` reports — when it
+// lowers a begin/rescue. It is deliberately UNSPELLABLE in Ruby source (`#` opens
+// a comment), so no program can name it, and it is the name MRI gives the same
+// hidden slot: the rescue ISeq's local table calls it `#$!`, which is why
+// errinfo_place can read `$!` straight out of a frame (eval.c ruby_4_0:2009-2029).
+//
+// It exists because `$!` itself is READ-ONLY to Ruby (rb_define_virtual_variable
+// with a 0 setter, eval.c ruby_4_0:2225 — `$! = x` raises NameError on ruby 4.0.5
+// and in rbgo), so the lowering cannot go through the user-visible name.
+const ErrinfoCell = "#$!"
+
 // HandlerState reports the memoised rescue-handler flag (0/1/2; see the field).
 func (s *ISeq) HandlerState() uint8 { return s.handlerState }
 

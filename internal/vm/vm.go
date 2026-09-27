@@ -2099,6 +2099,18 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 			case bytecode.OpGetConstTop:
 				// Leading `::Name`: top-level only, ignoring lexical nesting.
 				name := iseq.Names[in.A]
+				// `::Name` is a QUALIFIED reference — MRI compiles it to the same
+				// colon2/colon3 path that goes through rb_public_const_get_from, so
+				// Module#private_constant applies even when the holder is Object:
+				// `Object.send(:private_constant, :X); ::X` raises NameError "private
+				// constant Object::X referenced" on ruby 4.0.5, while the BAREWORD `X`
+				// still resolves. rbgo enforced this for `Recv::NAME` but not for the
+				// leading-`::` form, which was the one shape that could still read a
+				// private top-level constant.
+				if vm.cObject.privateConsts[name] {
+					push(vm.privateConstReferenced(vm.cObject, vm.cObject, name))
+					break
+				}
 				v, ok := vm.cObject.consts[name]
 				if !ok {
 					raise("NameError", "uninitialized constant %s", name)
@@ -2138,10 +2150,29 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				vm.warnAlreadyInitialized(lexCref, iseq.Names[in.A])
 				vm.assignConst(lexCref, iseq.Names[in.A], stack[len(stack)-1])
 			case bytecode.OpGetGVar:
-				push(vm.gvar(iseq.Names[in.A]))
+				// bytecode.ErrinfoCell ("#$!") is the reserved name the begin/rescue
+				// lowering uses for the interpreter's errinfo cell — the value `$!`
+				// reports. It bypasses vm.gvar/vm.setGVar because `$!` is read-only to
+				// Ruby (eval.c ruby_4_0:2225 registers it with a 0 setter) while the
+				// lowering must both read and write it. No Ruby program can name it.
+				if name := iseq.Names[in.A]; name == bytecode.ErrinfoCell {
+					// curExc starts as the zero object.Value (a Go nil), which nothing on
+					// the operand stack may be; normalise it the way the $! getter does.
+					if vm.curExc == nil {
+						push(object.NilV)
+					} else {
+						push(vm.curExc)
+					}
+				} else {
+					push(vm.gvar(name))
+				}
 			case bytecode.OpSetGVar:
 				// Assignment is an expression: set the global, keep its value.
-				vm.setGVar(iseq.Names[in.A], stack[len(stack)-1])
+				if name := iseq.Names[in.A]; name == bytecode.ErrinfoCell {
+					vm.curExc = stack[len(stack)-1]
+				} else {
+					vm.setGVar(name, stack[len(stack)-1])
+				}
 			case bytecode.OpGetCVar:
 				name := iseq.Names[in.A]
 				vm.checkCVarScope(definee)
@@ -2592,7 +2623,11 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					push(object.NilV)
 				}
 			case bytecode.OpDefinedConstTop:
-				if _, ok := vm.cObject.consts[iseq.Names[in.A]]; ok {
+				// defined?(::Name) answers for the same reference `::Name` makes, so a
+				// private top-level constant is NOT defined? through it (measured nil on
+				// ruby 4.0.5) although the bareword form reports "constant".
+				name := iseq.Names[in.A]
+				if _, ok := vm.cObject.consts[name]; ok && !vm.cObject.privateConsts[name] {
 					push(definedTag(bytecode.DefinedConst))
 				} else {
 					push(object.NilV)
@@ -2915,13 +2950,26 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 						// run an intervening ensure body before continuing it, then
 						// resume the unwind via OpReThrow (pendingSignal). A plain
 						// rescue handler does not apply, so it is skipped past.
+						//
 						if h, found := popToEnsure(&handlers); found {
+							// An ensure body still runs INSIDE this frame, so the rescue
+							// scopes it sits in are not gone yet: $! keeps whatever the
+							// clause-exit restore left (ruby/spec measures an `ensure`
+							// nested in a returning rescue clause seeing the OUTER
+							// exception, not nil).
 							stack = stack[:h.sp]
 							restoreFrameStacks()
 							pendingSignal = r
 							pc = h.pc
 							return
 						}
+						// No ensure left: the unwind LEAVES this frame, and every rescue
+						// clause it had open goes with it — in MRI the rescue frames are
+						// popped and $! reverts to the enclosing view. The compiler closes
+						// the scope for a `return` written in the clause itself; it cannot
+						// for `foo { return }`, where the return is in ANOTHER ISeq and a
+						// slot index would mean nothing there. That is this case.
+						vm.curExc = prevCurExc
 						panic(r)
 					}
 					if len(handlers) == 0 {

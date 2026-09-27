@@ -247,6 +247,13 @@ func (b *builder) build() *bytecode.ISeq {
 type Compiler struct {
 	ctxs         []*loopCtx // innermost-last stack of break/next targets
 	retryTargets []int      // innermost-last stack of begin-body PCs for `retry`
+	// errinfoSlots is the innermost-last stack of anonymous local slots holding the
+	// errinfo value saved on entry to each open begin/rescue, so every path that
+	// leaves a rescue clause can put it back (see compileBeginRescue). Each entry
+	// remembers the BUILDER that owns the slot: a slot index means nothing in
+	// another ISeq, so a `retry` written inside a block nested in a rescue clause
+	// must not read it.
+	errinfoSlots []errinfoScope
 	stack        []*builder
 	// srcEnc is the source file's encoding (from a `# encoding:` magic comment),
 	// canonicalised to a registry name, or "" for the UTF-8 default. When set, a
@@ -787,6 +794,13 @@ func (c *Compiler) compileNode1(n ast.Node) {
 		if len(c.retryTargets) == 0 {
 			c.fail("Invalid retry")
 		}
+		// `retry` LEAVES the rescue clause without reaching its end, so the errinfo
+		// scope has to be closed here too: MRI's retry path sets errinfo back to nil
+		// explicitly (rb_vrescue2, eval.c ruby_4_0:1080), and after a retry that
+		// succeeds `$!` reads as the value it had before the begin — measured on
+		// ruby 4.0.5. The jump target is the handler PUSH, which sits after the save,
+		// so the saved value survives the re-entry.
+		c.emitErrinfoRestore()
 		b.emit(bytecode.OpJump, c.retryTargets[len(c.retryTargets)-1], 0)
 	case *ast.OpAssign:
 		// Allocate the slot before the read so a fresh `x ||= v` sees nil
@@ -983,6 +997,12 @@ func (c *Compiler) compileNode1(n ast.Node) {
 		} else {
 			c.compileNode(v.Value)
 		}
+		// A `return` out of a rescue clause LEAVES the clause, so its errinfo scope
+		// closes here too — in MRI the rescue frame is simply popped, and `$!` after
+		// a rescue that returned reads as the value it had before the begin (three
+		// ruby/spec examples measure exactly this). It goes AFTER the return value is
+		// evaluated, because `return $!` must still see the exception.
+		c.emitErrinfoRestore()
 		// An explicit `return` inside a block body is a non-local return: it
 		// unwinds to the method the block was written in, not just the block
 		// frame. Operand A=1 flags it so the VM raises the unwinding signal;
@@ -3165,6 +3185,31 @@ func (c *Compiler) storeLocal(name string) {
 // compileBegin compiles begin/rescue/else/ensure. When an ensure clause is
 // present it wraps the rescue handling in a second handler that runs ensure on
 // both the normal and the propagating paths.
+// emitErrinfoRestore writes the innermost open begin/rescue's saved errinfo back
+// into the interpreter's cell, which is what leaving a rescue clause means for
+// $!. It is a no-op outside any rescue clause (a bare `retry` in a `for`/block
+// body reaches the Retry case with no rescue open).
+func (c *Compiler) emitErrinfoRestore() {
+	if len(c.errinfoSlots) == 0 {
+		return
+	}
+	top := c.errinfoSlots[len(c.errinfoSlots)-1]
+	b := c.cur()
+	if top.owner != b {
+		return
+	}
+	b.emit(bytecode.OpGetLocal, top.slot, 0)
+	b.emit(bytecode.OpSetGVar, b.addName(bytecode.ErrinfoCell), 0)
+	b.emit(bytecode.OpPop, 0, 0)
+}
+
+// errinfoScope is one open begin/rescue's saved-errinfo slot and the ISeq builder
+// the slot belongs to.
+type errinfoScope struct {
+	owner *builder
+	slot  int
+}
+
 func (c *Compiler) compileBegin(v *ast.Begin) {
 	if v.EnsureBody == nil {
 		c.compileBeginRescue(v)
@@ -3191,6 +3236,28 @@ func (c *Compiler) compileBeginRescue(v *ast.Begin) {
 		c.compileBody(v.Body)
 		return
 	}
+	// $! is per-RESCUE-CLAUSE state in MRI, not per frame: reading it walks the
+	// control frames out to the innermost ISEQ_TYPE_RESCUE frame and returns THAT
+	// frame's last local (errinfo_place, eval.c ruby_4_0:2009-2029), falling back to
+	// ec->errinfo only when no such frame is on the stack. So when a rescue clause
+	// completes, $! reverts to the enclosing view for free — the storage went away
+	// with the frame. rbgo does not compile a rescue clause into its own ISeq, so
+	// the scope has to be made explicit: save the errinfo cell into an anonymous
+	// local before the handler is armed, and write it back on every path that
+	// LEAVES a clause. The C mirror of the same rule is rb_vrescue2's
+	// `ec->errinfo = e_info;` after a handler returns (eval.c ruby_4_0:1109) —
+	// RESTORED to the entry value, not cleared to nil.
+	//
+	// The save must precede OpPushHandler because the interpreter overwrites the
+	// cell when a handler takes over; it must also precede it so `retry`, which
+	// jumps to the handler push, does not re-save the exception as the outer value.
+	errSlot := b.localSlot("")
+	b.emit(bytecode.OpGetGVar, b.addName(bytecode.ErrinfoCell), 0)
+	b.emit(bytecode.OpSetLocal, errSlot, 0)
+	b.emit(bytecode.OpPop, 0, 0)
+	c.errinfoSlots = append(c.errinfoSlots, errinfoScope{owner: b, slot: errSlot})
+	defer func() { c.errinfoSlots = c.errinfoSlots[:len(c.errinfoSlots)-1] }()
+
 	h := b.emit(bytecode.OpPushHandler, 0, 0)
 	c.compileBody(v.Body)
 	b.emit(bytecode.OpPopHandler, 0, 0)
@@ -3233,6 +3300,8 @@ func (c *Compiler) compileBeginRescue(v *ast.Begin) {
 		}
 		b.emit(bytecode.OpPop, 0, 0) // drop the exception (each store left it on the stack)
 		c.compileBody(clause.Body)
+		// The clause completed: close its errinfo scope before the merge point.
+		c.emitErrinfoRestore()
 		done = append(done, b.emit(bytecode.OpJump, 0, 0))
 		b.patch(skip, b.here())
 	}
