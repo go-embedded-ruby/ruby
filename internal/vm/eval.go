@@ -231,13 +231,16 @@ func (vm *VM) registerEval() {
 		// Reading the caller's frame here covers all of them at once, and the rewrite
 		// is gone.
 		//
-		// Only the LOCAL SCOPE is taken from the caller here: the definee keeps
-		// coming from evalDefinee(self) below, so this change adds the locals and
-		// alters nothing else. (MRI takes the definee from the caller's CREF too,
-		// which the frame now carries — a separate move, measured separately.)
+		// The DEFINEE is the calling frame's too. Deriving it from self was only ever
+		// a stand-in for a cref rbgo could not reach, and it is measurably wrong:
+		// `class K; class << self; def mk; eval "def m; self; end"; m; end; end; K.mk`
+		// is K on ruby 4.0.5, and with the definee derived from self (K, a Class) the
+		// def landed as an INSTANCE method and K.m raised NoMethodError. The bareword
+		// rewrite used to hide that, because the binding it spliced in carried the
+		// frame's real definee; reading the frame directly keeps it and extends it to
+		// every other shape.
 		cb := vm.callerBinding()
 		cb.self = self
-		cb.definee = vm.evalDefinee(self)
 		return vm.bindingEval(cb, src, loc)
 	})
 }
@@ -262,23 +265,15 @@ func (vm *VM) wrongTypeName(v object.Value) string {
 	return vm.classOf(v).name
 }
 
-// evalDefinee is where a `def` inside eval(str) — no binding, so no captured
-// definee — lands. MRI takes the CALLER's cref (eval_string_with_cref copies the
-// calling frame's, vm_eval.c ruby_4_0:2010-2013), which rbgo has no reified
-// stack of; classOf(self) stood in for it.
+// evalDefinee is GONE, deliberately, and this note records the invariant it stood
+// on so nobody reintroduces it. It answered "where does a `def` inside eval(str)
+// land" by deriving the definee from `self`, because MRI takes it from the
+// CALLER'S CREF (eval_string_with_cref copies the calling frame's, vm_eval.c
+// ruby_4_0:2010-2013) and rbgo had no reified frame stack to read one from. Its
+// own comment conceded it remained a stand-in: "a cref pushed by instance_eval
+// over a module is not recoverable from self alone".
 //
-// That stand-in is right for an ordinary object, whose cref while its methods run
-// is its class. It is never right when self is a Module or Class: the cref there
-// is the module ITSELF — that is what a class body, and a `def self.x` inside
-// one, run under — and classOf answered Class or Module, so
-// `Class.new { eval("def m; end") }` defined m on Class rather than on the new
-// class, and the new class reported no such method.
-//
-// It remains a stand-in: a cref pushed by instance_eval over a module (self is
-// the module, the cref its singleton class) is not recoverable from self alone.
-func (vm *VM) evalDefinee(self object.Value) *RClass {
-	if cls, ok := self.(*RClass); ok {
-		return cls
-	}
-	return vm.classOf(self)
-}
+// A frame now carries its definee (frameCode), so Kernel#eval reads the real one
+// and the stand-in has nothing left to approximate. Deleting it rather than
+// leaving it uncalled is the point: an unreachable approximation of a fact the VM
+// now knows is the shape a later wave would trust.

@@ -38,6 +38,13 @@ func TestNativeReachesCallerScope(t *testing.T) {
 		// A Binding carries the method context of the frame it was captured in, so
 		// eval'd code reports that method however far away the eval happens.
 		{`def q; binding; end; b = q; p b.eval("__method__")`, ":q\n"},
+		// The DEFINEE comes from the calling frame as well, so a `def` inside
+		// eval(str) lands where MRI's caller-cref puts it. Derived from self instead
+		// (K is a Class) it landed as an instance method and K.m raised NoMethodError;
+		// ruby 4.0.5 answers K for both lines below.
+		{`class K; class << self; def mk; eval "def m; self; end"; m; end; end; end; p K.mk`, "K\n"},
+		{`class K2; class << self; def mk; eval("def m; self; end", binding); m; end; end; end; p K2.mk`, "K2\n"},
+		{`p Class.new { eval("def m; 7; end") }.new.m`, "7\n"},
 		// TOPLEVEL_BINDING reports MRI's synthetic location rather than nothing.
 		{`p TOPLEVEL_BINDING.source_location`, "[\"<main>\", 0]\n"},
 	}
