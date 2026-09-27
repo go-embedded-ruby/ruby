@@ -1063,6 +1063,7 @@ func NewWithStderr(out, errOut io.Writer) *VM {
 	vm.includeMySQLEnumerable()    // Mysql2::Result mixes in Enumerable; after the prelude so the module exists
 	vm.includeWeakMapEnumerable()  // ObjectSpace::WeakMap mixes in Enumerable; after the prelude so the module exists
 	vm.includeStringIOEnumerable() // StringIO mixes in Enumerable; after the prelude so the module exists
+	vm.includeARGFEnumerable()     // ARGF.class mixes in Enumerable; after the prelude so the module exists
 	vm.installHashKeyHook()
 	// The prelude and built-ins are loaded; arm the level-2 AOT top level so the
 	// next Run (the user program) dispatches to the compiled aotMain, if one was
