@@ -66,8 +66,10 @@ end`
 		{with(`p "x#{ARGF.class.new(f1)}"`), "\"xARGF\"\n"},
 		{with(`p [ARGF.class.new(f1)]`), "[ARGF]\n"},
 		{`p(ARGF ? :y : :n)`, ":y\n"},
-		// A non-String filename is coerced with #to_s.
-		{with(`class P; def initialize(p); @p = p; end; def to_s; @p; end; end; p ARGF.class.new(P.new(f1)).read`), "\"l1\\nl2\\n\"\n"},
+		// A non-String filename goes through FilePathValue: #to_path (or #to_str) is
+		// consulted, #to_s is NOT, so a to_s-only object raises TypeError as in MRI.
+		{with(`o = Object.new; def o.to_path; @p; end; o.instance_variable_set(:@p, f1); p ARGF.class.new(o).read`), "\"l1\\nl2\\n\"\n"},
+		{with(`class P; def initialize(p); @p = p; end; def to_s; @p; end; end; p((ARGF.class.new(P.new(f1)).read rescue $!.class))`), "TypeError\n"},
 		// The singleton falling back to (empty, in-test) $stdin when ARGV is empty.
 		{`ARGV.replace([]); p ARGF.gets`, "nil\n"},
 		// read(len) spanning a file boundary; readchar returning a char; to_io and
@@ -134,6 +136,44 @@ end`
 		// #readbyte is not the byte twin of #readchar: with no stream at all it
 		// returns nil where #readchar raises (NEXT_ARGF_FORWARD vs rb_eof_error).
 		{with(`a = ARGF.class.new(f1); a.read; p [(a.readchar rescue :eof), a.readbyte]`), "[:eof, nil]\n"},
+		// --- the remaining arms of the state machine, each MRI 4.0.5-measured.
+		//
+		// ARGV empty at the first use puts ARGF on $stdin (next_p = -1); filenames
+		// appearing afterwards re-arm it (next_p = 1).
+		{with(`ARGV.replace([]); p ARGF.filename; ARGV.replace([f1]); p [ARGF.gets, ARGF.filename == f1]`), "\"-\"\n[\"l1\\n\", true]\n"},
+		// #readpartial's own argument handling: no length, a zero length, and a
+		// length past the end of the current file.
+		{with(`a = ARGF.class.new(f1); p((a.readpartial rescue $!.class))`), "ArgumentError\n"},
+		{with(`a = ARGF.class.new(f1); p a.readpartial(0)`), "\"\"\n"},
+		{with(`a = ARGF.class.new(f1); p a.readpartial(100)`), "\"l1\\nl2\\n\"\n"},
+		{with(`a = ARGF.class.new(f1); p a.read_nonblock(0)`), "\"\"\n"},
+		{with(`a = ARGF.class.new(f1, f2); b = +"x"; a.readpartial(6, b); a.readpartial(1, b); p b`), "\"\"\n"},
+		{with(`a = ARGF.class.new(f1); a.read(6); p((a.readbyte rescue $!.class))`), "EOFError\n"},
+		{with(`a = ARGF.class.new(f1, f2); p [a.readchar, a.readchar, a.readchar, a.readchar, a.readchar, a.readchar, a.readchar]`), "[\"l\", \"1\", \"\\n\", \"l\", \"2\", \"\\n\", \"l\"]\n"},
+		// binmode reaches the NEXT file too, not only the one open when it was
+		// called, and #binmode on a closed current file raises IOError.
+		{with(`a = ARGF.class.new(f1, f2); a.binmode; a.gets; a.skip; p a.read.encoding.to_s`), "\"ASCII-8BIT\"\n"},
+		{with(`a = ARGF.class.new(f1); a.close; p(begin; a.binmode; :ok; rescue => e; e.class; end)`), "IOError\n"},
+		// $stdin is the only input (next_p stays -1), and it is at end of file: no
+		// next file to move to, so each reader gives its own end-of-input answer.
+		{with(`r, w = IO.pipe; w.close; $stdin = r; p((ARGF.class.new.read_nonblock(4) rescue $!.class))`), "EOFError\n"},
+		{with(`r, w = IO.pipe; w.close; $stdin = r; p ARGF.class.new.read_nonblock(4, nil, exception: false)`), "nil\n"},
+		{with(`r, w = IO.pipe; w.close; $stdin = r; p ARGF.class.new.read(5)`), "nil\n"},
+		{with(`r, w = IO.pipe; w.close; $stdin = r; p ARGF.class.new.readchar`), "nil\n"},
+		{with(`r, w = IO.pipe; w.close; $stdin = r; p ARGF.class.new.gets`), "nil\n"},
+		// $stdin can be assigned a non-stream. This is a DOCUMENTED DIVERGENCE, not
+		// MRI's answer: MRI discovers it only when ARGF calls a reading method on
+		// the value (NoMethodError: undefined method 'read' for nil), while rbgo's
+		// ARGF is typed to a stream and reports the unusable $stdin as the closed
+		// stream it effectively is. Both refuse; the class differs.
+		{`$stdin = nil; p((ARGF.class.new.read(1) rescue $!.class))`, "IOError\n"},
+		// #argv IS the ARGV Array for the singleton, so ARGV.replace is visible
+		// through it; an instance has its own.
+		{`ARGF.argv.equal?(ARGV) ? (p :same) : (p :different)`, ":same\n"},
+		{with(`p ARGF.class.new(f1, f2).argv.size`), "2\n"},
+		// Kernel#p / #puts on ARGF go through the native Inspect / ToS.
+		{with(`p ARGF.class.new(f1)`), "ARGF\n"},
+		{with(`puts ARGF.class.new(f1)`), "ARGF\n"},
 		// After close there is no stream, so a delegating call raises.
 		{with(`a = ARGF.class.new(f1); a.close; p((a.pos rescue :err))`), ":err\n"},
 		{with(`a = ARGF.class.new(f1); a.close; p((a.rewind rescue :err))`), ":err\n"},

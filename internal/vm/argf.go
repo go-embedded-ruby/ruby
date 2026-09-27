@@ -33,46 +33,35 @@ type argfObj struct {
 	// nextP mirrors MRI's ARGF.next_p: 1 = open the next filename before reading
 	// again, 0 = cur is the live stream, -1 = there were no filenames at all, so
 	// cur is $stdin and stays $stdin.
-	nextP    int
-	lineno   int           // cumulative line count across all files ($.)
-	curName  string        // the current file's name ("-" for $stdin)
-	files    *object.Array // an ARGF.class.new(*files) instance's own filename list
-	fromARGV bool          // the singleton ARGF: draw filenames from the live ARGV
-	binmode  bool          // #binmode has been called — every stream reads as BINARY
-}
-
-// argvArray returns the mutable Array ARGF shifts its filenames off. For the
-// singleton that is the live ARGV (MRI: ARGF.argv IS $*, so replacing ARGV is
-// visible); for an ARGF.class.new instance it is the list it was built with.
-func (a *argfObj) argvArray() *object.Array {
-	if a.fromARGV {
-		arr, _ := a.vm.consts["ARGV"].(*object.Array)
-		return arr
-	}
-	return a.files
+	nextP   int
+	lineno  int    // cumulative line count across all files ($.)
+	curName string // the current file's name ("-" for $stdin)
+	// files is ARGF.argv: the mutable Array the filenames are shifted off. For the
+	// singleton it IS the ARGV Array (bound once, post-prelude, by finishARGF), so
+	// ARGV.replace is visible through it while reassigning the ARGV constant is
+	// not — which is MRI, where ARGF holds a reference rather than re-reading a
+	// constant. For an ARGF.class.new instance it is the list it was built with.
+	// It is never nil, so nothing downstream needs a "no list" arm.
+	files   *object.Array
+	binmode bool // #binmode has been called — every stream reads as BINARY
 }
 
 // pending reports how many filenames are still waiting — MRI's
 // RARRAY_LEN(ARGF.argv), which argf_next_argv and argf_getpartial both branch on.
-func (a *argfObj) pending() int {
-	if arr := a.argvArray(); arr != nil {
-		return len(arr.Elems)
-	}
-	return 0
-}
+func (a *argfObj) pending() int { return len(a.files.Elems) }
 
-// shiftName removes and returns the next filename, mirroring rb_ary_shift.
+// shiftName removes and returns the next filename, mirroring rb_ary_shift plus
+// the FilePathValue argf_next_argv applies to it: a String is taken as is, and
+// anything else goes through #to_path then #to_str, a value offering neither
+// raising TypeError (rb_get_path_check_to_string). #to_s is NOT consulted, so
+// ARGF.class.new(obj_with_only_to_s) raises exactly as MRI's does.
 func (a *argfObj) shiftName() (string, bool) {
-	arr := a.argvArray()
-	if arr == nil || len(arr.Elems) == 0 {
+	if len(a.files.Elems) == 0 {
 		return "", false
 	}
-	v := arr.Elems[0]
-	arr.Elems = arr.Elems[1:]
-	if s, ok := v.(*object.String); ok {
-		return s.Str(), true
-	}
-	return a.vm.send(v, "to_s", nil, nil).(*object.String).Str(), true
+	v := a.files.Elems[0]
+	a.files.Elems = a.files.Elems[1:]
+	return a.vm.filePathArg(v), true
 }
 
 func (a *argfObj) ToS() string     { return "ARGF" }
@@ -83,14 +72,24 @@ func (a *argfObj) Truthy() bool    { return true }
 // $stdin setter writes, so assigning $stdin redirects ARGF — which is what the
 // read_nonblock specs rely on when they point $stdin at a pipe.
 func (a *argfObj) stdin() *IOObj {
-	o, _ := a.vm.globals["$stdin"].(*IOObj)
-	return o
+	if o, ok := a.vm.globals["$stdin"].(*IOObj); ok {
+		return o
+	}
+	// $stdin can be assigned anything from Ruby, nil included. MRI only finds out
+	// when ARGF calls a reading method on it (NoMethodError); rbgo's ARGF is typed
+	// to a stream, so an unusable $stdin is reported as the closed stream it
+	// effectively is. Answering with a stream rather than nil is what lets every
+	// other method here be written without a "no stream at all" arm — after any
+	// nextArgv, cur IS a stream.
+	return &IOObj{cls: a.vm.consts["IO"].(*RClass), closed: true, label: "STDIN"}
 }
 
 // closeCur mirrors io.c argf_close: close the current file and record that it is
 // closed (init_p = -1). $stdin is never closed, and the "closed" mark is not set
 // for it either, so a stdin-backed ARGF stays readable.
 func (a *argfObj) closeCur() {
+	// cur is nil on the very first selection, where argf_next_argv still reaches
+	// argf_close (init_p has just become 1), and $stdin is never closed.
 	if a.cur == nil || a.cur == a.stdin() {
 		return
 	}
@@ -104,12 +103,10 @@ func (a *argfObj) closeCur() {
 // rb_io_ascii8bit_binmode(ARGF.current_file)`: once ARGF is in binary mode every
 // stream it opens — not only the one open when #binmode was called — reads as
 // BINARY with no newline or encoding conversion.
-func (a *argfObj) applyBinmode(o *IOObj) {
-	if o == nil || o.closed {
-		return
+func (a *argfObj) applyBinmode() {
+	if a.binmode {
+		a.vm.send(a.cur, "binmode", nil, nil)
 	}
-	o.binmode = true
-	o.extEnc, o.intEnc = "ASCII-8BIT", ""
 }
 
 // nextArgv mirrors io.c argf_next_argv — the ONE place ARGF changes which file it
@@ -149,12 +146,12 @@ func (a *argfObj) nextArgv() bool {
 			a.cur = openFileIO(a.vm.consts["File"].(*RClass), name, "r")
 		}
 		a.curName = name
-		a.applyBinmodeIfSet()
+		a.applyBinmode()
 		a.nextP = 0
 	case -1:
 		a.cur = a.stdin()
 		a.curName = "-"
-		a.applyBinmodeIfSet()
+		a.applyBinmode()
 	}
 	if a.initP == -1 {
 		a.initP = 1
@@ -162,18 +159,12 @@ func (a *argfObj) nextArgv() bool {
 	return true
 }
 
-func (a *argfObj) applyBinmodeIfSet() {
-	if a.binmode {
-		a.applyBinmode(a.cur)
-	}
-}
-
 // readAcross runs the `retry:` loop that argf_getline, argf_getc and argf_getbyte
 // share: read from the current file, and when it yields nothing close that file,
 // arm the next one and try again. nil means every input is exhausted.
 func (a *argfObj) readAcross(read func(o *IOObj) object.Value) object.Value {
 	for {
-		if !a.nextArgv() || a.cur == nil {
+		if !a.nextArgv() {
 			return object.NilV
 		}
 		v := read(a.cur)
@@ -283,7 +274,7 @@ func (a *argfObj) getPartial(vm *VM, args []object.Value, nonblock bool) object.
 		raise("EOFError", "end of file reached")
 		return object.NilV
 	}
-	if !a.nextArgv() || a.cur == nil {
+	if !a.nextArgv() {
 		// rb_eof_error() — unconditional here, even under exception: false, because
 		// there is no stream at all rather than a stream that ended.
 		if buf != nil {
@@ -315,22 +306,19 @@ func (a *argfObj) getPartial(vm *VM, args []object.Value, nonblock bool) object.
 func (vm *VM) registerARGF() {
 	cls := newClass("ARGF.class", vm.cObject)
 	vm.cARGF = cls
-	a := &argfObj{vm: vm, fromARGV: true}
+	// An empty list until finishARGF binds the real ARGV, which newVM has not
+	// created yet; the prelude must not find ARGF.argv nil.
+	a := &argfObj{vm: vm, files: object.NewArray()}
 	vm.consts["ARGF"] = a
 	vm.globals["$<"] = a
 
 	// ARGF.class.new(*filenames): a fresh ARGF reading exactly the given files
 	// (used by the spec harness); no arguments reads $stdin.
+	// io.c argf_initialize only STORES the arguments (argf_init); nothing is
+	// coerced here, because argf_next_argv applies FilePathValue as each name is
+	// taken off.
 	cls.smethods["new"] = &Method{name: "new", owner: cls, native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		files := object.NewArray()
-		for _, v := range args {
-			if s, ok := v.(*object.String); ok {
-				files.Elems = append(files.Elems, s)
-			} else {
-				files.Elems = append(files.Elems, vm.send(v, "to_s", nil, nil))
-			}
-		}
-		return &argfObj{vm: vm, files: files}
+		return &argfObj{vm: vm, files: object.NewArrayFromSlice(append([]object.Value(nil), args...))}
 	}}
 
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
@@ -354,7 +342,7 @@ func (vm *VM) registerARGF() {
 		}
 		want := length
 		for {
-			if !a.nextArgv() || a.cur == nil {
+			if !a.nextArgv() {
 				if str == nil {
 					return object.NilV
 				}
@@ -448,13 +436,11 @@ func (vm *VM) registerARGF() {
 	eof := func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		a := self(v)
 		a.nextArgv()
-		if a.cur == nil {
-			return object.Bool(false)
-		}
-		if a.initP == 0 {
-			return object.Bool(true)
-		}
-		a.nextArgv()
+		// argf_eof asks rb_io_eof of current_file whatever next_argv answered, so a
+		// CLOSED current file raises IOError here instead of reporting true. MRI's
+		// `if (ARGF.init_p == 0) return Qtrue` and its second next_argv() call are
+		// both dead after the first call: next_argv leaves init_p at 1 (having
+		// normalised -1) and next_p at 0 or its terminal value.
 		return object.Bool(vm.send(a.cur, "eof?", nil, nil).Truthy())
 	}
 	d("eof?", eof)
@@ -485,9 +471,6 @@ func (vm *VM) registerARGF() {
 	curFile := func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		a := self(v)
 		a.nextArgv()
-		if a.cur == nil {
-			return object.NilV
-		}
 		return a.cur
 	}
 	d("to_io", curFile)
@@ -505,10 +488,7 @@ func (vm *VM) registerARGF() {
 	// argv: the (mutating) Array ARGF draws its inputs from — the live ARGV for
 	// the singleton, its own list for an ARGF.class.new instance.
 	d("argv", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		if arr := self(v).argvArray(); arr != nil {
-			return arr
-		}
-		return object.NilV
+		return self(v).files
 	})
 
 	// close: io.c argf_close_m — closes the current file (so an IO taken from
@@ -530,9 +510,6 @@ func (vm *VM) registerARGF() {
 	d("closed?", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		a := self(v)
 		a.nextArgv()
-		if a.cur == nil {
-			return object.Bool(false)
-		}
 		return object.Bool(vm.send(a.cur, "closed?", nil, nil).Truthy())
 	})
 
@@ -555,7 +532,7 @@ func (vm *VM) registerARGF() {
 		a := self(v)
 		a.binmode = true
 		a.nextArgv()
-		a.applyBinmode(a.cur)
+		vm.send(a.cur, "binmode", nil, nil) // IOError on a closed current file, as MRI
 		return v
 	})
 	d("binmode?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -572,7 +549,7 @@ func (vm *VM) registerARGF() {
 	d("readchar", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		a := self(v)
 		for {
-			if !a.nextArgv() || a.cur == nil {
+			if !a.nextArgv() {
 				raise("EOFError", "end of file reached")
 			}
 			ch := vm.send(a.cur, "getc", nil, nil)
@@ -597,7 +574,7 @@ func (vm *VM) registerARGF() {
 	// ARGF.class.new(f).tap(&:read).readbyte is nil, .readchar is EOFError.
 	d("readbyte", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		a := self(v)
-		if !a.nextArgv() || a.cur == nil {
+		if !a.nextArgv() {
 			return object.NilV
 		}
 		b := a.readAcross(func(o *IOObj) object.Value { return vm.send(o, "getbyte", nil, nil) })
@@ -648,7 +625,7 @@ func (vm *VM) registerARGF() {
 	delegate := func(meth, noStream string) NativeFn {
 		return func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 			a := self(v)
-			if !a.nextArgv() || a.cur == nil {
+			if !a.nextArgv() {
 				raise("ArgumentError", "%s", noStream)
 			}
 			return vm.send(a.cur, meth, args, nil)
@@ -666,7 +643,7 @@ func (vm *VM) registerARGF() {
 	// rewind returns the current file to its start and resets the line counter.
 	d("rewind", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		a := self(v)
-		if !a.nextArgv() || a.cur == nil {
+		if !a.nextArgv() {
 			raise("ArgumentError", "no stream to rewind")
 		}
 		a.cur.pos = 0
@@ -677,17 +654,18 @@ func (vm *VM) registerARGF() {
 	})
 }
 
-// includeARGFEnumerable mixes Enumerable into ARGF.class, as io.c Init_IO does
-// with rb_include_module(rb_cARGF, rb_mEnumerable). It cannot run inside
-// registerARGF: Enumerable is defined by the Ruby prelude, which is loaded after
-// the built-ins, so the module does not exist yet there — the same reason
-// includeStringIOEnumerable is a separate post-prelude step.
-func (vm *VM) includeARGFEnumerable() {
-	en, ok := vm.consts["Enumerable"].(*RClass)
-	if !ok || vm.cARGF == nil || hasInclude(vm.cARGF, en) {
-		return
+// finishARGF completes ARGF once the prelude and the top-level globals exist —
+// neither is available while registerARGF runs. It does the two things io.c
+// Init_IO does that need them: mixing in Enumerable
+// (rb_include_module(rb_cARGF, rb_mEnumerable)), and binding ARGF.argv to the
+// ARGV Array, so #argv IS that Array and ARGV.replace is visible through it.
+func (vm *VM) finishARGF() {
+	if argv, ok := vm.consts["ARGV"].(*object.Array); ok {
+		vm.consts["ARGF"].(*argfObj).files = argv
 	}
-	vm.cARGF.includes = append(vm.cARGF.includes, en)
+	if en, ok := vm.consts["Enumerable"].(*RClass); ok {
+		vm.cARGF.includes = append(vm.cARGF.includes, en)
+	}
 }
 
 // argfEnum is the Enumerator ARGF's iterators return without a block. Its #size
