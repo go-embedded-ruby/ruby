@@ -46,16 +46,16 @@ const coreNativeFloor = 460
 // this, in both directions: a new undeclared native fails, and so does an entry
 // here that has since been declared.
 var argcUndeclarableCoreMethods = map[string]bool{
-	"Float#pow":                false, // no Float#pow in ruby 4.0.5 (Integer#pow only) or activesupport
-	"String#to_html":           false, // rbgo's own name; kramdown 2.5.2 defines no String#to_html
-	"String#to_kramdown_html":  false, // likewise
-	"Array#page":               false, // kaminari/pagy shim; neither gem defines Array#page
-	"String#truncate":          true,  // activesupport arity -2 (truncate_to, options = {})
-	"Array#in_groups":          true,  // activesupport arity -2 (number, fill_with = nil, &block)
-	"Array#in_groups_of":       true,  // activesupport arity -2
-	"Array#pack":               true,  // ruby arity -2, from <internal:pack>
-	"String#unpack":            true,  // ruby arity -2, from <internal:pack>
-	"String#unpack1":           true,  // ruby arity -2, from <internal:pack>
+	"Float#pow":               false, // no Float#pow in ruby 4.0.5 (Integer#pow only) or activesupport
+	"String#to_html":          false, // rbgo's own name; kramdown 2.5.2 defines no String#to_html
+	"String#to_kramdown_html": false, // likewise
+	"Array#page":              false, // kaminari/pagy shim; neither gem defines Array#page
+	"String#truncate":         true,  // activesupport arity -2 (truncate_to, options = {})
+	"Array#in_groups":         true,  // activesupport arity -2 (number, fill_with = nil, &block)
+	"Array#in_groups_of":      true,  // activesupport arity -2
+	"Array#pack":              true,  // ruby arity -2, from <internal:pack>
+	"String#unpack":           true,  // ruby arity -2, from <internal:pack>
+	"String#unpack1":          true,  // ruby arity -2, from <internal:pack>
 }
 
 // isPlainNative reports whether m is a native method whose arity can only come
