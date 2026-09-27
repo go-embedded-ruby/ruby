@@ -566,19 +566,41 @@ func (vm *VM) registerARGF() {
 	d("getc", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return self(v).readAcross(func(o *IOObj) object.Value { return vm.send(o, "getc", nil, nil) })
 	})
+	// io.c argf_readchar raises on "no stream at all" (its retry loop opens with
+	// `if (!next_argv()) rb_eof_error()`), and returns nil only for an exhausted
+	// $stdin, which has no next file to move to.
 	d("readchar", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		c := vm.send(v, "getc", nil, nil)
-		if object.IsNil(c) {
-			raise("EOFError", "end of file reached")
+		a := self(v)
+		for {
+			if !a.nextArgv() || a.cur == nil {
+				raise("EOFError", "end of file reached")
+			}
+			ch := vm.send(a.cur, "getc", nil, nil)
+			if !object.IsNil(ch) {
+				return ch
+			}
+			if a.nextP == -1 {
+				return object.NilV
+			}
+			a.closeCur()
+			a.nextP = 1
 		}
-		return c
 	})
 	// getbyte / readbyte: the next byte across the files.
 	d("getbyte", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return self(v).readAcross(func(o *IOObj) object.Value { return vm.send(o, "getbyte", nil, nil) })
 	})
+	// io.c argf_readbyte is NOT the byte twin of argf_readchar: it opens with
+	// NEXT_ARGF_FORWARD, i.e. `if (!next_argv()) return Qnil`, so with no stream at
+	// all it RETURNS NIL where #readchar raises, and raises EOFError only when a
+	// stream exists and yields nothing. MRI 4.0.5 confirms the asymmetry:
+	// ARGF.class.new(f).tap(&:read).readbyte is nil, .readchar is EOFError.
 	d("readbyte", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		b := vm.send(v, "getbyte", nil, nil)
+		a := self(v)
+		if !a.nextArgv() || a.cur == nil {
+			return object.NilV
+		}
+		b := a.readAcross(func(o *IOObj) object.Value { return vm.send(o, "getbyte", nil, nil) })
 		if object.IsNil(b) {
 			raise("EOFError", "end of file reached")
 		}
