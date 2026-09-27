@@ -45,11 +45,13 @@ func (vm *VM) bindingEval(b *Binding, src string, loc evalLocation) object.Value
 	// line) — stamp the compiled ISeq, and the binding's own source location is
 	// left untouched (bind_location reads the binding, not the eval).
 	setISeqFile(iseq, loc.file)
-	// eval is transparent to Kernel#__method__ / #__callee__: the evaluated code
-	// inherits the caller's method context (so `eval("__method__")`, which routes
-	// through the caller's binding, reports the enclosing method), matching the
-	// no-binding eval path.
-	vm.pendingMethodCtx = vm.currentMethodCtxPtr()
+	// eval is transparent to Kernel#__method__ / #__callee__, and through a BINDING
+	// the answer is the binding's own frame, not the frame doing the eval: MRI reads
+	// the method entry of the cfp the binding pins, so a Binding captured inside `q`
+	// and eval'd from the top level reports :q (measured on ruby 4.0.5). The pair
+	// the capturing frame recorded rides on the Binding for exactly this.
+	mc := b.method
+	vm.pendingMethodCtx = &mc
 	return vm.exec(iseq, b.self, nil, b.definee, "", b.env, nil, nil, nil, nil)
 }
 

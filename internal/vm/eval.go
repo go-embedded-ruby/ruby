@@ -219,14 +219,26 @@ func (vm *VM) registerEval() {
 			}
 			return vm.bindingEval(b, src, loc)
 		}
-		// Run against the caller's self/definee with a fresh local scope; a runtime
-		// RubyError from the evaluated code propagates (and is rescuable) as usual.
-		// eval is transparent to Kernel#__method__ / #__callee__: the evaluated code
-		// inherits the caller's method context (eval "__method__" inside a method
-		// reports that method), so hand exec the caller's pair.
-		iseq := vm.compileEval(src, loc)
-		vm.pendingMethodCtx = vm.currentMethodCtxPtr()
-		return vm.exec(iseq, self, nil, vm.evalDefinee(self), "", nil, nil, nil, nil, nil)
+		// No scope argument: MRI still evaluates against the CALLER'S LOCAL SCOPE —
+		// rb_f_eval calls eval_string_with_cref(self, ...) on the calling cfp, so
+		// `def m; x = 41; eval("x + 1"); end` is 42 on ruby 4.0.5. The self is the
+		// RECEIVER, not the frame's: `5.send(:eval, "[self, x]")` measures [5, 1]
+		// there, so the two halves come from different places.
+		//
+		// rbgo used to reach this only through a COMPILER REWRITE of the bareword
+		// `eval(str)` into `eval(str, binding)`, which meant #send, an alias, a
+		// Method object and every other arity ran with a fresh, empty local scope.
+		// Reading the caller's frame here covers all of them at once, and the rewrite
+		// is gone.
+		//
+		// Only the LOCAL SCOPE is taken from the caller here: the definee keeps
+		// coming from evalDefinee(self) below, so this change adds the locals and
+		// alters nothing else. (MRI takes the definee from the caller's CREF too,
+		// which the frame now carries — a separate move, measured separately.)
+		cb := vm.callerBinding()
+		cb.self = self
+		cb.definee = vm.evalDefinee(self)
+		return vm.bindingEval(cb, src, loc)
 	})
 }
 

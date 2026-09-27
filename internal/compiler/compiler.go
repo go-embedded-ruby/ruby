@@ -1297,16 +1297,13 @@ func (c *Compiler) compileCall(v *ast.Call) {
 		})
 		return
 	}
-	// A bare eval(str) with no explicit binding evaluates against the caller's
-	// binding, so it can see (and assign) the caller's local variables — exactly
-	// like eval(str, binding). Rewrite it to that two-argument form using the
-	// binding intrinsic; the added `binding` argument compiles to OpBinding above.
-	if v.Recv == nil && v.Block == nil && v.Name == "eval" && len(v.Args) == 1 {
-		v2 := *v
-		v2.Args = []ast.Node{v.Args[0], &ast.Call{Name: "binding"}}
-		c.compileCall(&v2)
-		return
-	}
+	// NO rewrite of `eval(str)` into `eval(str, binding)` here any more. It existed
+	// because Kernel#eval, a native, could not reach the caller's local scope — and
+	// it only ever covered this ONE shape: #send, an alias, a Method object and
+	// every other arity still ran against an empty scope. Kernel#eval now reads the
+	// calling frame directly (vm.callerBinding), which is where MRI takes it from
+	// (rb_f_eval -> eval_string_with_cref on the calling cfp), so the rewrite would
+	// be a second door onto the same rule.
 	// A bare, zero-arg name that resolves to a local is a variable read, not a
 	// send. The parser emits a Call (not a VarRef) for an identifier whose
 	// assignment it never saw — which is exactly how an eval'd string references

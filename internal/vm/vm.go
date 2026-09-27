@@ -224,11 +224,81 @@ func (vm *VM) frameLine(i int) int {
 	return fc.iseq.FirstLine
 }
 
-// frameCode is one frame's code position: the ISeq it runs and the instruction
-// it has reached. It is MRI's (cfp->iseq, cfp->pc).
+// frameCode is one frame's code position AND scope: the ISeq it runs, the
+// instruction it has reached, and the (env, self, definee) triple it runs under.
+// The first pair is MRI's (cfp->iseq, cfp->pc); the second is MRI's (cfp->ep,
+// cfp->self, the cref reached through cfp->ep[VM_ENV_DATA_INDEX_ME_CREF]) —
+// rb_control_frame_t carries all five side by side (vm_core.h ruby_4_0:915-926).
+//
+// The triple used to live in exec's LOCALS, and that is the whole of why a native
+// method could not reach the calling scope: rbgo pushes no frame for a native, so
+// Kernel#binding — rb_f_binding -> rb_binding_new -> rb_vm_make_binding(ec,
+// ec->cfp) (proc.c ruby_4_0:328-333, 379-383) — had nothing to read. The
+// compiler papered over the single shape `eval(str)` by rewriting it to
+// `eval(str, binding)`; every other shape (#send, an alias, a Method object, any
+// other arity) missed the caller's locals, and Kernel#binding could not be a
+// method at all.
 type frameCode struct {
 	iseq *bytecode.ISeq
 	pc   int
+
+	// env is the frame's local-variable environment (MRI's cfp->ep). It is nil
+	// only before exec has published it, which is what frameBinding skips on:
+	// MRI's rb_vm_get_binding_creatable_next_cfp (vm_core.h ruby_4_0:1993) walks
+	// outward for the same reason, past frames whose env cannot be escaped.
+	env     *Env
+	self    object.Value
+	definee *RClass
+}
+
+// frameBinding builds a Binding for the innermost frame at or below index i that
+// can make one, or nil when no frame can. This is rb_vm_make_binding after
+// rb_vm_get_binding_creatable_next_cfp: rbgo pushes a frame only for a Ruby-level
+// ISeq (a native pushes none), so the walk only has to skip a frame whose scope
+// exec has not published yet.
+//
+// The line comes from frameLine, i.e. from the frame's LIVE pc, which the
+// interpreter publishes on every instruction — so Binding#source_location reports
+// the capture line the way bind_location reads bind->first_lineno (proc.c
+// ruby_4_0:805-815) rather than the 0 rbgo reported for want of the number.
+func (vm *VM) frameBinding(i int) *Binding {
+	if i >= len(vm.frameCode) {
+		i = len(vm.frameCode) - 1
+	}
+	for ; i >= 0; i-- {
+		fc := vm.frameCode[i]
+		if fc.env == nil || fc.iseq == nil {
+			continue
+		}
+		b := &Binding{
+			env:     fc.env,
+			self:    fc.self,
+			definee: fc.definee,
+			file:    fc.iseq.File,
+			line:    vm.frameLine(i),
+			names:   append([]string(nil), fc.iseq.Locals...),
+		}
+		// A Binding is transparent to Kernel#__method__ / #__callee__: code eval'd
+		// through it reports the method the binding was captured in, which is the
+		// pair that frame recorded.
+		if i < len(vm.frameMethods) {
+			b.method = vm.frameMethods[i]
+		}
+		return b
+	}
+	// No frame has published a scope — a native reached from Go before Run, or
+	// after the Run boundary reset the stacks. The only scope that exists then is
+	// the top level's, which is what TOPLEVEL_BINDING is; returning it keeps every
+	// caller free of a nil case it could not otherwise exercise.
+	return vm.newToplevelBinding()
+}
+
+// callerBinding is the Binding a NATIVE method's caller would get from
+// Kernel#binding. A native pushes no frame, so the top of the frame stack IS the
+// calling Ruby frame — the cfp rb_vm_get_binding_creatable_next_cfp lands on once
+// it has skipped the CFUNC frame.
+func (vm *VM) callerBinding() *Binding {
+	return vm.frameBinding(len(vm.frameNames) - 1)
 }
 
 func (vm *VM) uncaughtBacktrace(e RubyError) []object.Value {
@@ -1559,6 +1629,14 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 	// instruction it has reached, which is what a backtrace resolves to a line.
 	myFrame := len(vm.frameNames) - 1
 	vm.setFrameCode(myFrame, iseq)
+	// Publish this frame's SCOPE beside its code position, so a native method —
+	// which pushes no frame of its own — can read the calling env/self/definee off
+	// the top of the stack (frameBinding). definee is the frame's, not
+	// methodDefinee's: a Binding captures the scope `def` and `CONST =` target,
+	// which is what MRI's cref slot holds.
+	vm.frameCode[myFrame].env = env
+	vm.frameCode[myFrame].self = self
+	vm.frameCode[myFrame].definee = definee
 	// frameCrefs mirrors frameNames too; the cref is filled in below once lexCref
 	// is known (a nil placeholder keeps the stacks aligned until then).
 	vm.frameCrefs = append(vm.frameCrefs, nil)
@@ -2586,7 +2664,9 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				push(vm.runDefinedGuard(iseq.Children[in.A], self, definee, env, block))
 			case bytecode.OpBinding:
 				markEnvCaptured(env)
-				push(&Binding{env: env, self: self, definee: definee, file: iseq.File, names: append([]string(nil), iseq.Locals...)})
+				// One door: the bareword intrinsic and Kernel#binding both build the
+				// Binding from this frame's published scope, so the two cannot drift.
+				push(vm.frameBinding(myFrame))
 			case bytecode.OpArgGiven:
 				push(object.Bool(in.A < nPosGiven))
 			case bytecode.OpKwGiven:
