@@ -3182,13 +3182,16 @@ func (c *Compiler) storeLocal(name string) {
 	c.cur().emit(bytecode.OpSetLocal, slot, depth)
 }
 
-// compileBegin compiles begin/rescue/else/ensure. When an ensure clause is
-// present it wraps the rescue handling in a second handler that runs ensure on
-// both the normal and the propagating paths.
 // emitErrinfoRestore writes the innermost open begin/rescue's saved errinfo back
-// into the interpreter's cell, which is what leaving a rescue clause means for
-// $!. It is a no-op outside any rescue clause (a bare `retry` in a `for`/block
-// body reaches the Retry case with no rescue open).
+// into the interpreter's cell, which is what leaving a rescue clause means for $!.
+//
+// It declines in two cases, and both are load-bearing rather than defensive.
+// With no rescue clause open there is nothing to close — every `return` in the
+// program reaches here, and almost none of them is inside one. And when the
+// innermost open scope belongs to ANOTHER ISeq — `begin; raise; rescue; [1].each
+// { return }; end`, where the return is compiled into the block's builder — the
+// slot index would address a different frame's locals entirely; the interpreter
+// closes that scope instead, as the unwind leaves the frame.
 func (c *Compiler) emitErrinfoRestore() {
 	if len(c.errinfoSlots) == 0 {
 		return
@@ -3210,6 +3213,9 @@ type errinfoScope struct {
 	slot  int
 }
 
+// compileBegin compiles begin/rescue/else/ensure. When an ensure clause is
+// present it wraps the rescue handling in a second handler that runs ensure on
+// both the normal and the propagating paths.
 func (c *Compiler) compileBegin(v *ast.Begin) {
 	if v.EnsureBody == nil {
 		c.compileBeginRescue(v)

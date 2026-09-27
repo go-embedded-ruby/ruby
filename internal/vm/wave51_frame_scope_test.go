@@ -113,6 +113,12 @@ func TestErrinfoIsPerRescueClause(t *testing.T) {
 		// interpreter closes the scope as the unwind leaves the frame.
 		{`def g; [1].each { begin; raise "e"; rescue; return; end }; end; g; p $!`, "nil\n"},
 		{`def k; 1.times { return }; end; def bar; begin; raise "b"; rescue; k; end; end; bar; p $!`, "nil\n"},
+		// The same shape with the block written INSIDE the clause: the `return` is
+		// compiled into the block's builder, so the clause's slot index means nothing
+		// there and the compiler declines to emit the restore — the interpreter closes
+		// the scope instead. ruby 4.0.5 answers 42 then nil, and [7, nil].
+		{`def m; begin; raise "x"; rescue; [1].each { return 42 }; end; end; p m; p $!`, "42\nnil\n"},
+		{`def m; begin; raise "x"; rescue; 1.times { return 7 }; end; end; p [m, $!]`, "[7, nil]\n"},
 		// $! is read-only to Ruby, and the reserved cell the lowering uses does not
 		// change that.
 		{`begin; eval("$! = RuntimeError.new"); rescue NameError => e; p e.message; end`,
