@@ -83,7 +83,14 @@ func TestClosedWasmBuildIntegration(t *testing.T) {
 
 	app := filepath.Join(dir, "app.rb")
 	program := "JS.log(\"closed wasm ruby ran\")\n" +
-		"JS.log(\"document is: \" + JS.document.to_s)\n"
+		"JS.log(\"document is: \" + JS.document.to_s)\n" +
+		// #708 on the wasm side: whether a closed binary can take arguments must
+		// not be decided by a build tag. seedProcessArgs reads os.Args on every
+		// target; what differs is what the HOST supplies. Under node, Go's own
+		// wasm_exec_node.js glue passes process.argv.slice(2) through, so the two
+		// arguments given below arrive — MEASURED here rather than assumed, because
+		// the assumption ("wasm has no argv") is wrong for this host.
+		"JS.log(\"argv=\" + ARGV.inspect)\n"
 	if err := os.WriteFile(app, []byte(program), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +128,7 @@ func TestClosedWasmBuildIntegration(t *testing.T) {
 	if _, err := os.Stat(glue); err != nil {
 		t.Fatalf("no wasm_exec_node.js in this toolchain (%s): %v", glue, err)
 	}
-	run := exec.Command(node, glue, wasmOut)
+	run := exec.Command(node, glue, wasmOut, "alpha", "beta")
 	out, err := run.CombinedOutput()
 	// A non-zero exit is EXPECTED here, and only for one reason. closed_main_wasm.go
 	// ends in select{} on purpose, to keep the runtime alive for the JS event and
@@ -141,5 +148,9 @@ func TestClosedWasmBuildIntegration(t *testing.T) {
 	// found there, rather than trapping: a missing global must come back as a value.
 	if !strings.Contains(string(out), "document is: ") {
 		t.Errorf("the JS bridge did not report a value for the absent `document` global; node said:\n%s", out)
+	}
+	// The module's own arguments reached the embedded program's ARGV.
+	if want := `argv=["alpha", "beta"]`; !strings.Contains(string(out), want) {
+		t.Errorf("the wasm module's arguments did not reach ARGV (want %s); node said:\n%s", want, out)
 	}
 }
