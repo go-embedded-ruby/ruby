@@ -19,8 +19,11 @@ output. Where a blocker was tractable, it was stubbed/worked around to expose th
 | Puppet    | `puppetlabs/puppet` @ `e227c27` (PUPPETVERSION `8.11.0`) |
 | Rack      | `rack/rack` @ `1e62232` |
 
-Invocation is `rbgo run <file.rb>` or `rbgo run -e '<code>'` (note the `run`
-sub-command; bare `rbgo -e` is not the CLI form).
+Invocation is `rbgo <file.rb> [arguments...]` or `rbgo -e '<code>' [arguments...]`,
+following `ruby [options] [--] [filepath] [arguments]`; the explicit `run`
+sub-command (`rbgo run <file.rb>`) accepts the same command line. The parenthesis
+that used to stand here said bare `rbgo -e` was not the CLI form, which was never
+true.
 
 ---
 
