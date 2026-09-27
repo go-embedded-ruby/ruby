@@ -19,6 +19,9 @@ import (
 // runtime stays alive for browser callbacks.
 func main() {
 	machine := vm.New(os.Stdout)
+	// The program's own arguments: a standalone binary that cannot take arguments
+	// is not a usable program (#708). See seedProcessArgs in closed_argv.go.
+	seedProcessArgs(machine)
 	_, err := machine.Run(embeddedProgram())
 	finish(machine, err) // never returns; see exit_status.go
 }

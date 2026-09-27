@@ -24,6 +24,9 @@ import (
 // the registered js.Func callbacks remain live (this mirrors cmd/wasm/main.go).
 func main() {
 	machine := vm.New(os.Stdout)
+	// The program's own arguments, from whatever the wasm host supplied (#708).
+	// See seedProcessArgs in closed_argv.go.
+	seedProcessArgs(machine)
 	if _, err := machine.Run(embeddedProgram()); err != nil {
 		finish(machine, err) // never returns; see exit_status.go
 	}
