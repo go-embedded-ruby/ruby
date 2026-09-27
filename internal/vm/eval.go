@@ -47,18 +47,28 @@ func (vm *VM) evalDefaultPath() string {
 }
 
 // evalLoc builds the location for an eval whose optional filename is fileArg and
-// optional first line lineArg (either nil for "not given"). MRI coerces the
-// filename with StringValue and the line with NUM2INT, and treats an explicit
-// nil filename exactly as an absent one (rb_f_eval tests NIL_P(vfile),
-// specific_eval tests NIL_P(file)).
-func (vm *VM) evalLoc(fileArg, lineArg object.Value) evalLocation {
+// optional first line lineArg — a Go nil for either means the argument was not
+// passed at all, which takes the default.
+//
+// An EXPLICIT Ruby nil filename is where the two families part, and the
+// difference is measurable: rb_f_eval runs `StringValue(vfile)` whenever
+// `argc >= 3` and only THEN tests NIL_P (vm_eval.c ruby_4_0:2066-2073), so
+// eval(src, nil, nil) is a TypeError; specific_eval tests `NIL_P(file)` BEFORE
+// StringValue (vm_eval.c ruby_4_0:2297-2302), so instance_eval(src, nil) takes
+// the default path. Binding#eval is rb_f_eval with the binding spliced in, so it
+// raises like eval. All four verified against ruby 4.0.5. nilFileAllowed picks
+// the arm.
+//
+// An explicit nil LINE is a TypeError in both families: NUM2INT on nil.
+func (vm *VM) evalLoc(fileArg, lineArg object.Value, nilFileAllowed bool) evalLocation {
 	loc := evalLocation{line: 1}
-	if fileArg != nil && !object.IsNil(fileArg) {
-		loc.file = vm.coerceFormatString(fileArg)
-	} else {
+	switch {
+	case fileArg == nil, nilFileAllowed && object.IsNil(fileArg):
 		loc.file = vm.evalDefaultPath()
+	default:
+		loc.file = vm.coerceFormatString(fileArg)
 	}
-	if lineArg != nil && !object.IsNil(lineArg) {
+	if lineArg != nil {
 		loc.line = vm.evalLineno(lineArg)
 	}
 	return loc
@@ -72,6 +82,11 @@ func (vm *VM) evalLoc(fileArg, lineArg object.Value) evalLocation {
 func (vm *VM) evalLineno(v object.Value) int {
 	if i, ok := v.(object.Integer); ok {
 		return int(i)
+	}
+	// nil is rb_to_int's own arm, with its own wording ("from nil to integer",
+	// not "of nil into Integer"): eval(src, nil, "f", nil) raises it.
+	if object.IsNil(v) {
+		raise("TypeError", "no implicit conversion from nil to integer")
 	}
 	if vm.respondsToDynamic(v, "to_int") {
 		r := vm.send(v, "to_int", nil, nil)
@@ -192,7 +207,7 @@ func (vm *VM) registerEval() {
 		if len(args) >= 4 {
 			lineArg = args[3]
 		}
-		loc := vm.evalLoc(fileArg, lineArg)
+		loc := vm.evalLoc(fileArg, lineArg, false)
 		// A scope argument must be a Binding or nil: rb_f_eval routes a non-nil
 		// scope through Check_TypedStruct, which rejects anything else with "wrong
 		// argument type X (expected binding)". rbgo used to IGNORE a non-Binding

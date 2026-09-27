@@ -562,7 +562,7 @@ func (vm *VM) bootstrap() {
 		if len(args) >= 3 {
 			lineArg = args[2]
 		}
-		return vm.instanceEvalString(self, src, vm.evalLoc(fileArg, lineArg))
+		return vm.instanceEvalString(self, src, vm.evalLoc(fileArg, lineArg, true))
 	})
 	vm.cBasicObject.define("instance_exec", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		if blk == nil {
@@ -1940,7 +1940,7 @@ func (vm *VM) bootstrap() {
 		if len(args) >= 3 {
 			lineArg = args[2]
 		}
-		loc := vm.evalLoc(fileArg, lineArg)
+		loc := vm.evalLoc(fileArg, lineArg, true)
 		defer vm.freshEvalVisibility(cls)()
 		return vm.classEvalString(cls, src, loc)
 	}

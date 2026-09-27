@@ -56,7 +56,10 @@ func (vm *VM) registerBinding() {
 		if len(args) >= 3 {
 			lineArg = args[2]
 		}
-		return vm.bindingEval(self.(*Binding), src, vm.evalLoc(fileArg, lineArg))
+		// nilFileAllowed is false: bind_eval splices the binding into rb_f_eval's
+		// argv, so an explicit nil filename reaches StringValue there and raises,
+		// exactly as eval(src, b, nil) does.
+		return vm.bindingEval(self.(*Binding), src, vm.evalLoc(fileArg, lineArg, false))
 	})
 	cBinding.define("receiver", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return self.(*Binding).self

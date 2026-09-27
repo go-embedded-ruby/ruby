@@ -39,9 +39,8 @@ func TestEvalLocationArguments(t *testing.T) {
 		{`p eval("\n\n__LINE__", nil, "n.rb", -100)`, "-98"},
 		// The lineno argument is coerced through #to_int.
 		{`n = Object.new; def n.to_int; 15; end; p eval("__LINE__", nil, "t.rb", n)`, "15"},
-		// An explicit nil filename is treated as an absent one, and so is a nil
-		// binding: both fall back to the default rather than raising.
-		{`p eval("1", nil, nil, 3)`, "1"},
+		// An explicit nil SCOPE is an absent one: it falls back to the caller.
+		{`p eval("1 + 1", nil)`, "2"},
 	} {
 		if got := eval(t, c.src); got != c.want+"\n" {
 			t.Errorf("src=%q got=%q want=%q", c.src, got, c.want+"\n")
@@ -140,6 +139,38 @@ func TestEvalRejectsANonBindingScope(t *testing.T) {
 	}
 }
 
+// TestEvalNilFileAndLineArguments: an explicit Ruby nil is where rb_f_eval and
+// specific_eval part. rb_f_eval runs StringValue(vfile) whenever argc >= 3 and
+// only then tests NIL_P, so eval(src, nil, nil) raises; specific_eval tests
+// NIL_P first, so instance_eval(src, nil) takes the default path. Binding#eval
+// splices the binding into rb_f_eval's argv, so it raises like eval. A nil LINE
+// is NUM2INT on nil in both families, with rb_to_int's own wording. All nine
+// measured against ruby 4.0.5.
+func TestEvalNilFileAndLineArguments(t *testing.T) {
+	const nilStr = "no implicit conversion of nil into String"
+	const nilInt = "no implicit conversion from nil to integer"
+	for _, c := range []struct{ src, want string }{
+		{`begin; eval("1", nil, nil); rescue TypeError => e; print e.message; end`, nilStr},
+		{`begin; eval("1", nil, nil, 5); rescue TypeError => e; print e.message; end`, nilStr},
+		{`begin; eval("1", nil, "f", nil); rescue TypeError => e; print e.message; end`, nilInt},
+		{`begin; binding.eval("1", nil); rescue TypeError => e; print e.message; end`, nilStr},
+		{`begin; binding.eval("1", nil, 7); rescue TypeError => e; print e.message; end`, nilStr},
+		{`begin; binding.eval("1", "f", nil); rescue TypeError => e; print e.message; end`, nilInt},
+		// specific_eval's family takes the default path for a nil filename.
+		{`print Object.new.instance_eval("__FILE__", nil)`, "(eval)"},
+		{`print Object.new.instance_eval("__FILE__", nil, 5)`, "(eval)"},
+		{`print Module.new.module_eval("__FILE__", nil)`, "(eval)"},
+		{`print Class.new.class_eval("__FILE__", nil)`, "(eval)"},
+		// but still raises for a nil line.
+		{`begin; Object.new.instance_eval("1", "f", nil); rescue TypeError => e; print e.message; end`, nilInt},
+		{`begin; Module.new.module_eval("1", "f", nil); rescue TypeError => e; print e.message; end`, nilInt},
+	} {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q got=%q want=%q", c.src, got, c.want)
+		}
+	}
+}
+
 // TestEvalLinenoCoercionErrors: NUM2INT on the lineno argument reports
 // rb_to_integer's message when #to_int answers with a non-Integer, and the plain
 // implicit-conversion TypeError when there is no #to_int at all.
@@ -179,11 +210,18 @@ func TestEvalArity(t *testing.T) {
 // Class and the new class reported none.
 func TestEvalDefineeIsTheModuleItself(t *testing.T) {
 	for _, c := range []struct{ src, want string }{
+		// The ONE-argument form is rewritten by the compiler into eval(src, binding)
+		// (compiler.go, the `eval` intrinsic), so its definee comes from the binding
+		// and this arm does not exercise evalDefinee. Every other arity — and a
+		// dispatch that the rewrite cannot see, such as #send — reaches it, so each
+		// case below is stated in one of those forms.
+		{`c = Class.new { eval("def m; 1; end", nil, "f", 1) }; p c.new.m`, "1"},
+		{`c = Class.new { eval("def m; end", nil, "f", 1) }; p c.instance_method(:m).owner.equal?(c)`, "true"},
+		{`c = Class.new { send(:eval, "def m; end") }; p c.instance_method(:m).owner.equal?(c)`, "true"},
 		{`c = Class.new { eval("def m; 1; end") }; p c.new.m`, "1"},
-		{`c = Class.new { eval("def m; end") }; p c.instance_method(:m).owner.equal?(c)`, "true"},
-		{`m = Module.new { eval("def mm; 2; end") }; k = Class.new { include m }; p k.new.mm`, "2"},
+		{`m = Module.new { eval("def mm; 2; end", nil, "f", 1) }; k = Class.new { include m }; p k.new.mm`, "2"},
 		// An ordinary object's cref is still its class.
-		{`class EvD; def go; eval("def later; 3; end"); end; end; o = EvD.new; o.go; p o.later`, "3"},
+		{`class EvD; def go; send(:eval, "def later; 3; end"); end; end; o = EvD.new; o.go; p o.later`, "3"},
 	} {
 		if got := eval(t, c.src); got != c.want+"\n" {
 			t.Errorf("src=%q got=%q want=%q", c.src, got, c.want+"\n")
