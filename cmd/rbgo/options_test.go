@@ -7,7 +7,9 @@
 package main
 
 import (
+	"errors"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -408,4 +410,96 @@ func captureRun(t *testing.T, fn func()) (stdout, stderr string) {
 	errW.Close()
 	os.Stdout, os.Stderr = savedOut, savedErr
 	return <-outCh, <-errCh
+}
+
+// TestLoadErrorIsMRIsLoadErrorLine: a script rbgo cannot read must produce the
+// line ruby produces. Measured, all four against MRI 4.0.5 with the same argv:
+//
+//	ruby: No such file or directory -- nosuch.rb (LoadError)   exit 1
+//	ruby: Is a directory -- adir (LoadError)                   exit 1
+//	ruby: Permission denied -- noperm.rb (LoadError)           exit 1
+//
+// Before this, rbgo printed Go's *os.PathError — "rbgo: open nosuch.rb: no such
+// file or directory" — with the same exit status. The status was never the
+// defect; the wording was.
+//
+// A/B: drop the capitalise() call and every row fails, because Go's errno strings
+// are strerror's text with a lower-case first letter.
+func TestLoadErrorIsMRIsLoadErrorLine(t *testing.T) {
+	dir := t.TempDir()
+	sub := filepath.Join(dir, "adir")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	noperm := filepath.Join(dir, "noperm.rb")
+	if err := os.WriteFile(noperm, []byte("p 1\n"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	missing := filepath.Join(dir, "nosuch.rb")
+
+	for _, c := range []struct {
+		name, path, want string
+	}{
+		{"missing", missing, "rbgo: No such file or directory -- " + missing + " (LoadError)"},
+		{"a directory", sub, "rbgo: Is a directory -- " + sub + " (LoadError)"},
+		{"unreadable", noperm, "rbgo: Permission denied -- " + noperm + " (LoadError)"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if os.Geteuid() == 0 && c.name == "unreadable" {
+				t.Skip("root reads a 0000 file, so this row cannot be arranged")
+			}
+			o, err := parseOptions([]string{c.path}, io.Discard)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, _, _, lerr := o.load()
+			if lerr == nil {
+				t.Fatalf("load(%q) returned no error", c.path)
+			}
+			var le *loadError
+			if !errors.As(lerr, &le) {
+				t.Fatalf("load error is %T, want *loadError", lerr)
+			}
+			if got := le.Error(); got != c.want {
+				t.Errorf("Error() = %q, want %q", got, c.want)
+			}
+			// Unwrap must still reach the fs.PathError, so a caller can ask
+			// errors.Is(err, fs.ErrNotExist).
+			var pe *fs.PathError
+			if !errors.As(lerr, &pe) {
+				t.Errorf("the underlying *fs.PathError is not reachable through Unwrap")
+			}
+		})
+	}
+}
+
+// TestCapitaliseLeavesNonASCIIAlone pins the guard rather than the happy path:
+// every errno string Go carries is ASCII, and a first rune that is not an ASCII
+// lower-case letter must come back byte-identical rather than half-encoded.
+func TestCapitaliseLeavesNonASCIIAlone(t *testing.T) {
+	for _, c := range []struct{ in, want string }{
+		{"", ""},
+		{"no such file", "No such file"},
+		{"Already capital", "Already capital"},
+		{"é accented", "é accented"},
+		{"1 leading digit", "1 leading digit"},
+	} {
+		if got := capitalise(c.in); got != c.want {
+			t.Errorf("capitalise(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// TestErrnoTextFallsBackToTheWholeError: an error that is not a *fs.PathError has
+// no errno to strip, and inventing a message would be worse than an unfamiliar
+// one.
+func TestErrnoTextFallsBackToTheWholeError(t *testing.T) {
+	if got := errnoText(errors.New("something else entirely")); got != "something else entirely" {
+		t.Errorf("errnoText = %q, want the error's own text", got)
+	}
+	// A PathError whose Err is nil has no errno at all, and (*PathError).Error()
+	// would panic on it. os.ReadFile never builds one; the answer is still defined.
+	if got := errnoText(&fs.PathError{Op: "open", Path: "x"}); got != "open x" {
+		t.Errorf("errnoText of a PathError with no Err = %q, want %q", got, "open x")
+	}
 }

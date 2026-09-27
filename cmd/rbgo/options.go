@@ -7,8 +7,10 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"strings"
 )
@@ -287,7 +289,54 @@ func (o *options) load() (src, name string, fromFile bool, err error) {
 	}
 	b, rerr := os.ReadFile(o.script)
 	if rerr != nil {
-		return "", "", false, rerr
+		return "", "", false, &loadError{path: o.script, err: rerr}
 	}
 	return string(b), o.script, true, nil
+}
+
+// loadError is a script that could not be read. MRI reports this from
+// open_load_file through rb_load_fail, which raises LoadError with the message
+// "<strerror(errno)> -- <path>"; uncaught, that reaches stderr as
+// "ruby: No such file or directory -- nosuch.rb (LoadError)" with exit 1.
+//
+// Go's syscall errno strings are the same strerror text with a lowercase first
+// letter ("no such file or directory"), and an *os.PathError wraps them with its
+// own operation and path ("open nosuch.rb: no such file or directory"). Both
+// differences are undone here, so the line is MRI's.
+type loadError struct {
+	path string
+	err  error
+}
+
+func (e *loadError) Error() string {
+	return "rbgo: " + capitalise(errnoText(e.err)) + " -- " + e.path + " (LoadError)"
+}
+
+func (e *loadError) Unwrap() error { return e.err }
+
+// errnoText strips an *os.PathError's operation and path, leaving the bare
+// strerror text MRI names. An error that is not a PathError is used as it is,
+// because inventing a message would be worse than an unfamiliar one.
+func errnoText(err error) string {
+	var pe *fs.PathError
+	if errors.As(err, &pe) {
+		if pe.Err == nil {
+			// os.ReadFile never builds one of these, and (*PathError).Error()
+			// dereferences Err unconditionally, so say what IS known rather than
+			// panic on a malformed error from somewhere else.
+			return pe.Op + " " + pe.Path
+		}
+		return pe.Err.Error()
+	}
+	return err.Error()
+}
+
+// capitalise upper-cases the first BYTE only when it is an ASCII lower-case
+// letter. Every errno string Go carries is ASCII, and a multi-byte first rune
+// (which cannot occur here) is left untouched rather than mangled.
+func capitalise(s string) string {
+	if s == "" || s[0] < 'a' || s[0] > 'z' {
+		return s
+	}
+	return string(s[0]-'a'+'A') + s[1:]
 }

@@ -22,6 +22,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
@@ -70,6 +71,12 @@ func runCmd(args []string) {
 	}
 	src, name, fromFile, err := o.load()
 	if err != nil {
+		var le *loadError
+		if errors.As(err, &le) {
+			// MRI's own LoadError line for an unreadable script, not Go's
+			// *os.PathError wording.
+			fatal("%s", le)
+		}
 		fatal("rbgo: %v", err)
 	}
 
