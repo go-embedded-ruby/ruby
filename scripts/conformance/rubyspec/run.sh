@@ -97,6 +97,19 @@ echo
 echo "passing examples: $TOTAL_PASS   (files loaded: $FILES_OK, failed to load: $FILES_FAIL)"
 echo "frozen floor:     $FLOOR"
 
+# Name the unloaded files on EVERY run, not only on a regression. A file that
+# fails to load carries tens of examples, so its coming and going is the largest
+# single term in the total -- larger than every per-example flake combined: a
+# documentation-only commit was measured moving the total by 43 because one file
+# flipped from loading to not. Printing the count alone makes that step visible
+# and unattributable, which is the worst of both: the reader sees the number move
+# and cannot tell whether a spec regressed or a file simply did not load. The two
+# need opposite responses, so the names belong in the passing output too.
+if [ "$FILES_FAIL" -gt 0 ]; then
+  echo "-- files that failed to load ($FILES_FAIL) --"
+  awk -F'\t' '$1=="FILEFAIL"{print "   "$2}' "$RESULTS" | head -40
+fi
+
 if [ "${UPDATE_FLOOR:-0}" = "1" ]; then
   echo "$TOTAL_PASS" > "$HERE/FLOOR"
   echo "FLOOR updated to $TOTAL_PASS"
@@ -105,8 +118,7 @@ fi
 
 if [ "$TOTAL_PASS" -lt "$FLOOR" ]; then
   echo "::error::ruby/spec ratchet REGRESSION: $TOTAL_PASS passing < floor $FLOOR"
-  echo "-- files that failed to load --"
-  awk -F'\t' '$1=="FILEFAIL"{print "   "$2}' "$RESULTS" | head -40
+  echo "   (the unloaded files, if any, are named above)"
   exit 1
 fi
 
