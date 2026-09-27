@@ -35,10 +35,11 @@ import (
 //     Verified end to end by TestClosedWasmBuildIntegration.
 //   - js/wasm in a browser: there is no process argv at all; os.Args carries only
 //     "js", so ARGV is empty. Nothing here special-cases that.
-//   - wasip1: os.Args comes from the WASI args_get call, so a host that passes
-//     arguments delivers them. This machine has no wasip1 runtime installed, so
-//     that row is reasoned from the Go runtime's own wasip1 os.Args and is the
-//     one row below that was NOT measured.
+//   - wasip1: os.Args comes from the WASI args_get call. Measured with the OPEN
+//     CLI built for GOOS=wasip1 and run under node's node:wasi (preview1): the
+//     whole command line works there, ARGV included. A wasip1 CLOSED binary is not
+//     reachable through `rbgo build`, whose only wasm target is GOOS=js, so that
+//     exact combination is the one thing here that could not be run.
 func seedProcessArgs(machine *vm.VM) {
 	if len(os.Args) > 0 {
 		machine.SetScriptName(os.Args[0])
