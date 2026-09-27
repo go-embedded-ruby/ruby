@@ -309,15 +309,51 @@ type loadError struct {
 }
 
 func (e *loadError) Error() string {
-	return "rbgo: " + capitalise(errnoText(e.err)) + " -- " + e.path + " (LoadError)"
+	return "rbgo: " + errnoText(e.err, e.path) + " -- " + e.path + " (LoadError)"
 }
 
 func (e *loadError) Unwrap() error { return e.err }
 
-// errnoText strips an *os.PathError's operation and path, leaving the bare
-// strerror text MRI names. An error that is not a PathError is used as it is,
-// because inventing a message would be worse than an unfamiliar one.
-func errnoText(err error) string {
+// errnoText names the errno the way strerror does, which is the text MRI's
+// rb_load_fail interpolates.
+//
+// The three cases MRI names for a script it cannot open are recognised through
+// Go's OS-INDEPENDENT predicates, not through the operating system's own message,
+// because Windows does not agree with strerror about any of them: Go surfaces
+// FormatMessage's wording there ("The system cannot find the file specified.",
+// "Incorrect function." for a directory) while ruby.exe still prints
+// strerror(ENOENT), i.e. "No such file or directory". Matching the predicate
+// rather than the text is what makes the line the same on both platforms.
+//
+// Anything else falls back to the OS's own text, stripped of the *os.PathError
+// wrapper and capitalised, because inventing a message would be worse than an
+// unfamiliar one. That path is exercised: ENOTDIR (`ruby t.rb/x`) reaches it and
+// MRI's "Not a directory -- t.rb/x" comes out of it unchanged.
+func errnoText(err error, path string) string {
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return "No such file or directory" // ENOENT
+	case errors.Is(err, fs.ErrPermission):
+		return "Permission denied" // EACCES
+	case isDirectory(path):
+		// EISDIR. Asked of the filesystem rather than of the error, because
+		// syscall.EISDIR does not exist on Windows and the error there carries no
+		// portable marker for it.
+		return "Is a directory"
+	}
+	return capitalise(bareErrText(err))
+}
+
+// isDirectory reports whether path is a directory, answering false for anything
+// it cannot determine — a name that has since gone, or a stat that is refused.
+func isDirectory(path string) bool {
+	fi, err := os.Stat(path)
+	return err == nil && fi.IsDir()
+}
+
+// bareErrText strips an *os.PathError's operation and path, leaving the OS's
+// message alone.
+func bareErrText(err error) string {
 	var pe *fs.PathError
 	if errors.As(err, &pe) {
 		if pe.Err == nil {

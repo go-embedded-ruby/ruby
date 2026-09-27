@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -437,16 +438,34 @@ func TestLoadErrorIsMRIsLoadErrorLine(t *testing.T) {
 	}
 	missing := filepath.Join(dir, "nosuch.rb")
 
+	notdir := filepath.Join(noperm, "inner.rb") // a path THROUGH a regular file
+
 	for _, c := range []struct {
 		name, path, want string
 	}{
 		{"missing", missing, "rbgo: No such file or directory -- " + missing + " (LoadError)"},
 		{"a directory", sub, "rbgo: Is a directory -- " + sub + " (LoadError)"},
 		{"unreadable", noperm, "rbgo: Permission denied -- " + noperm + " (LoadError)"},
+		// The fallback arm: no OS-independent predicate names ENOTDIR, so this one
+		// comes out of the operating system's own text. Measured:
+		// `ruby t.rb/x` prints "ruby: Not a directory -- t.rb/x (LoadError)".
+		{"a path through a file", notdir, "rbgo: Not a directory -- " + notdir + " (LoadError)"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			if os.Geteuid() == 0 && c.name == "unreadable" {
-				t.Skip("root reads a 0000 file, so this row cannot be arranged")
+			if c.name == "unreadable" && !readDenied(t, noperm) {
+				// Windows does not deny reads on a 0000 file (nor does root on
+				// POSIX), so the PRECONDITION cannot be arranged here. Skipping is
+				// reported only after checking that the file really is readable, so
+				// this is a measurement rather than an assumption about the host.
+				t.Skipf("%s is readable here, so EACCES cannot be arranged", noperm)
+			}
+			if c.name == "a path through a file" && runtime.GOOS == "windows" {
+				// ENOTDIR has no Windows equivalent that Go surfaces with this
+				// wording, and this row's "want" is MRI's POSIX strerror text. It is
+				// skipped rather than guessed at: the Windows behaviour was NOT
+				// measured (no Windows host here), and the CI lane that runs it is
+				// where such a claim would have to come from.
+				t.Skip("ENOTDIR's strerror text is POSIX; Windows behaviour not measured")
 			}
 			o, err := parseOptions([]string{c.path}, io.Discard)
 			if err != nil {
@@ -492,14 +511,29 @@ func TestCapitaliseLeavesNonASCIIAlone(t *testing.T) {
 
 // TestErrnoTextFallsBackToTheWholeError: an error that is not a *fs.PathError has
 // no errno to strip, and inventing a message would be worse than an unfamiliar
-// one.
+// one. The path argument names something that does not exist, so isDirectory
+// cannot claim the case.
 func TestErrnoTextFallsBackToTheWholeError(t *testing.T) {
-	if got := errnoText(errors.New("something else entirely")); got != "something else entirely" {
-		t.Errorf("errnoText = %q, want the error's own text", got)
+	absent := filepath.Join(t.TempDir(), "absent")
+	if got := errnoText(errors.New("something else entirely"), absent); got != "Something else entirely" {
+		t.Errorf("errnoText = %q, want the error's own text, capitalised", got)
 	}
 	// A PathError whose Err is nil has no errno at all, and (*PathError).Error()
 	// would panic on it. os.ReadFile never builds one; the answer is still defined.
-	if got := errnoText(&fs.PathError{Op: "open", Path: "x"}); got != "open x" {
-		t.Errorf("errnoText of a PathError with no Err = %q, want %q", got, "open x")
+	if got := errnoText(&fs.PathError{Op: "open", Path: "x"}, absent); got != "Open x" {
+		t.Errorf("errnoText of a PathError with no Err = %q, want %q", got, "Open x")
 	}
+}
+
+// readDenied reports whether path really cannot be read, which is the precondition
+// the EACCES row needs. It is asked rather than assumed: chmod 0000 denies nothing
+// to root, and on Windows it denies nothing at all.
+func readDenied(t *testing.T, path string) bool {
+	t.Helper()
+	f, err := os.Open(path)
+	if err == nil {
+		f.Close()
+		return false
+	}
+	return errors.Is(err, fs.ErrPermission)
 }
