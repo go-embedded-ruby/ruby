@@ -64,6 +64,39 @@ func TestClosedBuildIntegration(t *testing.T) {
 		t.Errorf("closed binary (%d) is not smaller than open (%d)", cs, os_)
 	}
 
+	// A standalone binary that cannot take arguments is not a usable program
+	// (#708). Its arguments are its OWN: there is no interpreter command line in
+	// front of them, so "-W0" here is a datum and not a switch, and the exit
+	// status proves the program saw all three.
+	//
+	// The program deliberately carries a string literal. On origin/main
+	// (87e418bc) `rbgo build --closed` fails outright for a program whose frozen
+	// bytecode holds NO object value — `p ARGV` is enough — because
+	// aot.FreezeISeq emits the internal/object import unconditionally and the
+	// nested go build then rejects it as unused. That is a separate defect, in
+	// internal/aot rather than here; this test must not depend on it.
+	argvRb := filepath.Join(dir, "argv.rb")
+	argvProg := "puts \"argv=#{ARGV.inspect} zero=#{$0.empty? ? \"(empty)\" : \"(set)\"}\"\n" +
+		"exit ARGV.length\n"
+	if err := os.WriteFile(argvRb, []byte(argvProg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	argvBin := filepath.Join(dir, "argv_closed")
+	rbgoBuild(t, root, "-o", argvBin, "--closed", argvRb)
+
+	argvCmd := exec.Command(argvBin, "-W0", "alpha", "beta")
+	argvOut, argvErr := argvCmd.CombinedOutput()
+	// Measured: three arguments, so `exit 3`.
+	if code := argvCmd.ProcessState.ExitCode(); code != 3 {
+		t.Errorf("closed binary exit status = %d, want 3 (it saw %d arguments); err=%v out=%s",
+			code, 3, argvErr, argvOut)
+	}
+	// $0 was the EMPTY string in a closed binary before this: nothing set it.
+	const wantArgv = "argv=[\"-W0\", \"alpha\", \"beta\"] zero=(set)\n"
+	if string(argvOut) != wantArgv {
+		t.Errorf("closed binary with arguments printed %q, want %q", argvOut, wantArgv)
+	}
+
 	// eval in a closed binary raises NotImplementedError (front-end dropped).
 	ev := filepath.Join(dir, "ev.rb")
 	if err := os.WriteFile(ev, []byte("puts eval(\"1 + 1\")\n"), 0o644); err != nil {

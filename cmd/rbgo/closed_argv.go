@@ -23,12 +23,22 @@ import (
 // would be lying about whose command line it is.
 //
 // It is shared by the native and the wasm closed mains, and it reads os.Args on
-// both, so no build tag decides whether a closed binary can take arguments. What
-// differs is what the host puts there: wasip1 fills os.Args from the WASI
-// args_get call, so `wasmtime prog.wasm a b` arrives intact, while a js/wasm
-// module loaded by a browser has no process arguments at all and os.Args carries
-// only the program name — ARGV is then empty, which is the honest answer rather
-// than a tag-selected one.
+// both, so no BUILD TAG decides whether a closed binary can take arguments —
+// only the host does, which is the honest answer and not a tag-selected one.
+//
+// What each host puts there was measured, not assumed:
+//
+//   - native: the process's argv, as usual.
+//   - js/wasm under node: Go's own lib/wasm/wasm_exec_node.js glue passes
+//     process.argv.slice(2) through, so `node wasm_exec_node.js prog.wasm a b`
+//     arrives as os.Args == {"prog.wasm", "a", "b"} and ARGV == ["a", "b"].
+//     Verified end to end by TestClosedWasmBuildIntegration.
+//   - js/wasm in a browser: there is no process argv at all; os.Args carries only
+//     "js", so ARGV is empty. Nothing here special-cases that.
+//   - wasip1: os.Args comes from the WASI args_get call, so a host that passes
+//     arguments delivers them. This machine has no wasip1 runtime installed, so
+//     that row is reasoned from the Go runtime's own wasip1 os.Args and is the
+//     one row below that was NOT measured.
 func seedProcessArgs(machine *vm.VM) {
 	if len(os.Args) > 0 {
 		machine.SetScriptName(os.Args[0])
