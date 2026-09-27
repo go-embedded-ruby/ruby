@@ -342,26 +342,39 @@ func TestDeclareArgcRejectsOutOfRange(t *testing.T) {
 }
 
 // TestGuardArgcKeepsTheMethodRecord pins the defect guardArgc had: it rebuilt the
-// Method it wrapped, so every field on the record was reset. The declared argc is
-// the one that made it visible (Integer#gcd declared 1 and answered -1), but
-// nonRetaining went the same way, and that one is a silent performance loss
-// rather than a wrong answer.
+// Method it wrapped with cls.define, so every field on the record was reset.
+//
+// Two mechanisms now stand between that and a wrong arity, and they are asserted
+// SEPARATELY because the first one hides the second. A guard whose bounds are
+// EQUAL declares the count it enforces, which alone is enough to make
+// Integer#gcd, #lcm, #gcdlcm and #to_r report truthfully — so an assertion about
+// those four passes even with the record still being rebuilt. The witness for
+// the preservation itself has to be a guard with UNEQUAL bounds, where no
+// fallback can fire, and a field the fallback does not restore.
+//
+// Nothing rbgo ships exercises that today: the only unequal-bounds guard is on
+// #rationalize, whose declared argc is -1, which is also what an undeclared one
+// answers. That is why the witness is built here rather than found.
 func TestGuardArgcKeepsTheMethodRecord(t *testing.T) {
 	vm := newTestVM()
-	for name, want := range map[string]int{"gcd": 1, "lcm": 1, "gcdlcm": 1, "to_r": 0, "bit_length": 0} {
+	// The equal-bounds path: these four declared a count at their registration site
+	// and answered -1 before, because the guard had replaced the record holding it.
+	for name, want := range map[string]int{"gcd": 1, "lcm": 1, "gcdlcm": 1, "to_r": 0} {
 		m := vm.cInteger.methods[name]
 		if m == nil {
 			t.Fatalf("Integer#%s is not defined", name)
 		}
 		if got := methodArity(m); got != want {
-			t.Errorf("Integer#%s arity %d, want %d (the guard must not discard the declared argc)", name, got, want)
+			t.Errorf("Integer#%s arity %d, want %d", name, got, want)
 		}
 	}
 	// A guard with equal bounds declares the count it enforces, so a site that
-	// declared nothing still gets a truthful arity rather than -1.
+	// declared nothing still gets a truthful arity rather than -1; unequal bounds
+	// ARE variadic and must stay -1.
 	cls := newClass("GuardProbe", vm.cObject)
-	cls.define("undeclared", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return self })
-	cls.define("stays_variadic", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return self })
+	body := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return self }
+	cls.define("undeclared", body)
+	cls.define("stays_variadic", body)
 	guardArgc(cls, 2, 2, "undeclared")
 	guardArgc(cls, 0, 1, "stays_variadic")
 	if got := methodArity(cls.methods["undeclared"]); got != 2 {
@@ -369,5 +382,25 @@ func TestGuardArgcKeepsTheMethodRecord(t *testing.T) {
 	}
 	if got := methodArity(cls.methods["stays_variadic"]); got != -1 {
 		t.Errorf("a [0,1] guard gave arity %d, want -1: unequal bounds ARE variadic", got)
+	}
+	// The preservation path. Unequal bounds, so the fallback cannot fire, and a
+	// declared 1 that only survives if the record does. nonRetaining and vis go
+	// the same way and are the fields whose loss is silent: one costs a per-call
+	// args copy, the other makes a private method public.
+	cls.defineArgcNR("kept", 1, body)
+	cls.methods["kept"].vis = visPrivate
+	guardArgc(cls, 0, 3, "kept")
+	kept := cls.methods["kept"]
+	if got := methodArity(kept); got != 1 {
+		t.Errorf("a [0,3] guard over a declared argc 1 gave arity %d, want 1", got)
+	}
+	if !kept.nonRetaining {
+		t.Error("the guard dropped nonRetaining: every call to this method now pays a defensive args copy, and nothing else would say so")
+	}
+	if kept.vis != visPrivate {
+		t.Errorf("the guard reset vis to %v: a private method became public", kept.vis)
+	}
+	if kept.name != "kept" || kept.owner != cls {
+		t.Errorf("the guard lost the method's identity: %q on %v", kept.name, kept.owner)
 	}
 }
