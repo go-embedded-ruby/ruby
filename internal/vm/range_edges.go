@@ -19,7 +19,7 @@ import (
 func (vm *VM) registerRangeEdges() {
 	// bsearch finds an element by binary search over the range's numeric domain
 	// (see rangeBsearch); without a block it returns an Enumerator.
-	vm.cRange.define("bsearch", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+	vm.cRange.defineArgc("bsearch", 0, func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		r := self.(*object.Range)
 		// A non-numeric bound cannot be searched — MRI reports this even without a
 		// block, before returning the Enumerator.
@@ -44,7 +44,7 @@ func (vm *VM) registerRangeEdges() {
 	// iterate from <class>" for a begin that cannot be enumerated — then walked
 	// backwards. Without a block it returns an Enumerator whose #size is the
 	// Range#size.
-	vm.cRange.define("reverse_each", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+	vm.cRange.defineArgc("reverse_each", 0, func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		r := self.(*object.Range)
 		if blk == nil {
 			return enumForSized(self, "reverse_each", func(vm *VM) object.Value { return vm.rangeReverseSizeVal(r) })

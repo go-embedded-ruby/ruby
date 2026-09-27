@@ -624,10 +624,10 @@ func (vm *VM) stringEncode(s *object.String, args []object.Value) *object.String
 // registerStringEncodeMethods wires String#encode / #encode! and the
 // Encoding::*Error classes. Called from registerStringEncoding.
 func (vm *VM) registerStringEncodeMethods() {
-	vm.cString.define("encode", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cString.defineArgc("encode", -1, func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return vm.stringEncode(self.(*object.String), args)
 	})
-	vm.cString.define("encode!", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cString.defineArgc("encode!", -1, func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		s := self.(*object.String)
 		// #encode! mutates in place, so a frozen receiver is a FrozenError — even for
 		// a no-op transcoding (utf-8 to utf-8), which MRI still refuses.

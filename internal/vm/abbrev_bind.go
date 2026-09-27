@@ -62,7 +62,7 @@ func (vm *VM) installAbbrev() {
 
 	// Array#abbrev(pattern = nil) — the core extension `require "abbrev"` adds; it
 	// calls Abbrev.abbrev(self, pattern).
-	vm.cArray.define("abbrev", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cArray.defineArgc("abbrev", -1, func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		var pattern object.Value
 		if len(args) > 0 {
 			pattern = args[0]

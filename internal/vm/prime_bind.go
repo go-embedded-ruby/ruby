@@ -100,10 +100,10 @@ func (vm *VM) installPrime() {
 
 	// Integer#prime? and Integer#prime_division — the core extensions `require
 	// "prime"` adds. They delegate to the same library functions on the receiver.
-	vm.cInteger.define("prime?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	vm.cInteger.defineArgc("prime?", 0, func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(prime.IsPrime(bigVal(self)))
 	})
-	vm.cInteger.define("prime_division", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	vm.cInteger.defineArgc("prime_division", -1, func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return primeDivision(bigVal(self))
 	})
 }

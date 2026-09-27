@@ -50,7 +50,7 @@ func (vm *VM) registerScanf() {
 //     buffered input.
 //   - Kernel#scanf(format) — IO#scanf on $stdin (the top-level form).
 func (vm *VM) installScanf() {
-	vm.cString.define("scanf", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+	vm.cString.defineArgc("scanf", 1, func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		return vm.doScanf(strArg(self), strArg(args[0]), blk)
 	})
 

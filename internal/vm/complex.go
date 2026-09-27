@@ -601,9 +601,9 @@ func (vm *VM) registerComplex() {
 	realToC := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return &object.Complex{Re: self, Im: object.IntValue(0)}
 	}
-	vm.cInteger.define("to_c", realToC)
-	vm.cFloat.define("to_c", realToC)
-	vm.cString.define("to_c", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	vm.cInteger.defineArgc("to_c", 0, realToC)
+	vm.cFloat.defineArgc("to_c", 0, realToC)
+	vm.cString.defineArgc("to_c", 0, func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		vm.mustASCIICompat(self) // rb_str_to_c's first act
 		c, _ := stringToC(self.(*object.String).Str(), false)
 		return c

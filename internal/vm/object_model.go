@@ -182,6 +182,29 @@ type Method struct {
 	// instance_methods all treat the name as absent (a call routes to
 	// method_missing → NoMethodError).
 	undefined bool
+	// argc is the argument count the native method's registration site DECLARED,
+	// in MRI's rb_define_method convention (vm_method.c r4:877, which rejects
+	// anything outside -2..15):
+	//
+	//   n >= 0  the method takes exactly n arguments
+	//   -1      variadic: MRI's (int argc, VALUE *argv, VALUE self) shape
+	//
+	// MRI also accepts -2, its (VALUE self, VALUE args) shape. rbgo has no such
+	// shape — every native is one NativeFn signature, the analogue of MRI's -1 —
+	// so declareArgc rejects -2 rather than offering a value no site can honestly
+	// use. Nothing is lost from the reflection surface either way: MRI's
+	// method_def_min_max_arity gives EVERY argc < 0 cfunc min 0 and an unlimited
+	// max (proc.c r4:2942-2947), so a -2 cfunc reports arity -1 exactly as a -1
+	// one does.
+	//
+	// The zero value is "the site declared nothing", which is NOT the same as a
+	// declared -1: it is what lets a test tell a site that has been given a
+	// truthful arity from one that has not. Nothing in the type system forces a
+	// site to declare — `define` still compiles — so the barrier is
+	// TestNativeArityDeclaredForCoreClasses, which enumerates the core classes'
+	// method tables and fails on any undeclared native. Only defineArgc /
+	// defineArgcNR set this, so argc and its declared flag cannot drift apart.
+	argc nativeArgc
 	// attrKind marks a method synthesised by attr_reader/attr_writer/attr_accessor,
 	// so #parameters reports MRI's [] (a reader) or [[:req]] (a writer) instead of
 	// a native method's default [[:rest]]. The zero value means "not an attr".
@@ -335,10 +358,73 @@ func (c *RClass) ToS() string {
 func (c *RClass) Inspect() string { return c.ToS() }
 func (c *RClass) Truthy() bool    { return true }
 
-// define installs a native method on the class.
+// nativeArgc is a native method's declared argument count. Its zero value means
+// "undeclared", which is distinguishable from a declared -1 — the distinction
+// the whole of #arity / #parameters / #inspect for natives rests on. It is a
+// struct rather than a bare int so the count and the fact that a count was given
+// are set together, by declareArgc, and can never disagree.
+type nativeArgc struct {
+	n        int8
+	declared bool
+}
+
+// declareArgc validates an argc and packs it. The upper bound is MRI's, which
+// raises "arity out of range: %d for -2..15" (vm_method.c r4:877); the lower
+// bound is -1 rather than -2 because rbgo has only MRI's -1 shape (see
+// nativeArgc). An out-of-range argc is a mistake at a registration site, not a
+// Ruby-level condition, so it panics rather than raising.
+func declareArgc(argc int) nativeArgc {
+	if argc < -1 || argc > 15 {
+		panic(fmt.Sprintf("arity out of range: %d for -1..15", argc))
+	}
+	return nativeArgc{n: int8(argc), declared: true}
+}
+
+// nativeArity is the arity a native method's declared argc reports, mirroring
+// MRI's method_def_min_max_arity for VM_METHOD_TYPE_CFUNC followed by
+// method_def_arity (proc.c r4:2940-3004): a non-negative argc is both the
+// minimum and the maximum, so the arity is that count; ANY negative argc — -1 or
+// -2 — gives min 0 and an unlimited max, so the arity is -1. An undeclared site
+// also reads -1, which is what made this value carry no information before it
+// could be declared.
+func (a nativeArgc) nativeArity() int {
+	if !a.declared || a.n < 0 {
+		return -1
+	}
+	return int(a.n)
+}
+
+// define installs a native method on the class WITHOUT declaring its argument
+// count, so #arity reports -1 and #parameters [[:rest]]. That is the truthful
+// answer for a genuinely variadic body and a placeholder for every other one;
+// prefer defineArgc, which says which it is.
 func (c *RClass) define(name string, fn NativeFn) {
 	c.methods[name] = &Method{name: name, native: fn, owner: c}
 	bumpMethodSerial()
+}
+
+// defineArgc is define with the argument count declared, MRI's
+// rb_define_method(klass, name, func, argc). argc is a positional parameter, so
+// a site that uses this entry point cannot omit it; a site that wants to omit it
+// has to fall back to define, which a core-class completeness test then reports.
+// The declared count reaches Ruby through #arity, #parameters and #inspect, all
+// three derived from this one field (see methodArity), so they cannot disagree.
+//
+// It does not ENFORCE the count: rbgo's natives check their own arguments, and
+// making the registration reject a call would change dispatch behaviour rather
+// than the reflection surface this records. A declaration is therefore a claim
+// about the method, pinned against MRI by the golden table in
+// method_arity_conformance_test.go rather than by the call path.
+func (c *RClass) defineArgc(name string, argc int, fn NativeFn) {
+	c.define(name, fn)
+	c.methods[name].argc = declareArgc(argc)
+}
+
+// defineArgcNR is defineArgc for a native whose body has been audited not to
+// retain its args slice (see Method.nonRetaining and defineNR).
+func (c *RClass) defineArgcNR(name string, argc int, fn NativeFn) {
+	c.defineNR(name, fn)
+	c.methods[name].argc = declareArgc(argc)
 }
 
 // defineNR is define for a native whose body has been audited not to retain its

@@ -124,7 +124,14 @@ func (vm *VM) resolveMethod(recv object.Value, name string) *Method {
 // when it is variadic — i.e. it has an optional positional or a splat, or it
 // accepts extra keywords (an optional keyword or a **rest) without demanding any
 // required keyword. A required keyword keeps the arity non-negative even
-// alongside optional keywords or a **rest. Native methods report -1 (variadic).
+// alongside optional keywords or a **rest.
+//
+// A NATIVE method has no ISeq to read, so its arity comes from the argument
+// count its registration site declared (Method.argc, set by defineArgc) — MRI's
+// cfunc branch of method_def_min_max_arity. A site that declared nothing still
+// reports -1; that is the pre-#714 answer for every native, and it is a value
+// carrying no information rather than a measurement, which is why
+// TestNativeArityDeclaredForCoreClasses refuses an undeclared core-class native.
 func methodArity(m *Method) int {
 	switch m.attrKind {
 	case attrReaderMethod:
@@ -137,7 +144,7 @@ func methodArity(m *Method) int {
 		if m.proc != nil {
 			return m.proc.arityVal()
 		}
-		return -1
+		return m.argc.nativeArity()
 	}
 	reqKw, optKw := keywordCounts(is)
 	req := iseqRequiredPositional(is)

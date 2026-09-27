@@ -115,10 +115,10 @@ func (vm *VM) registerSafeBuffer() {
 		return object.Bool(avContains(self.(*SafeBufferVal).buf.String(), avToS(avArg(args, 0))))
 	})
 
-	vm.cString.define("html_safe", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	vm.cString.defineArgc("html_safe", 0, func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return vm.newSafeBuffer(actionview.Raw(self.(*object.String).Str()))
 	})
-	vm.cString.define("html_safe?", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+	vm.cString.defineArgc("html_safe?", 0, func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(false)
 	})
 }

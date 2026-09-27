@@ -43,7 +43,7 @@ func (vm *VM) registerDeepMerge() {
 	}}
 
 	// Hash#deep_merge!(source, opts={}) — the receiver is dest, mutated in place.
-	vm.cHash.define("deep_merge!", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cHash.defineArgc("deep_merge!", 1, func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return deepMergeHashBang(self, args)
 	})
 }

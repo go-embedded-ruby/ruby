@@ -215,7 +215,36 @@ func methodParameters(m *Method) object.Value {
 	case attrWriterMethod:
 		return object.NewArray(object.NewArray(object.Symbol("req")))
 	}
+	if is := methodISeq(m); is == nil {
+		// A native: MRI has no parameter names for a cfunc either, and answers
+		// rb_unnamed_parameters(arity) — the arity being the declared argc
+		// (method_def_parameters falls through to it for VM_METHOD_TYPE_CFUNC,
+		// proc.c r4:3237-3277). So #parameters is a RENDERING of #arity here, not a
+		// second opinion about the method, and the two cannot disagree.
+		return unnamedParameters(methodArity(m))
+	}
 	return object.NewArray(buildParamsList(methodISeq(m), "req")...)
+}
+
+// unnamedParameters builds the parameter list MRI reports for a callable with no
+// names to report — a cfunc method or a Go-backed Proc: exactly
+// rb_unnamed_parameters (proc.c r4:1556-1572). A non-negative arity gives that
+// many bare [:req] entries; a negative one gives ~arity (= -arity-1) of them
+// followed by a single [:rest]. So 0 is [], 1 is [[:req]], -1 is [[:rest]] — the
+// answer every native used to give — and -2 is [[:req], [:rest]].
+func unnamedParameters(arity int) object.Value {
+	n := arity
+	if arity < 0 {
+		n = ^arity
+	}
+	out := make([]object.Value, 0, n+1)
+	for i := 0; i < n; i++ {
+		out = append(out, object.NewArray(object.Symbol("req")))
+	}
+	if arity < 0 {
+		out = append(out, object.NewArray(object.Symbol("rest")))
+	}
+	return object.NewArray(out...)
 }
 
 // buildParamsList builds the MRI #parameters descriptor list shared by
@@ -384,7 +413,12 @@ func lookupOwnClassMethod(c *RClass, name string) *Method {
 func formatParamList(m *Method) string {
 	is := methodISeq(m)
 	if is == nil {
-		return "(*)"
+		// MRI builds this fragment by WALKING rb_method_parameters(method)
+		// (method_inspect, proc.c r4:3418-3470), rendering a nameless [:req] as "_"
+		// and a nameless [:rest] as "*". For a native that list is
+		// unnamedParameters(arity), so the signature follows the declared argc for
+		// free: arity 0 renders "()", 1 "(_)", 2 "(_, _)" and -1 "(*)".
+		return formatUnnamedParams(methodArity(m))
 	}
 	var toks []string
 	for i, name := range is.Params {
@@ -437,4 +471,23 @@ func joinComma(toks []string) string {
 		out += t
 	}
 	return out
+}
+
+// formatUnnamedParams renders the #<Method: …> signature fragment for a callable
+// whose parameters are unnamed, matching what MRI's method_inspect prints when it
+// walks an rb_unnamed_parameters list: a nameless :req becomes "_" and a nameless
+// :rest becomes the bare "*" (proc.c r4:3449-3460).
+func formatUnnamedParams(arity int) string {
+	n := arity
+	if arity < 0 {
+		n = ^arity
+	}
+	toks := make([]string, 0, n+1)
+	for i := 0; i < n; i++ {
+		toks = append(toks, "_")
+	}
+	if arity < 0 {
+		toks = append(toks, "*")
+	}
+	return "(" + joinComma(toks) + ")"
 }

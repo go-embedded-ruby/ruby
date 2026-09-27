@@ -428,7 +428,7 @@ func (vm *VM) registerNumericEdges() {
 	floatOf := func(self object.Value) float64 { return float64(self.(object.Float)) }
 
 	// Integer#[] — bit reference, with two-arg (start, len) and Range forms.
-	vm.cInteger.define("[]", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cInteger.defineArgc("[]", -1, func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		n := bigVal(self)
 		if len(args) == 1 {
 			if rng, ok := args[0].(*object.Range); ok {
@@ -444,7 +444,7 @@ func (vm *VM) registerNumericEdges() {
 
 	// Integer#size — bytes in the machine representation (8 for a fixnum-range
 	// value; the exact byte count for a Bignum).
-	vm.cInteger.define("size", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	vm.cInteger.defineArgc("size", 0, func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		if _, ok := self.(object.Integer); ok {
 			return object.IntValue(8)
 		}
@@ -453,17 +453,17 @@ func (vm *VM) registerNumericEdges() {
 	})
 
 	// Integer#ord — an integer is its own codepoint.
-	vm.cInteger.define("ord", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	vm.cInteger.defineArgc("ord", 0, func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return self
 	})
 
 	// Integer#integer? — always true (overrides Numeric#integer?).
-	vm.cInteger.define("integer?", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+	vm.cInteger.defineArgc("integer?", 0, func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.True
 	})
 
 	// Integer#round — MRI-faithful, honouring negative ndigits and `half:`.
-	vm.cInteger.define("round", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cInteger.defineArgc("round", -1, func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		ndigits, mode := vm.roundNdigits(args)
 		if ndigits >= 0 {
 			return self
@@ -472,15 +472,15 @@ func (vm *VM) registerNumericEdges() {
 	})
 
 	// Float#next_float / #prev_float — the adjacent representable doubles.
-	vm.cFloat.define("next_float", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	vm.cFloat.defineArgc("next_float", 0, func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Float(math.Nextafter(floatOf(self), math.Inf(1)))
 	})
-	vm.cFloat.define("prev_float", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	vm.cFloat.defineArgc("prev_float", 0, func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Float(math.Nextafter(floatOf(self), math.Inf(-1)))
 	})
 
 	// Float#round — MRI-faithful, honouring `half:` and the ndigits contract.
-	vm.cFloat.define("round", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cFloat.defineArgc("round", -1, func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		ndigits, mode := vm.roundNdigits(args)
 		return floRound(floatOf(self), ndigits, mode)
 	})
@@ -493,15 +493,15 @@ func (vm *VM) registerNumericEdges() {
 		mask = vm.arefToInt(args[0])
 		return new(big.Int).And(bigVal(self), mask), mask
 	}
-	vm.cInteger.define("allbits?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cInteger.defineArgc("allbits?", 1, func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		and, mask := andMask(vm, self, args)
 		return object.Bool(and.Cmp(mask) == 0)
 	})
-	vm.cInteger.define("anybits?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cInteger.defineArgc("anybits?", 1, func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		and, _ := andMask(vm, self, args)
 		return object.Bool(and.Sign() != 0)
 	})
-	vm.cInteger.define("nobits?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cInteger.defineArgc("nobits?", 1, func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		and, _ := andMask(vm, self, args)
 		return object.Bool(and.Sign() == 0)
 	})
@@ -509,7 +509,7 @@ func (vm *VM) registerNumericEdges() {
 	// Integer#ceildiv (Ruby 3.2+): the quotient rounded toward +Infinity, defined
 	// as -((-self).div(other)). Delegating to #div inherits its floor semantics,
 	// its numeric coercion of Float/Rational operands, and its ZeroDivisionError.
-	vm.cInteger.define("ceildiv", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cInteger.defineArgc("ceildiv", 1, func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		neg := object.NormInt(new(big.Int).Neg(bigVal(self)))
 		q := vm.send(neg, "div", []object.Value{args[0]}, nil)
 		return object.NormInt(new(big.Int).Neg(bigVal(q)))
@@ -517,7 +517,7 @@ func (vm *VM) registerNumericEdges() {
 
 	// Integer#quo: an exact quotient. A Float operand yields a Float (like #fdiv);
 	// an Integer/Rational operand yields a Rational. A zero divisor raises.
-	vm.cInteger.define("quo", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cInteger.defineArgc("quo", 1, func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		if f, ok := args[0].(object.Float); ok {
 			sf, _ := toFloat(self)
 			return object.Float(sf / float64(f))
@@ -537,7 +537,7 @@ func (vm *VM) registerNumericEdges() {
 
 	// Float#remainder: self - other*(self/other).truncate — the remainder keeps the
 	// dividend's sign (unlike #modulo/%). A zero divisor raises ZeroDivisionError.
-	vm.cFloat.define("remainder", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cFloat.defineArgc("remainder", 1, func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		b, ok := toFloat(args[0])
 		if !ok {
 			raise("TypeError", "%s can't be coerced into Float", vm.classOf(args[0]).name)
@@ -565,7 +565,7 @@ func (vm *VM) registerNumericEdges() {
 
 	// Float#step — mirrors Integer#step: an enumerator without a block, otherwise
 	// walking [self, limit] by step (default 1), yielding Floats via numericStep.
-	vm.cFloat.define("step", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+	vm.cFloat.defineArgc("step", -1, func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		limit, step := vm.stepBounds(args)
 		if blk == nil {
 			return vm.stepEnum(self, self, limit, step, false, args...)
@@ -611,7 +611,7 @@ func (vm *VM) registerNumericAliasesAndEdges() {
 	// MRI coerces a non-Integer operand of Integer#coerce with rb_Float (parsing a
 	// String, dispatching #to_f on an object, raising ArgumentError/TypeError like
 	// Float()); an Integer/Bignum operand stays exact and returns [other, self].
-	vm.cInteger.define("coerce", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cInteger.defineArgc("coerce", 1, func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		checkArgc(args, 1, "coerce")
 		other := args[0]
 		if _, ok := object.BigOf(other); ok {
@@ -623,7 +623,7 @@ func (vm *VM) registerNumericAliasesAndEdges() {
 	})
 	// Float#coerce converts the operand with Kernel#Float and returns [other, self]
 	// (self is already a Float).
-	vm.cFloat.define("coerce", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cFloat.defineArgc("coerce", 1, func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		checkArgc(args, 1, "coerce")
 		of := vm.send(vm.main, "Float", []object.Value{args[0]}, nil)
 		return object.NewArray(of, self)
@@ -633,7 +633,7 @@ func (vm *VM) registerNumericAliasesAndEdges() {
 	// self.to_f / other.to_f overflows to Inf/Inf = NaN for operands beyond a
 	// double's range; MRI divides exactly (rb_big_fdiv) so 1.fdiv(10**323) is
 	// 1e-323 rather than 0.0 and (10**400).fdiv(10**402) is 0.01 rather than NaN.
-	vm.cInteger.define("fdiv", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cInteger.defineArgc("fdiv", 1, func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		checkArgc(args, 1, "fdiv")
 		other := args[0]
 		if f, ok := other.(object.Float); ok {
@@ -663,7 +663,7 @@ func (vm *VM) registerNumericAliasesAndEdges() {
 	// Float#fdiv is exactly one argument, then float division (a zero divisor
 	// yields ±Infinity, never a ZeroDivisionError); a non-numeric divisor is
 	// coerced, matching Numeric#coerce ("into Float").
-	vm.cFloat.define("fdiv", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cFloat.defineArgc("fdiv", 1, func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		checkArgc(args, 1, "fdiv")
 		b, ok := toFloat(args[0])
 		if !ok {
@@ -680,7 +680,7 @@ func (vm *VM) registerNumericAliasesAndEdges() {
 	// self.to_f/other but raises ZeroDivisionError on a 0.0 divisor (unlike
 	// Float#/); a Rational divisor floors the exact quotient; anything else runs
 	// the coerce protocol (other.coerce(self) then #div on the pair).
-	vm.cInteger.define("div", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cInteger.defineArgc("div", 1, func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		checkArgc(args, 1, "div")
 		other := args[0]
 		if b, ok := object.BigOf(other); ok {
@@ -710,7 +710,7 @@ func (vm *VM) registerNumericAliasesAndEdges() {
 	// the dividend, and the result takes the divisor's sign (so 4.2 % Infinity is
 	// 4.2 and 4.2 % -Infinity is -Infinity). A zero divisor raises; a non-numeric
 	// divisor is coerced (mock#coerce, then re-dispatch %).
-	vm.cFloat.define("%", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cFloat.defineArgc("%", 1, func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		checkArgc(args, 1, "%")
 		b, ok := toFloat(args[0])
 		if !ok {
@@ -725,7 +725,7 @@ func (vm *VM) registerNumericAliasesAndEdges() {
 	// Float#divmod: an Integer quotient (floored) and a Float modulo. A NaN or
 	// Infinite quotient has no Integer value, so MRI raises FloatDomainError; a
 	// zero divisor raises ZeroDivisionError.
-	vm.cFloat.define("divmod", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cFloat.defineArgc("divmod", 1, func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		checkArgc(args, 1, "divmod")
 		b, ok := toFloat(args[0])
 		if !ok {
@@ -744,7 +744,7 @@ func (vm *VM) registerNumericAliasesAndEdges() {
 	// long and raised RangeError for a Bignum; compute it over big.Int so a
 	// Bignum answers (a negative number uses ~n, since -n-1 has the same magnitude
 	// pattern as MRI's leftmost-0-bit count).
-	vm.cInteger.define("bit_length", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	vm.cInteger.defineArgc("bit_length", 0, func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		n := bigVal(self)
 		if n.Sign() < 0 {
 			n = new(big.Int).Not(n) // ~n = -n-1
@@ -809,6 +809,13 @@ func argcMessage(given, min, max int) string {
 // guardArgc re-wraps each named method of cls with a positional-argument-count
 // check ([min, max]; max < 0 means unbounded), preserving the original body.
 // A name the class does not define is skipped.
+//
+// It replaces only the BODY, keeping the original Method record's other fields.
+// Building a fresh one with cls.define instead silently reset every one of them,
+// and the declared argc was the field that made that visible: Integer#gcd, #lcm,
+// #gcdlcm and #to_r each declared a count at their registration site and then
+// answered #arity -1 anyway, because the guard had replaced the record that held
+// it. nonRetaining, attrKind, vis and origName travelled the same path unseen.
 func guardArgc(cls *RClass, min, max int, names ...string) {
 	for _, name := range names {
 		m, ok := cls.methods[name]
@@ -816,12 +823,21 @@ func guardArgc(cls *RClass, min, max int, names ...string) {
 			continue
 		}
 		orig := m.native
-		cls.define(name, func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		guarded := *m
+		guarded.native = func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 			if len(args) < min || (max >= 0 && len(args) > max) {
 				raise("ArgumentError", "%s", argcMessage(len(args), min, max))
 			}
 			return orig(vm, self, args, blk)
-		})
+		}
+		// A guard with equal bounds IS an arity declaration for a site that made
+		// none: the method provably accepts exactly min arguments, so #arity can
+		// say so rather than fall back to -1.
+		if !guarded.argc.declared && min == max {
+			guarded.argc = declareArgc(min)
+		}
+		cls.methods[name] = &guarded
+		bumpMethodSerial()
 	}
 }
 

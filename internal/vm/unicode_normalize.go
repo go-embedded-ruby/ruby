@@ -118,7 +118,7 @@ func (vm *VM) normResult(out, back string) *object.String {
 // registerStringUnicodeNormalize adds the unicode_normalize core-ext String
 // methods. (Called from the String setup so it shares cString.)
 func (vm *VM) registerStringUnicodeNormalize() {
-	vm.cString.define("unicode_normalize", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cString.defineArgc("unicode_normalize", -1, func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		form := normForm(args)
 		src, back, done := vm.normTarget(self)
 		if done {
@@ -126,7 +126,7 @@ func (vm *VM) registerStringUnicodeNormalize() {
 		}
 		return vm.normResult(norm.Normalize(src, form), back)
 	})
-	vm.cString.define("unicode_normalized?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cString.defineArgc("unicode_normalized?", -1, func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		form := normForm(args)
 		src, _, done := vm.normTarget(self)
 		if done {
@@ -137,7 +137,7 @@ func (vm *VM) registerStringUnicodeNormalize() {
 	// unicode_normalize! normalizes the receiver in place and returns self (even
 	// when already normalized). The form argument is validated before the frozen
 	// check, matching MRI.
-	vm.cString.define("unicode_normalize!", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cString.defineArgc("unicode_normalize!", -1, func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		form := normForm(args)
 		s := self.(*object.String)
 		src, back, done := vm.normTarget(self)

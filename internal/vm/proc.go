@@ -29,6 +29,15 @@ func (vm *VM) registerProcMethods() {
 				asLambda = v.Truthy()
 			}
 		}
+		if p.iseq == nil {
+			// A Go-backed Proc — notably Method#to_proc, whose nativeArity is the
+			// method's arity. MRI answers rb_unnamed_parameters(rb_proc_arity(self))
+			// here (rb_proc_parameters, proc.c r4:1617), so `method(:length).to_proc`
+			// reports arity 0 AND parameters []. Reading the arity keeps the two
+			// sides of one Proc agreeing once a native method can declare a count; a
+			// flat [[:rest]] would have contradicted the arity for every one of them.
+			return unnamedParameters(p.arityVal())
+		}
 		return procParameters(p.iseq, asLambda)
 	})
 
