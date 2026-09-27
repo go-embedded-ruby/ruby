@@ -79,9 +79,13 @@ func TestMethodArity(t *testing.T) {
 }
 
 // TestMethodSourceLocation covers Method/UnboundMethod#source_location: nil for a
-// native method (or a method compiled without a source file), and [file, 0] for a
-// method loaded from a named script (the VM tracks no per-line info, so the line
-// is 0).
+// native method (or a method compiled without a source file), and [file, line]
+// for a method loaded from a named script.
+//
+// The line was pinned at 0 here, which was rbgo's own answer and not MRI's: ruby
+// 4.0.5 reports the line the `def` sits on, iseq_location's
+// location.first_lineno (proc.c ruby_4_0:1515). `class C; def f; end; end` on
+// line 1 of the script measures as ["…/main.rb", 1] there.
 func TestMethodSourceLocation(t *testing.T) {
 	if got := eval(t, `p "x".method(:upcase).source_location`); got != "nil\n" {
 		t.Errorf("native source_location got %q", got)
@@ -90,7 +94,7 @@ func TestMethodSourceLocation(t *testing.T) {
 		t.Errorf("fileless source_location got %q", got)
 	}
 	got, err := runScript(t, "class C; def f; end; end\np C.new.method(:f).source_location\np C.instance_method(:f).source_location", "/scripts/main.rb")
-	if err != nil || got != "[\"/scripts/main.rb\", 0]\n[\"/scripts/main.rb\", 0]\n" {
+	if err != nil || got != "[\"/scripts/main.rb\", 1]\n[\"/scripts/main.rb\", 1]\n" {
 		t.Errorf("source_location got=%q err=%v", got, err)
 	}
 }

@@ -547,15 +547,22 @@ func (vm *VM) bootstrap() {
 		}
 		// String form: instance_eval("code" [, filename [, lineno]]) evaluates the
 		// source with self as the receiver and its singleton class as the definee.
+		// The filename and first line are specific_eval's argv[1]/argv[2]
+		// (vm_eval.c ruby_4_0:2286-2300) and reach the compiled ISeq, so they
+		// govern __FILE__/__LINE__, the backtrace of anything the source raises and
+		// the #source_location of anything it defines — not error reporting alone.
 		if len(args) < 1 || len(args) > 3 {
 			raise("ArgumentError", "wrong number of arguments (given %d, expected 1..3)", len(args))
 		}
 		src := vm.coerceFormatString(args[0])
-		file := vm.currentFile()
+		var fileArg, lineArg object.Value
 		if len(args) >= 2 {
-			file = vm.coerceFormatString(args[1]) // filename, coerced via #to_str
+			fileArg = args[1]
 		}
-		return vm.instanceEvalString(self, src, file)
+		if len(args) >= 3 {
+			lineArg = args[2]
+		}
+		return vm.instanceEvalString(self, src, vm.evalLoc(fileArg, lineArg))
 	})
 	vm.cBasicObject.define("instance_exec", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		if blk == nil {
@@ -1909,21 +1916,33 @@ func (vm *VM) bootstrap() {
 				raise("ArgumentError", "wrong number of arguments (given %d, expected 0)", len(args))
 			}
 			defer vm.freshEvalVisibility(cls)()
-			return vm.classEval(cls, blk, nil)
+			// The block is yielded the MODULE: specific_eval's block arm is
+			// yield_under(self, singleton, 1, &self, kw_splat) (vm_eval.c
+			// ruby_4_0:2279), one argument and that argument is the receiver — the
+			// same shape as instance_eval's. So `Foo.class_eval { |m| m }` answers
+			// Foo; it answered nil, because no argument was passed at all.
+			return vm.classEval(cls, blk, []object.Value{cls})
 		}
 		// String form — class_eval("def m; end", file, line): 1..3 arguments, the
-		// first being the source (coerced via #to_str) and the optional second the
-		// filename (also #to_str-coerced; it steers error reporting only). A count
-		// outside 1..3 is an ArgumentError.
+		// first being the source (coerced via #to_str) and the optional second and
+		// third the filename and first line. Both are specific_eval's argv[1] and
+		// argv[2] and reach the compiled ISeq (vm_eval.c ruby_4_0:2286-2300), so
+		// they steer __FILE__/__LINE__ and every location the source produces, not
+		// error reporting alone. A count outside 1..3 is an ArgumentError.
 		if len(args) < 1 || len(args) > 3 {
 			raise("ArgumentError", "wrong number of arguments (given %d, expected 1..3)", len(args))
 		}
-		src := vm.coerceToString(args[0])
+		src := vm.coerceFormatString(args[0])
+		var fileArg, lineArg object.Value
 		if len(args) >= 2 {
-			vm.coerceToString(args[1])
+			fileArg = args[1]
 		}
+		if len(args) >= 3 {
+			lineArg = args[2]
+		}
+		loc := vm.evalLoc(fileArg, lineArg)
 		defer vm.freshEvalVisibility(cls)()
-		return vm.classEvalString(cls, src)
+		return vm.classEvalString(cls, src, loc)
 	}
 	// Module#class_eval is an alias of Module#module_eval — a shared method record,
 	// so Module.instance_method(:class_eval) == Module.instance_method(:module_eval).

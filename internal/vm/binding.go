@@ -39,8 +39,24 @@ func (vm *VM) registerBinding() {
 	// starts with no locals of its own.
 	vm.consts["TOPLEVEL_BINDING"] = &Binding{env: &Env{}, self: vm.main, definee: vm.cObject}
 
+	// Binding#eval(src [, file [, line]]) is bind_eval (proc.c ruby_4_0:402): it
+	// scans "12" and then calls rb_f_eval with the binding inserted as the scope,
+	// so its optional filename and first line are eval's — and an absent filename
+	// takes the same "(eval at FILE:LINE)" default, naming the CALLER of
+	// Binding#eval (a native pushes no frame, so that is the innermost one).
 	cBinding.define("eval", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return vm.bindingEval(self.(*Binding), args[0])
+		if len(args) < 1 || len(args) > 3 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 1..3)", len(args))
+		}
+		src := vm.coerceFormatString(args[0])
+		var fileArg, lineArg object.Value
+		if len(args) >= 2 {
+			fileArg = args[1]
+		}
+		if len(args) >= 3 {
+			lineArg = args[2]
+		}
+		return vm.bindingEval(self.(*Binding), src, vm.evalLoc(fileArg, lineArg))
 	})
 	cBinding.define("receiver", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return self.(*Binding).self
