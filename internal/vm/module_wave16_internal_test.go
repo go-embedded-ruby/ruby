@@ -226,9 +226,11 @@ func TestWave16ModuleEval(t *testing.T) {
 		{"Module.new.module_eval(\"1\", \"f\", 1, 2)", "ArgumentError", "wrong number of arguments (given 4, expected 1..3)"},
 		{"Module.new.module_eval(Object.new)", "TypeError", "no implicit conversion of Object into String"},
 		{"Module.new.module_eval(\"1\", Object.new)", "TypeError", "no implicit conversion of Object into String"},
-		// #to_str present but returning a non-String still raises (coerceToString
-		// falls through the conversion to the TypeError).
-		{"o = Object.new\ndef o.to_str; 1; end\nModule.new.module_eval(o)", "TypeError", "no implicit conversion of Object into String"},
+		// #to_str present but returning a non-String still raises — and names what
+		// the conversion gave, as rb_convert_type_with_id does. The message pinned
+		// here was rbgo's own (coerceToString falling through to the plain
+		// implicit-conversion TypeError); ruby 4.0.5 measures as below.
+		{"o = Object.new\ndef o.to_str; 1; end\nModule.new.module_eval(o)", "TypeError", "can't convert Object to String (Object#to_str gives Integer)"},
 	}
 	for _, c := range errs {
 		if cls, msg := evalErr(t, c.src); cls != c.class || msg != c.msg {

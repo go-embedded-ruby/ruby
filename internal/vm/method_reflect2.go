@@ -185,14 +185,20 @@ func methodOriginalName(m *Method) string {
 
 // methodSourceLocation returns [file, line] for where a method was defined, or
 // nil when the source is unknown (a native method, or an iseq compiled without a
-// source file such as the prelude). As with Proc#source_location the VM tracks
-// no per-instruction line, so the line is reported as 0.
+// source file such as the prelude).
+//
+// It is iseq_location (proc.c ruby_4_0:1515-1531), reached from
+// method_def_location for every Ruby-level definition type: the pair is
+// (rb_iseq_path, location.first_lineno) — the line the DEFINING construct sits
+// on, not the line the frame has reached. rbgo's ISeq carries that as FirstLine,
+// which Proc#source_location already read; this reported a constant 0 instead,
+// so every Method and UnboundMethod placed itself on line 0 of the right file.
 func methodSourceLocation(m *Method) object.Value {
 	is := methodISeq(m)
 	if is == nil || is.File == "" {
 		return object.NilV
 	}
-	return object.NewArray(object.NewString(is.File), object.IntValue(0))
+	return object.NewArray(object.NewString(is.File), object.IntValue(int64(is.FirstLine)))
 }
 
 // methodParameters builds a method's MRI #parameters array: each entry is

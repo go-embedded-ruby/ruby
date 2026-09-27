@@ -13,18 +13,14 @@ import (
 // so the eval'd code sees and writes the binding's local variables. It uses the
 // front-end directly (CompileWithLocals), so a closed-world build replaces it
 // with the stub in binding_eval_closed.go.
-func (vm *VM) bindingEval(b *Binding, srcV object.Value) object.Value {
-	s, ok := srcV.(*object.String)
-	if !ok {
-		raise("TypeError", "no implicit conversion of %s into String", classNameOf(srcV))
-	}
-	prog, perr := parser.Parse(s.Str())
+func (vm *VM) bindingEval(b *Binding, src string, loc evalLocation) object.Value {
+	prog, perr := parser.Parse(src)
 	if perr != nil {
-		raise("SyntaxError", "%s", perr.Error())
+		raiseEvalSyntaxError(loc, perr)
 	}
-	iseq, cerr := compiler.CompileWithLocals(prog, b.names)
+	iseq, cerr := compiler.CompileEvalWithLocals(prog, b.names, loc.line)
 	if cerr != nil {
-		raise("SyntaxError", "%s", cerr.Error())
+		raiseEvalSyntaxError(loc, cerr)
 	}
 	// A top-scope assignment in the eval string creates a new local in the
 	// binding's scope (MRI: `eval("x = 1", b)` then `b.local_variable_get(:x)`).
@@ -40,9 +36,15 @@ func (vm *VM) bindingEval(b *Binding, srcV object.Value) object.Value {
 		}
 		// Re-seeding the same program with additional valid local names cannot
 		// introduce a compile error, so the earlier check already covered it.
-		iseq, _ = compiler.CompileWithLocals(prog, b.names)
+		iseq, _ = compiler.CompileEvalWithLocals(prog, b.names, loc.line)
 	}
 	iseq.Name = "(eval)"
+	// The location is the eval's own, exactly as on the no-binding path: MRI
+	// reaches eval_string_with_scope through the same rb_f_eval, so the file and
+	// first line given to eval(str, b, file, line) — or Binding#eval(str, file,
+	// line) — stamp the compiled ISeq, and the binding's own source location is
+	// left untouched (bind_location reads the binding, not the eval).
+	setISeqFile(iseq, loc.file)
 	// eval is transparent to Kernel#__method__ / #__callee__: the evaluated code
 	// inherits the caller's method context (so `eval("__method__")`, which routes
 	// through the caller's binding, reports the enclosing method), matching the

@@ -267,6 +267,22 @@ type Compiler struct {
 	// every lookup answers line 0 — the behaviour this VM had before there was a
 	// map at all.
 	lines map[ast.Node]int
+	// lineDelta offsets every line this compilation records, so a body whose
+	// first line is not 1 numbers itself from there. It is `firstLine - 1` for an
+	// eval given a starting line (eval(src, b, file, line), instance_eval(src,
+	// file, line)) and 0 everywhere else.
+	//
+	// MRI applies the same offset in the PARSER — pm_options_line_set(&options,
+	// line) / rb_parser_compile_string_path(parser, fname, src, line), vm_eval.c
+	// ruby_4_0:1725 and 1959 — so the offset reaches everything derived from a
+	// line, not the source map alone: notably the Integer literal `__LINE__`
+	// compiles to, which no later pass can tell from any other Integer in the
+	// pool. Offsetting here, at the ONE site where a line enters the builder, is
+	// that same substitution and covers the literal with it.
+	//
+	// It is NOT clamped at 1: a negative first line is legal in MRI and observable
+	// (instance_eval("\n\nraise\n", "b_file", -100) reports b_file:-98).
+	lineDelta int
 }
 
 // masgnPreEval holds the temporaries into which one multiple-assignment target's
@@ -293,6 +309,15 @@ func Compile(prog *ast.Program) (iseq *bytecode.ISeq, err error) {
 // encoding name, or "" for UTF-8) via a `# encoding:` magic comment, so string
 // literals carry that encoding.
 func CompileWithEncoding(prog *ast.Program, srcEnc string) (iseq *bytecode.ISeq, err error) {
+	return CompileEval(prog, srcEnc, 1)
+}
+
+// CompileEval lowers prog as a top-level body whose FIRST LINE is firstLine
+// rather than 1 — the shape an eval given an explicit starting line needs
+// (eval(src, nil, file, line), instance_eval(src, file, line), whose line
+// reaches MRI's parser as pm_options_line_set). firstLine may be negative; MRI
+// does not clamp it. CompileWithEncoding is this function at firstLine 1.
+func CompileEval(prog *ast.Program, srcEnc string, firstLine int) (iseq *bytecode.ISeq, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			// Unchecked: a non-compileError is an internal bug and re-panics as a
@@ -300,12 +325,13 @@ func CompileWithEncoding(prog *ast.Program, srcEnc string) (iseq *bytecode.ISeq,
 			iseq, err = nil, r.(compileError)
 		}
 	}()
-	c := &Compiler{srcEnc: srcEnc, patCache: -1, lines: prog.Lines}
+	c := &Compiler{srcEnc: srcEnc, patCache: -1, lines: prog.Lines, lineDelta: firstLine - 1}
 	c.push(newBuilder("<main>", nil))
 	// MRI's top-level ISeq has first_lineno 1 (iseq.c v3_4_0 rb_iseq_new_top
 	// passes a location starting at line 1), so an empty or unplaceable <main>
-	// frame reports line 1 rather than nothing.
-	c.cur().firstLine = 1
+	// frame reports line 1 rather than nothing. An eval ISeq's is its `line`
+	// instead (rb_iseq_new_eval is handed the same first_lineno the parser got).
+	c.cur().firstLine = firstLine
 	c.compileBody(prog.Body)
 	c.cur().emit(bytecode.OpReturn, 0, 0)
 	return c.pop().build(), nil
@@ -411,15 +437,26 @@ func isEncNameByte(b byte) bool {
 // ISeq is run with that environment as the parent — while any new locals are
 // scratch in the child frame.
 func CompileWithLocals(prog *ast.Program, localNames []string) (iseq *bytecode.ISeq, err error) {
+	return CompileEvalWithLocals(prog, localNames, 1)
+}
+
+// CompileEvalWithLocals is CompileWithLocals for a binding eval given an explicit
+// starting line — eval(src, b, file, line) and Binding#eval(src, file, line).
+// CompileWithLocals is this function at firstLine 1.
+func CompileEvalWithLocals(prog *ast.Program, localNames []string, firstLine int) (iseq *bytecode.ISeq, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			iseq, err = nil, r.(compileError)
 		}
 	}()
-	c := &Compiler{patCache: -1, lines: prog.Lines}
+	c := &Compiler{patCache: -1, lines: prog.Lines, lineDelta: firstLine - 1}
 	parent := newBuilder("<binding>", nil)
 	parent.locals = append([]string(nil), localNames...)
 	parent.borrowed = true
+	// The synthetic parent holds no code; its curLine exists only so push stamps
+	// the eval scope below it with the eval's first line (MRI's
+	// rb_iseq_new_eval first_lineno).
+	parent.curLine = firstLine
 	c.push(parent)
 	child := newBuilder("(eval)", nil)
 	child.isBlock = true
@@ -623,7 +660,7 @@ func (c *Compiler) compileDiscarded(n ast.Node) bool {
 // because MRI's nd_line for those inner nodes is the same line too.
 func (c *Compiler) compileNode(n ast.Node) {
 	if l, ok := c.lines[n]; ok {
-		c.cur().curLine = l
+		c.cur().curLine = l + c.lineDelta
 	}
 	c.compileNode1(n)
 }
