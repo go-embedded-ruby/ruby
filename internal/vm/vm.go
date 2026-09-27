@@ -224,11 +224,81 @@ func (vm *VM) frameLine(i int) int {
 	return fc.iseq.FirstLine
 }
 
-// frameCode is one frame's code position: the ISeq it runs and the instruction
-// it has reached. It is MRI's (cfp->iseq, cfp->pc).
+// frameCode is one frame's code position AND scope: the ISeq it runs, the
+// instruction it has reached, and the (env, self, definee) triple it runs under.
+// The first pair is MRI's (cfp->iseq, cfp->pc); the second is MRI's (cfp->ep,
+// cfp->self, the cref reached through cfp->ep[VM_ENV_DATA_INDEX_ME_CREF]) —
+// rb_control_frame_t carries all five side by side (vm_core.h ruby_4_0:915-926).
+//
+// The triple used to live in exec's LOCALS, and that is the whole of why a native
+// method could not reach the calling scope: rbgo pushes no frame for a native, so
+// Kernel#binding — rb_f_binding -> rb_binding_new -> rb_vm_make_binding(ec,
+// ec->cfp) (proc.c ruby_4_0:328-333, 379-383) — had nothing to read. The
+// compiler papered over the single shape `eval(str)` by rewriting it to
+// `eval(str, binding)`; every other shape (#send, an alias, a Method object, any
+// other arity) missed the caller's locals, and Kernel#binding could not be a
+// method at all.
 type frameCode struct {
 	iseq *bytecode.ISeq
 	pc   int
+
+	// env is the frame's local-variable environment (MRI's cfp->ep). It is nil
+	// only before exec has published it, which is what frameBinding skips on:
+	// MRI's rb_vm_get_binding_creatable_next_cfp (vm_core.h ruby_4_0:1993) walks
+	// outward for the same reason, past frames whose env cannot be escaped.
+	env     *Env
+	self    object.Value
+	definee *RClass
+}
+
+// frameBinding builds a Binding for the innermost frame at or below index i that
+// can make one, or nil when no frame can. This is rb_vm_make_binding after
+// rb_vm_get_binding_creatable_next_cfp: rbgo pushes a frame only for a Ruby-level
+// ISeq (a native pushes none), so the walk only has to skip a frame whose scope
+// exec has not published yet.
+//
+// The line comes from frameLine, i.e. from the frame's LIVE pc, which the
+// interpreter publishes on every instruction — so Binding#source_location reports
+// the capture line the way bind_location reads bind->first_lineno (proc.c
+// ruby_4_0:805-815) rather than the 0 rbgo reported for want of the number.
+func (vm *VM) frameBinding(i int) *Binding {
+	if i >= len(vm.frameCode) {
+		i = len(vm.frameCode) - 1
+	}
+	for ; i >= 0; i-- {
+		fc := vm.frameCode[i]
+		if fc.env == nil || fc.iseq == nil {
+			continue
+		}
+		b := &Binding{
+			env:     fc.env,
+			self:    fc.self,
+			definee: fc.definee,
+			file:    fc.iseq.File,
+			line:    vm.frameLine(i),
+			names:   append([]string(nil), fc.iseq.Locals...),
+		}
+		// A Binding is transparent to Kernel#__method__ / #__callee__: code eval'd
+		// through it reports the method the binding was captured in, which is the
+		// pair that frame recorded.
+		if i < len(vm.frameMethods) {
+			b.method = vm.frameMethods[i]
+		}
+		return b
+	}
+	// No frame has published a scope — a native reached from Go before Run, or
+	// after the Run boundary reset the stacks. The only scope that exists then is
+	// the top level's, which is what TOPLEVEL_BINDING is; returning it keeps every
+	// caller free of a nil case it could not otherwise exercise.
+	return vm.newToplevelBinding()
+}
+
+// callerBinding is the Binding a NATIVE method's caller would get from
+// Kernel#binding. A native pushes no frame, so the top of the frame stack IS the
+// calling Ruby frame — the cfp rb_vm_get_binding_creatable_next_cfp lands on once
+// it has skipped the CFUNC frame.
+func (vm *VM) callerBinding() *Binding {
+	return vm.frameBinding(len(vm.frameNames) - 1)
 }
 
 func (vm *VM) uncaughtBacktrace(e RubyError) []object.Value {
@@ -1559,6 +1629,14 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 	// instruction it has reached, which is what a backtrace resolves to a line.
 	myFrame := len(vm.frameNames) - 1
 	vm.setFrameCode(myFrame, iseq)
+	// Publish this frame's SCOPE beside its code position, so a native method —
+	// which pushes no frame of its own — can read the calling env/self/definee off
+	// the top of the stack (frameBinding). definee is the frame's, not
+	// methodDefinee's: a Binding captures the scope `def` and `CONST =` target,
+	// which is what MRI's cref slot holds.
+	vm.frameCode[myFrame].env = env
+	vm.frameCode[myFrame].self = self
+	vm.frameCode[myFrame].definee = definee
 	// frameCrefs mirrors frameNames too; the cref is filled in below once lexCref
 	// is known (a nil placeholder keeps the stacks aligned until then).
 	vm.frameCrefs = append(vm.frameCrefs, nil)
@@ -2021,6 +2099,18 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 			case bytecode.OpGetConstTop:
 				// Leading `::Name`: top-level only, ignoring lexical nesting.
 				name := iseq.Names[in.A]
+				// `::Name` is a QUALIFIED reference — MRI compiles it to the same
+				// colon2/colon3 path that goes through rb_public_const_get_from, so
+				// Module#private_constant applies even when the holder is Object:
+				// `Object.send(:private_constant, :X); ::X` raises NameError "private
+				// constant Object::X referenced" on ruby 4.0.5, while the BAREWORD `X`
+				// still resolves. rbgo enforced this for `Recv::NAME` but not for the
+				// leading-`::` form, which was the one shape that could still read a
+				// private top-level constant.
+				if vm.cObject.privateConsts[name] {
+					push(vm.privateConstReferenced(vm.cObject, vm.cObject, name))
+					break
+				}
 				v, ok := vm.cObject.consts[name]
 				if !ok {
 					raise("NameError", "uninitialized constant %s", name)
@@ -2060,10 +2150,29 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				vm.warnAlreadyInitialized(lexCref, iseq.Names[in.A])
 				vm.assignConst(lexCref, iseq.Names[in.A], stack[len(stack)-1])
 			case bytecode.OpGetGVar:
-				push(vm.gvar(iseq.Names[in.A]))
+				// bytecode.ErrinfoCell ("#$!") is the reserved name the begin/rescue
+				// lowering uses for the interpreter's errinfo cell — the value `$!`
+				// reports. It bypasses vm.gvar/vm.setGVar because `$!` is read-only to
+				// Ruby (eval.c ruby_4_0:2225 registers it with a 0 setter) while the
+				// lowering must both read and write it. No Ruby program can name it.
+				if name := iseq.Names[in.A]; name == bytecode.ErrinfoCell {
+					// curExc starts as the zero object.Value (a Go nil), which nothing on
+					// the operand stack may be; normalise it the way the $! getter does.
+					if vm.curExc == nil {
+						push(object.NilV)
+					} else {
+						push(vm.curExc)
+					}
+				} else {
+					push(vm.gvar(name))
+				}
 			case bytecode.OpSetGVar:
 				// Assignment is an expression: set the global, keep its value.
-				vm.setGVar(iseq.Names[in.A], stack[len(stack)-1])
+				if name := iseq.Names[in.A]; name == bytecode.ErrinfoCell {
+					vm.curExc = stack[len(stack)-1]
+				} else {
+					vm.setGVar(name, stack[len(stack)-1])
+				}
 			case bytecode.OpGetCVar:
 				name := iseq.Names[in.A]
 				vm.checkCVarScope(definee)
@@ -2514,7 +2623,11 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					push(object.NilV)
 				}
 			case bytecode.OpDefinedConstTop:
-				if _, ok := vm.cObject.consts[iseq.Names[in.A]]; ok {
+				// defined?(::Name) answers for the same reference `::Name` makes, so a
+				// private top-level constant is NOT defined? through it (measured nil on
+				// ruby 4.0.5) although the bareword form reports "constant".
+				name := iseq.Names[in.A]
+				if _, ok := vm.cObject.consts[name]; ok && !vm.cObject.privateConsts[name] {
 					push(definedTag(bytecode.DefinedConst))
 				} else {
 					push(object.NilV)
@@ -2586,7 +2699,9 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				push(vm.runDefinedGuard(iseq.Children[in.A], self, definee, env, block))
 			case bytecode.OpBinding:
 				markEnvCaptured(env)
-				push(&Binding{env: env, self: self, definee: definee, file: iseq.File, names: append([]string(nil), iseq.Locals...)})
+				// One door: the bareword intrinsic and Kernel#binding both build the
+				// Binding from this frame's published scope, so the two cannot drift.
+				push(vm.frameBinding(myFrame))
 			case bytecode.OpArgGiven:
 				push(object.Bool(in.A < nPosGiven))
 			case bytecode.OpKwGiven:
@@ -2835,13 +2950,26 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 						// run an intervening ensure body before continuing it, then
 						// resume the unwind via OpReThrow (pendingSignal). A plain
 						// rescue handler does not apply, so it is skipped past.
+						//
 						if h, found := popToEnsure(&handlers); found {
+							// An ensure body still runs INSIDE this frame, so the rescue
+							// scopes it sits in are not gone yet: $! keeps whatever the
+							// clause-exit restore left (ruby/spec measures an `ensure`
+							// nested in a returning rescue clause seeing the OUTER
+							// exception, not nil).
 							stack = stack[:h.sp]
 							restoreFrameStacks()
 							pendingSignal = r
 							pc = h.pc
 							return
 						}
+						// No ensure left: the unwind LEAVES this frame, and every rescue
+						// clause it had open goes with it — in MRI the rescue frames are
+						// popped and $! reverts to the enclosing view. The compiler closes
+						// the scope for a `return` written in the clause itself; it cannot
+						// for `foo { return }`, where the return is in ANOTHER ISeq and a
+						// slot index would mean nothing there. That is this case.
+						vm.curExc = prevCurExc
 						panic(r)
 					}
 					if len(handlers) == 0 {
