@@ -183,8 +183,8 @@ type Method struct {
 	// method_missing → NoMethodError).
 	undefined bool
 	// argc is the argument count the native method's registration site DECLARED,
-	// in MRI's rb_define_method convention (vm_method.c r4:877, which rejects
-	// anything outside -2..15):
+	// in MRI's rb_define_method convention (rb_add_method_cfunc, vm_method.c
+	// r4:877, which rejects anything outside -2..15):
 	//
 	//   n >= 0  the method takes exactly n arguments
 	//   -1      variadic: MRI's (int argc, VALUE *argv, VALUE self) shape
@@ -369,7 +369,8 @@ type nativeArgc struct {
 }
 
 // declareArgc validates an argc and packs it. The upper bound is MRI's, which
-// raises "arity out of range: %d for -2..15" (vm_method.c r4:877); the lower
+// raises "arity out of range: %d for -2..15" (rb_add_method_cfunc, vm_method.c
+// r4:877, the check every rb_define_method* goes through); the lower
 // bound is -1 rather than -2 because rbgo has only MRI's -1 shape (see
 // nativeArgc). An out-of-range argc is a mistake at a registration site, not a
 // Ruby-level condition, so it panics rather than raising.

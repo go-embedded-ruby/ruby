@@ -95,7 +95,10 @@ func (vm *VM) registerProcMethods() {
 
 // procParameters builds a Proc's MRI #parameters array by way of the shared
 // buildParamsList: a non-lambda proc reports every required positional as :opt
-// (it never enforces them), while a lambda reports them as :req.
+// (it never enforces them), while a lambda reports them as :req. is must be
+// non-nil — a Go-backed Proc has no ISeq to read and takes the
+// unnamedParameters(arity) route MRI's rb_proc_parameters takes, at the call
+// site.
 func procParameters(is *bytecode.ISeq, isLambda bool) object.Value {
 	reqKind := "opt"
 	if isLambda {

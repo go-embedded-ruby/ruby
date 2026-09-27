@@ -252,8 +252,13 @@ func unnamedParameters(arity int) object.Value {
 // required positional (:req for a method or a lambda, :opt for a non-lambda
 // proc, which never enforces its positionals). The positional shape — leading
 // required, optionals, a *rest, then the POST required — is read from the iseq,
-// followed by the keyword, keyword-rest and block parameters. A nil iseq is a
-// native (ISeq-less) callable: MRI reports a single catch-all rest.
+// followed by the keyword, keyword-rest and block parameters.
+//
+// is must be non-nil. An ISeq-less callable — a native method or a Go-backed
+// Proc — does not come here at all: MRI answers it with rb_unnamed_parameters
+// over its arity, which unnamedParameters does at each call site. This function
+// used to carry a nil arm returning a flat [[:rest]], which WAS the whole of
+// #parameters for a native before #714 and is now unreachable.
 //
 // The post run is the one rb_iseq_parameters walks last among the positionals,
 // [post_start, post_start+post_num), emitting :req for each (iseq.c
@@ -263,9 +268,6 @@ func unnamedParameters(arity int) object.Value {
 // run as optional unless a splat separated it, so `def m(a=1, b)` answered
 // [[:opt, :a], [:opt, :b]] where MRI answers [[:opt, :a], [:req, :b]].
 func buildParamsList(is *bytecode.ISeq, reqKind string) []object.Value {
-	if is == nil {
-		return []object.Value{object.NewArray(object.Symbol("rest"))}
-	}
 	var out []object.Value
 	postStart := iseqPostStart(is)
 	for i, name := range is.Params {
