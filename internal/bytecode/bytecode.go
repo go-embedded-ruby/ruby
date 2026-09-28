@@ -271,6 +271,36 @@ const (
 	// was written as keywords, which is what FlagSendNoKW has to answer. So the
 	// hash is always appended and the VM drops it, exactly where MRI does.
 	FlagSendKWSplat
+
+	// FlagSendVCall marks a VCALL: a BARE identifier written with no receiver, no
+	// parentheses, no arguments and no block, which at compile time did not
+	// resolve to a local variable. MRI's parser makes it a different NODE from a
+	// call — gettable's "method call without arguments" branch returns NEW_VCALL
+	// (parse.y-ruby_4_0:13086) where an explicit call builds NODE_FCALL — and the
+	// difference survives all the way to the error:
+	//
+	//	nope          # NameError:     undefined local variable or method 'nope' for main
+	//	nope()        # NoMethodError: undefined method 'nope' for main
+	//	nope {}       # NoMethodError
+	//	self.nope     # NoMethodError
+	//
+	// The call info carries VM_CALL_VCALL (scope_to_ci, vm_eval.c:435); the miss
+	// turns it into MISSING_VCALL, and raise_method_missing (vm_eval.c:943) is the
+	// single place that reads it: MISSING_VCALL alone selects the format string
+	// "undefined local variable or method '%1$s' for %3$s%4$s" AND swaps the
+	// exception class to rb_eNameError, which rb_make_no_method_exception
+	// (vm_eval.c:927) then builds with rb_name_err_new instead of
+	// rb_nomethod_err_new. #name and #receiver are set either way.
+	//
+	// KNOWN GAP, measured on go-ruby-parser v0.8.0: `foo` and `foo()` parse to the
+	// IDENTICAL *ast.Call (Recv nil, Args empty, Block nil), so the compiler cannot
+	// tell a bare name from an empty argument list and this flag is set for both.
+	// Distinguishing them needs a `Paren` bit on ast.Call upstream — the same shape
+	// of gap as the `Braced` bit ast.HashLit needs for FlagSendNoKW above. The flag
+	// is therefore set on the shape the parser CAN prove is receiver-less,
+	// argument-less and block-less, and `nope()` reports NameError where MRI
+	// reports NoMethodError.
+	FlagSendVCall
 )
 
 // LineEntry maps the first instruction of a run to the source line that run

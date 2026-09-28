@@ -424,7 +424,7 @@ func embeddedPrelude() *bytecode.ISeq {
 						Children: []*bytecode.ISeq{
 							&bytecode.ISeq{
 								Name:  "block in map",
-								Insns: []bytecode.Instr{{Op: 5}, {Op: 1}, {Op: 30, B: 1, Flags: 2}, {Op: 28, A: 7}, {Op: 5}, {Op: 30, A: 1}, {Op: 26, A: 8}, {Op: 2}, {Op: 53}},
+								Insns: []bytecode.Instr{{Op: 5}, {Op: 1}, {Op: 30, B: 1, Flags: 2}, {Op: 28, A: 7}, {Op: 5}, {Op: 30, A: 1, Flags: 8}, {Op: 26, A: 8}, {Op: 2}, {Op: 53}},
 								Consts: []object.Value{
 									object.Symbol("size"),
 								},
@@ -542,7 +542,7 @@ func embeddedPrelude() *bytecode.ISeq {
 					},
 					&bytecode.ISeq{
 						Name:  "min_by",
-						Insns: []bytecode.Instr{{Op: 52}, {Op: 25}, {Op: 28, A: 14}, {Op: 5}, {Op: 6}, {Op: 1}, {Op: 6, A: 1}, {Op: 61}, {Op: 11}, {Op: 60}, {Op: 61}, {Op: 62, C: 1, Flags: 2}, {Op: 53}, {Op: 26, A: 15}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 1}, {Op: 6}, {Op: 11}, {Op: 60}, {Op: 61}, {Op: 62, A: 2, C: 2, Flags: 3}, {Op: 53}},
+						Insns: []bytecode.Instr{{Op: 52}, {Op: 25}, {Op: 28, A: 14}, {Op: 5}, {Op: 6}, {Op: 1}, {Op: 6, A: 1}, {Op: 61}, {Op: 11}, {Op: 60}, {Op: 61}, {Op: 62, C: 1, Flags: 2}, {Op: 53}, {Op: 26, A: 15}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 1, Flags: 8}, {Op: 6}, {Op: 11}, {Op: 60}, {Op: 61}, {Op: 62, A: 2, C: 2, Flags: 3}, {Op: 53}},
 						Consts: []object.Value{
 							object.Symbol("min_by"),
 						},
@@ -560,7 +560,7 @@ func embeddedPrelude() *bytecode.ISeq {
 						Children: []*bytecode.ISeq{
 							&bytecode.ISeq{
 								Name:  "block in min_by",
-								Insns: []bytecode.Instr{{Op: 5}, {Op: 1}, {Op: 30, B: 1, Flags: 2}, {Op: 28, A: 7}, {Op: 5}, {Op: 30, A: 1}, {Op: 26, A: 8}, {Op: 2}, {Op: 53}},
+								Insns: []bytecode.Instr{{Op: 5}, {Op: 1}, {Op: 30, B: 1, Flags: 2}, {Op: 28, A: 7}, {Op: 5}, {Op: 30, A: 1, Flags: 8}, {Op: 26, A: 8}, {Op: 2}, {Op: 53}},
 								Consts: []object.Value{
 									object.Symbol("size"),
 								},
@@ -595,7 +595,7 @@ func embeddedPrelude() *bytecode.ISeq {
 					},
 					&bytecode.ISeq{
 						Name:  "max_by",
-						Insns: []bytecode.Instr{{Op: 52}, {Op: 25}, {Op: 28, A: 14}, {Op: 5}, {Op: 6}, {Op: 1}, {Op: 6, A: 1}, {Op: 61}, {Op: 11}, {Op: 60}, {Op: 61}, {Op: 62, C: 1, Flags: 2}, {Op: 53}, {Op: 26, A: 15}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 1}, {Op: 6}, {Op: 11}, {Op: 60}, {Op: 61}, {Op: 62, A: 2, C: 2, Flags: 3}, {Op: 53}},
+						Insns: []bytecode.Instr{{Op: 52}, {Op: 25}, {Op: 28, A: 14}, {Op: 5}, {Op: 6}, {Op: 1}, {Op: 6, A: 1}, {Op: 61}, {Op: 11}, {Op: 60}, {Op: 61}, {Op: 62, C: 1, Flags: 2}, {Op: 53}, {Op: 26, A: 15}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 1, Flags: 8}, {Op: 6}, {Op: 11}, {Op: 60}, {Op: 61}, {Op: 62, A: 2, C: 2, Flags: 3}, {Op: 53}},
 						Consts: []object.Value{
 							object.Symbol("max_by"),
 						},
@@ -613,7 +613,7 @@ func embeddedPrelude() *bytecode.ISeq {
 						Children: []*bytecode.ISeq{
 							&bytecode.ISeq{
 								Name:  "block in max_by",
-								Insns: []bytecode.Instr{{Op: 5}, {Op: 1}, {Op: 30, B: 1, Flags: 2}, {Op: 28, A: 7}, {Op: 5}, {Op: 30, A: 1}, {Op: 26, A: 8}, {Op: 2}, {Op: 53}},
+								Insns: []bytecode.Instr{{Op: 5}, {Op: 1}, {Op: 30, B: 1, Flags: 2}, {Op: 28, A: 7}, {Op: 5}, {Op: 30, A: 1, Flags: 8}, {Op: 26, A: 8}, {Op: 2}, {Op: 53}},
 								Consts: []object.Value{
 									object.Symbol("size"),
 								},
@@ -648,7 +648,7 @@ func embeddedPrelude() *bytecode.ISeq {
 					},
 					&bytecode.ISeq{
 						Name:        "sort",
-						Insns:       []bytecode.Instr{{Op: 5}, {Op: 30}, {Op: 11}, {Op: 66, A: 1, Flags: 1}, {Op: 53}},
+						Insns:       []bytecode.Instr{{Op: 5}, {Op: 30, Flags: 8}, {Op: 11}, {Op: 66, A: 1, Flags: 1}, {Op: 53}},
 						Names:       []string{"to_a", "sort"},
 						NumRequired: 0,
 						SplatIndex:  -1,
@@ -663,7 +663,7 @@ func embeddedPrelude() *bytecode.ISeq {
 					},
 					&bytecode.ISeq{
 						Name:  "sort_by",
-						Insns: []bytecode.Instr{{Op: 52}, {Op: 25}, {Op: 28, A: 8}, {Op: 5}, {Op: 1}, {Op: 30, B: 1, C: 1, Flags: 2}, {Op: 53}, {Op: 26, A: 9}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 1}, {Op: 30, A: 2, C: 2, Flags: 1}, {Op: 53}},
+						Insns: []bytecode.Instr{{Op: 52}, {Op: 25}, {Op: 28, A: 8}, {Op: 5}, {Op: 1}, {Op: 30, B: 1, C: 1, Flags: 2}, {Op: 53}, {Op: 26, A: 9}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 1, Flags: 8}, {Op: 30, A: 2, C: 2, Flags: 1}, {Op: 53}},
 						Consts: []object.Value{
 							object.Symbol("sort_by"),
 						},
@@ -679,7 +679,7 @@ func embeddedPrelude() *bytecode.ISeq {
 						Children: []*bytecode.ISeq{
 							&bytecode.ISeq{
 								Name:  "block in sort_by",
-								Insns: []bytecode.Instr{{Op: 5}, {Op: 1}, {Op: 30, B: 1, Flags: 2}, {Op: 28, A: 7}, {Op: 5}, {Op: 30, A: 1}, {Op: 26, A: 8}, {Op: 2}, {Op: 53}},
+								Insns: []bytecode.Instr{{Op: 5}, {Op: 1}, {Op: 30, B: 1, Flags: 2}, {Op: 28, A: 7}, {Op: 5}, {Op: 30, A: 1, Flags: 8}, {Op: 26, A: 8}, {Op: 2}, {Op: 53}},
 								Consts: []object.Value{
 									object.Symbol("size"),
 								},
@@ -731,7 +731,7 @@ func embeddedPrelude() *bytecode.ISeq {
 						Children: []*bytecode.ISeq{
 							&bytecode.ISeq{
 								Name:  "block in select",
-								Insns: []bytecode.Instr{{Op: 5}, {Op: 1}, {Op: 30, B: 1, Flags: 2}, {Op: 28, A: 7}, {Op: 5}, {Op: 30, A: 1}, {Op: 26, A: 8}, {Op: 2}, {Op: 53}},
+								Insns: []bytecode.Instr{{Op: 5}, {Op: 1}, {Op: 30, B: 1, Flags: 2}, {Op: 28, A: 7}, {Op: 5}, {Op: 30, A: 1, Flags: 8}, {Op: 26, A: 8}, {Op: 2}, {Op: 53}},
 								Consts: []object.Value{
 									object.Symbol("size"),
 								},
@@ -784,7 +784,7 @@ func embeddedPrelude() *bytecode.ISeq {
 						Children: []*bytecode.ISeq{
 							&bytecode.ISeq{
 								Name:  "block in reject",
-								Insns: []bytecode.Instr{{Op: 5}, {Op: 1}, {Op: 30, B: 1, Flags: 2}, {Op: 28, A: 7}, {Op: 5}, {Op: 30, A: 1}, {Op: 26, A: 8}, {Op: 2}, {Op: 53}},
+								Insns: []bytecode.Instr{{Op: 5}, {Op: 1}, {Op: 30, B: 1, Flags: 2}, {Op: 28, A: 7}, {Op: 5}, {Op: 30, A: 1, Flags: 8}, {Op: 26, A: 8}, {Op: 2}, {Op: 53}},
 								Consts: []object.Value{
 									object.Symbol("size"),
 								},
@@ -940,7 +940,7 @@ func embeddedPrelude() *bytecode.ISeq {
 					},
 					&bytecode.ISeq{
 						Name:        "min",
-						Insns:       []bytecode.Instr{{Op: 54}, {Op: 27, A: 5}, {Op: 2}, {Op: 12}, {Op: 9}, {Op: 11}, {Op: 30, Flags: 1}, {Op: 25}, {Op: 28, A: 17}, {Op: 5}, {Op: 30, A: 1}, {Op: 11, A: 1}, {Op: 66, A: 2, Flags: 1}, {Op: 11}, {Op: 30, A: 3, B: 1, Flags: 3}, {Op: 53}, {Op: 26, A: 18}, {Op: 2}, {Op: 9}, {Op: 2}, {Op: 12, A: 2}, {Op: 9}, {Op: 3}, {Op: 12, A: 3}, {Op: 9}, {Op: 5}, {Op: 30, A: 4, C: 1}, {Op: 9}, {Op: 11, A: 2}, {Op: 53}},
+						Insns:       []bytecode.Instr{{Op: 54}, {Op: 27, A: 5}, {Op: 2}, {Op: 12}, {Op: 9}, {Op: 11}, {Op: 30, Flags: 1}, {Op: 25}, {Op: 28, A: 17}, {Op: 5}, {Op: 30, A: 1, Flags: 8}, {Op: 11, A: 1}, {Op: 66, A: 2, Flags: 1}, {Op: 11}, {Op: 30, A: 3, B: 1, Flags: 3}, {Op: 53}, {Op: 26, A: 18}, {Op: 2}, {Op: 9}, {Op: 2}, {Op: 12, A: 2}, {Op: 9}, {Op: 3}, {Op: 12, A: 3}, {Op: 9}, {Op: 5}, {Op: 30, A: 4, C: 1}, {Op: 9}, {Op: 11, A: 2}, {Op: 53}},
 						Names:       []string{"nil?", "to_a", "sort", "first", "__each_packed"},
 						Params:      []string{"n"},
 						NumRequired: 0,
@@ -981,7 +981,7 @@ func embeddedPrelude() *bytecode.ISeq {
 					},
 					&bytecode.ISeq{
 						Name:        "max",
-						Insns:       []bytecode.Instr{{Op: 54}, {Op: 27, A: 5}, {Op: 2}, {Op: 12}, {Op: 9}, {Op: 11}, {Op: 30, Flags: 1}, {Op: 25}, {Op: 28, A: 18}, {Op: 5}, {Op: 30, A: 1}, {Op: 11, A: 1}, {Op: 66, A: 2, Flags: 1}, {Op: 11}, {Op: 30, A: 3, B: 1, Flags: 3}, {Op: 30, A: 4, Flags: 1}, {Op: 53}, {Op: 26, A: 19}, {Op: 2}, {Op: 9}, {Op: 2}, {Op: 12, A: 2}, {Op: 9}, {Op: 3}, {Op: 12, A: 3}, {Op: 9}, {Op: 5}, {Op: 30, A: 5, C: 1}, {Op: 9}, {Op: 11, A: 2}, {Op: 53}},
+						Insns:       []bytecode.Instr{{Op: 54}, {Op: 27, A: 5}, {Op: 2}, {Op: 12}, {Op: 9}, {Op: 11}, {Op: 30, Flags: 1}, {Op: 25}, {Op: 28, A: 18}, {Op: 5}, {Op: 30, A: 1, Flags: 8}, {Op: 11, A: 1}, {Op: 66, A: 2, Flags: 1}, {Op: 11}, {Op: 30, A: 3, B: 1, Flags: 3}, {Op: 30, A: 4, Flags: 1}, {Op: 53}, {Op: 26, A: 19}, {Op: 2}, {Op: 9}, {Op: 2}, {Op: 12, A: 2}, {Op: 9}, {Op: 3}, {Op: 12, A: 3}, {Op: 9}, {Op: 5}, {Op: 30, A: 5, C: 1}, {Op: 9}, {Op: 11, A: 2}, {Op: 53}},
 						Names:       []string{"nil?", "to_a", "sort", "last", "reverse", "__each_packed"},
 						Params:      []string{"n"},
 						NumRequired: 0,
@@ -1413,7 +1413,7 @@ func embeddedPrelude() *bytecode.ISeq {
 						Children: []*bytecode.ISeq{
 							&bytecode.ISeq{
 								Name:  "block in each_with_index",
-								Insns: []bytecode.Instr{{Op: 5}, {Op: 1}, {Op: 30, B: 1, Flags: 2}, {Op: 28, A: 7}, {Op: 5}, {Op: 30, A: 1}, {Op: 26, A: 8}, {Op: 2}, {Op: 53}},
+								Insns: []bytecode.Instr{{Op: 5}, {Op: 1}, {Op: 30, B: 1, Flags: 2}, {Op: 28, A: 7}, {Op: 5}, {Op: 30, A: 1, Flags: 8}, {Op: 26, A: 8}, {Op: 2}, {Op: 53}},
 								Consts: []object.Value{
 									object.Symbol("size"),
 								},
@@ -1452,7 +1452,7 @@ func embeddedPrelude() *bytecode.ISeq {
 					},
 					&bytecode.ISeq{
 						Name:  "reverse_each",
-						Insns: []bytecode.Instr{{Op: 11}, {Op: 25}, {Op: 28, A: 8}, {Op: 5}, {Op: 1}, {Op: 30, B: 1, C: 1, Flags: 2}, {Op: 53}, {Op: 26, A: 9}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 1}, {Op: 11}, {Op: 66, A: 2, Flags: 1}, {Op: 9}, {Op: 5}, {Op: 53}},
+						Insns: []bytecode.Instr{{Op: 11}, {Op: 25}, {Op: 28, A: 8}, {Op: 5}, {Op: 1}, {Op: 30, B: 1, C: 1, Flags: 2}, {Op: 53}, {Op: 26, A: 9}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 1, Flags: 8}, {Op: 11}, {Op: 66, A: 2, Flags: 1}, {Op: 9}, {Op: 5}, {Op: 53}},
 						Consts: []object.Value{
 							object.Symbol("reverse_each"),
 						},
@@ -1469,7 +1469,7 @@ func embeddedPrelude() *bytecode.ISeq {
 						Children: []*bytecode.ISeq{
 							&bytecode.ISeq{
 								Name:  "block in reverse_each",
-								Insns: []bytecode.Instr{{Op: 5}, {Op: 1}, {Op: 30, B: 1, Flags: 2}, {Op: 28, A: 7}, {Op: 5}, {Op: 30, A: 1}, {Op: 26, A: 8}, {Op: 2}, {Op: 53}},
+								Insns: []bytecode.Instr{{Op: 5}, {Op: 1}, {Op: 30, B: 1, Flags: 2}, {Op: 28, A: 7}, {Op: 5}, {Op: 30, A: 1, Flags: 8}, {Op: 26, A: 8}, {Op: 2}, {Op: 53}},
 								Consts: []object.Value{
 									object.Symbol("size"),
 								},
@@ -1506,7 +1506,7 @@ func embeddedPrelude() *bytecode.ISeq {
 						Children: []*bytecode.ISeq{
 							&bytecode.ISeq{
 								Name:  "block in flat_map",
-								Insns: []bytecode.Instr{{Op: 5}, {Op: 1}, {Op: 30, B: 1, Flags: 2}, {Op: 28, A: 7}, {Op: 5}, {Op: 30, A: 1}, {Op: 26, A: 8}, {Op: 2}, {Op: 53}},
+								Insns: []bytecode.Instr{{Op: 5}, {Op: 1}, {Op: 30, B: 1, Flags: 2}, {Op: 28, A: 7}, {Op: 5}, {Op: 30, A: 1, Flags: 8}, {Op: 26, A: 8}, {Op: 2}, {Op: 53}},
 								Consts: []object.Value{
 									object.Symbol("size"),
 								},
@@ -1578,7 +1578,7 @@ func embeddedPrelude() *bytecode.ISeq {
 						Children: []*bytecode.ISeq{
 							&bytecode.ISeq{
 								Name:  "block in each_entry",
-								Insns: []bytecode.Instr{{Op: 5}, {Op: 1}, {Op: 30, B: 1, Flags: 2}, {Op: 28, A: 7}, {Op: 5}, {Op: 30, A: 1}, {Op: 26, A: 8}, {Op: 2}, {Op: 53}},
+								Insns: []bytecode.Instr{{Op: 5}, {Op: 1}, {Op: 30, B: 1, Flags: 2}, {Op: 28, A: 7}, {Op: 5}, {Op: 30, A: 1, Flags: 8}, {Op: 26, A: 8}, {Op: 2}, {Op: 53}},
 								Consts: []object.Value{
 									object.Symbol("size"),
 								},
@@ -1632,7 +1632,7 @@ func embeddedPrelude() *bytecode.ISeq {
 						Children: []*bytecode.ISeq{
 							&bytecode.ISeq{
 								Name:  "block in each_with_object",
-								Insns: []bytecode.Instr{{Op: 5}, {Op: 1}, {Op: 30, B: 1, Flags: 2}, {Op: 28, A: 7}, {Op: 5}, {Op: 30, A: 1}, {Op: 26, A: 8}, {Op: 2}, {Op: 53}},
+								Insns: []bytecode.Instr{{Op: 5}, {Op: 1}, {Op: 30, B: 1, Flags: 2}, {Op: 28, A: 7}, {Op: 5}, {Op: 30, A: 1, Flags: 8}, {Op: 26, A: 8}, {Op: 2}, {Op: 53}},
 								Consts: []object.Value{
 									object.Symbol("size"),
 								},
@@ -1684,7 +1684,7 @@ func embeddedPrelude() *bytecode.ISeq {
 						Children: []*bytecode.ISeq{
 							&bytecode.ISeq{
 								Name:  "block in filter_map",
-								Insns: []bytecode.Instr{{Op: 5}, {Op: 1}, {Op: 30, B: 1, Flags: 2}, {Op: 28, A: 7}, {Op: 5}, {Op: 30, A: 1}, {Op: 26, A: 8}, {Op: 2}, {Op: 53}},
+								Insns: []bytecode.Instr{{Op: 5}, {Op: 1}, {Op: 30, B: 1, Flags: 2}, {Op: 28, A: 7}, {Op: 5}, {Op: 30, A: 1, Flags: 8}, {Op: 26, A: 8}, {Op: 2}, {Op: 53}},
 								Consts: []object.Value{
 									object.Symbol("size"),
 								},
@@ -1737,7 +1737,7 @@ func embeddedPrelude() *bytecode.ISeq {
 						Children: []*bytecode.ISeq{
 							&bytecode.ISeq{
 								Name:  "block in partition",
-								Insns: []bytecode.Instr{{Op: 5}, {Op: 1}, {Op: 30, B: 1, Flags: 2}, {Op: 28, A: 7}, {Op: 5}, {Op: 30, A: 1}, {Op: 26, A: 8}, {Op: 2}, {Op: 53}},
+								Insns: []bytecode.Instr{{Op: 5}, {Op: 1}, {Op: 30, B: 1, Flags: 2}, {Op: 28, A: 7}, {Op: 5}, {Op: 30, A: 1, Flags: 8}, {Op: 26, A: 8}, {Op: 2}, {Op: 53}},
 								Consts: []object.Value{
 									object.Symbol("size"),
 								},
@@ -1790,7 +1790,7 @@ func embeddedPrelude() *bytecode.ISeq {
 						Children: []*bytecode.ISeq{
 							&bytecode.ISeq{
 								Name:  "block in group_by",
-								Insns: []bytecode.Instr{{Op: 5}, {Op: 1}, {Op: 30, B: 1, Flags: 2}, {Op: 28, A: 7}, {Op: 5}, {Op: 30, A: 1}, {Op: 26, A: 8}, {Op: 2}, {Op: 53}},
+								Insns: []bytecode.Instr{{Op: 5}, {Op: 1}, {Op: 30, B: 1, Flags: 2}, {Op: 28, A: 7}, {Op: 5}, {Op: 30, A: 1, Flags: 8}, {Op: 26, A: 8}, {Op: 2}, {Op: 53}},
 								Consts: []object.Value{
 									object.Symbol("size"),
 								},
@@ -2215,7 +2215,7 @@ func embeddedPrelude() *bytecode.ISeq {
 						Children: []*bytecode.ISeq{
 							&bytecode.ISeq{
 								Name:  "block in each_slice",
-								Insns: []bytecode.Instr{{Op: 5}, {Op: 1}, {Op: 30, B: 1, Flags: 2}, {Op: 28, A: 8}, {Op: 5}, {Op: 30, A: 1}, {Op: 12}, {Op: 26, A: 9}, {Op: 2}, {Op: 28, A: 18}, {Op: 11}, {Op: 11, B: 1}, {Op: 13}, {Op: 1, A: 1}, {Op: 14}, {Op: 11, B: 1}, {Op: 16}, {Op: 26, A: 19}, {Op: 2}, {Op: 53}},
+								Insns: []bytecode.Instr{{Op: 5}, {Op: 1}, {Op: 30, B: 1, Flags: 2}, {Op: 28, A: 8}, {Op: 5}, {Op: 30, A: 1, Flags: 8}, {Op: 12}, {Op: 26, A: 9}, {Op: 2}, {Op: 28, A: 18}, {Op: 11}, {Op: 11, B: 1}, {Op: 13}, {Op: 1, A: 1}, {Op: 14}, {Op: 11, B: 1}, {Op: 16}, {Op: 26, A: 19}, {Op: 2}, {Op: 53}},
 								Consts: []object.Value{
 									object.Symbol("size"),
 									object.IntValue(1),
@@ -2273,7 +2273,7 @@ func embeddedPrelude() *bytecode.ISeq {
 						Children: []*bytecode.ISeq{
 							&bytecode.ISeq{
 								Name:  "block in each_cons",
-								Insns: []bytecode.Instr{{Op: 5}, {Op: 1}, {Op: 30, B: 1, Flags: 2}, {Op: 28, A: 7}, {Op: 5}, {Op: 30, A: 1}, {Op: 26, A: 8}, {Op: 2}, {Op: 12}, {Op: 28, A: 26}, {Op: 11}, {Op: 11, B: 1}, {Op: 14}, {Op: 1, A: 1}, {Op: 13}, {Op: 1, A: 2}, {Op: 18}, {Op: 28, A: 20}, {Op: 1, A: 2}, {Op: 26, A: 25}, {Op: 11}, {Op: 11, B: 1}, {Op: 14}, {Op: 1, A: 1}, {Op: 13}, {Op: 26, A: 27}, {Op: 2}, {Op: 53}},
+								Insns: []bytecode.Instr{{Op: 5}, {Op: 1}, {Op: 30, B: 1, Flags: 2}, {Op: 28, A: 7}, {Op: 5}, {Op: 30, A: 1, Flags: 8}, {Op: 26, A: 8}, {Op: 2}, {Op: 12}, {Op: 28, A: 26}, {Op: 11}, {Op: 11, B: 1}, {Op: 14}, {Op: 1, A: 1}, {Op: 13}, {Op: 1, A: 2}, {Op: 18}, {Op: 28, A: 20}, {Op: 1, A: 2}, {Op: 26, A: 25}, {Op: 11}, {Op: 11, B: 1}, {Op: 14}, {Op: 1, A: 1}, {Op: 13}, {Op: 26, A: 27}, {Op: 2}, {Op: 53}},
 								Consts: []object.Value{
 									object.Symbol("size"),
 									object.IntValue(1),
@@ -2508,7 +2508,7 @@ func embeddedPrelude() *bytecode.ISeq {
 					},
 					&bytecode.ISeq{
 						Name:  "chunk_while",
-						Insns: []bytecode.Instr{{Op: 52}, {Op: 25}, {Op: 28, A: 8}, {Op: 5}, {Op: 33}, {Op: 1}, {Op: 30, A: 1, B: 2, Flags: 2}, {Op: 26, A: 9}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 2}, {Op: 12}, {Op: 9}, {Op: 11}, {Op: 30, A: 3, Flags: 1}, {Op: 28, A: 22}, {Op: 6}, {Op: 1, A: 1}, {Op: 30, A: 4, B: 1, Flags: 3}, {Op: 53}, {Op: 26, A: 23}, {Op: 2}, {Op: 9}, {Op: 6}, {Op: 12, A: 1}, {Op: 9}, {Op: 11}, {Op: 1, A: 2}, {Op: 30, A: 5, B: 1, Flags: 3}, {Op: 6, A: 1}, {Op: 12, A: 2}, {Op: 9}, {Op: 1, A: 3}, {Op: 12, A: 3}, {Op: 9}, {Op: 11, A: 3}, {Op: 11}, {Op: 30, A: 6, Flags: 1}, {Op: 18}, {Op: 28, A: 73}, {Op: 11}, {Op: 11, A: 3}, {Op: 1, A: 3}, {Op: 14}, {Op: 30, A: 5, B: 1, Flags: 3}, {Op: 11}, {Op: 11, A: 3}, {Op: 30, A: 5, B: 1, Flags: 3}, {Op: 48, A: 2, Flags: 2}, {Op: 28, A: 57}, {Op: 11, A: 2}, {Op: 11}, {Op: 11, A: 3}, {Op: 30, A: 5, B: 1, Flags: 3}, {Op: 30, A: 7, B: 1}, {Op: 26, A: 66}, {Op: 11, A: 1}, {Op: 11, A: 2}, {Op: 30, A: 7, B: 1}, {Op: 9}, {Op: 11}, {Op: 11, A: 3}, {Op: 30, A: 5, B: 1, Flags: 3}, {Op: 6, A: 1}, {Op: 12, A: 2}, {Op: 9}, {Op: 11, A: 3}, {Op: 1, A: 3}, {Op: 13}, {Op: 12, A: 3}, {Op: 9}, {Op: 26, A: 36}, {Op: 2}, {Op: 9}, {Op: 11, A: 1}, {Op: 11, A: 2}, {Op: 30, A: 7, B: 1}, {Op: 9}, {Op: 11, A: 1}, {Op: 1, A: 1}, {Op: 30, A: 4, B: 1, Flags: 3}, {Op: 53}},
+						Insns: []bytecode.Instr{{Op: 52}, {Op: 25}, {Op: 28, A: 8}, {Op: 5}, {Op: 33}, {Op: 1}, {Op: 30, A: 1, B: 2, Flags: 2}, {Op: 26, A: 9}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 2, Flags: 8}, {Op: 12}, {Op: 9}, {Op: 11}, {Op: 30, A: 3, Flags: 1}, {Op: 28, A: 22}, {Op: 6}, {Op: 1, A: 1}, {Op: 30, A: 4, B: 1, Flags: 3}, {Op: 53}, {Op: 26, A: 23}, {Op: 2}, {Op: 9}, {Op: 6}, {Op: 12, A: 1}, {Op: 9}, {Op: 11}, {Op: 1, A: 2}, {Op: 30, A: 5, B: 1, Flags: 3}, {Op: 6, A: 1}, {Op: 12, A: 2}, {Op: 9}, {Op: 1, A: 3}, {Op: 12, A: 3}, {Op: 9}, {Op: 11, A: 3}, {Op: 11}, {Op: 30, A: 6, Flags: 1}, {Op: 18}, {Op: 28, A: 73}, {Op: 11}, {Op: 11, A: 3}, {Op: 1, A: 3}, {Op: 14}, {Op: 30, A: 5, B: 1, Flags: 3}, {Op: 11}, {Op: 11, A: 3}, {Op: 30, A: 5, B: 1, Flags: 3}, {Op: 48, A: 2, Flags: 2}, {Op: 28, A: 57}, {Op: 11, A: 2}, {Op: 11}, {Op: 11, A: 3}, {Op: 30, A: 5, B: 1, Flags: 3}, {Op: 30, A: 7, B: 1}, {Op: 26, A: 66}, {Op: 11, A: 1}, {Op: 11, A: 2}, {Op: 30, A: 7, B: 1}, {Op: 9}, {Op: 11}, {Op: 11, A: 3}, {Op: 30, A: 5, B: 1, Flags: 3}, {Op: 6, A: 1}, {Op: 12, A: 2}, {Op: 9}, {Op: 11, A: 3}, {Op: 1, A: 3}, {Op: 13}, {Op: 12, A: 3}, {Op: 9}, {Op: 26, A: 36}, {Op: 2}, {Op: 9}, {Op: 11, A: 1}, {Op: 11, A: 2}, {Op: 30, A: 7, B: 1}, {Op: 9}, {Op: 11, A: 1}, {Op: 1, A: 1}, {Op: 30, A: 4, B: 1, Flags: 3}, {Op: 53}},
 						Consts: []object.Value{
 							object.NewString("tried to create Proc object without a block"),
 							object.Symbol("each"),
@@ -2529,7 +2529,7 @@ func embeddedPrelude() *bytecode.ISeq {
 					},
 					&bytecode.ISeq{
 						Name:  "slice_when",
-						Insns: []bytecode.Instr{{Op: 52}, {Op: 25}, {Op: 28, A: 8}, {Op: 5}, {Op: 33}, {Op: 1}, {Op: 30, A: 1, B: 2, Flags: 2}, {Op: 26, A: 9}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 2}, {Op: 12}, {Op: 9}, {Op: 11}, {Op: 30, A: 3, Flags: 1}, {Op: 28, A: 22}, {Op: 6}, {Op: 1, A: 1}, {Op: 30, A: 4, B: 1, Flags: 3}, {Op: 53}, {Op: 26, A: 23}, {Op: 2}, {Op: 9}, {Op: 6}, {Op: 12, A: 1}, {Op: 9}, {Op: 11}, {Op: 1, A: 2}, {Op: 30, A: 5, B: 1, Flags: 3}, {Op: 6, A: 1}, {Op: 12, A: 2}, {Op: 9}, {Op: 1, A: 3}, {Op: 12, A: 3}, {Op: 9}, {Op: 11, A: 3}, {Op: 11}, {Op: 30, A: 6, Flags: 1}, {Op: 18}, {Op: 28, A: 73}, {Op: 11}, {Op: 11, A: 3}, {Op: 1, A: 3}, {Op: 14}, {Op: 30, A: 5, B: 1, Flags: 3}, {Op: 11}, {Op: 11, A: 3}, {Op: 30, A: 5, B: 1, Flags: 3}, {Op: 48, A: 2, Flags: 2}, {Op: 28, A: 61}, {Op: 11, A: 1}, {Op: 11, A: 2}, {Op: 30, A: 7, B: 1}, {Op: 9}, {Op: 11}, {Op: 11, A: 3}, {Op: 30, A: 5, B: 1, Flags: 3}, {Op: 6, A: 1}, {Op: 12, A: 2}, {Op: 26, A: 66}, {Op: 11, A: 2}, {Op: 11}, {Op: 11, A: 3}, {Op: 30, A: 5, B: 1, Flags: 3}, {Op: 30, A: 7, B: 1}, {Op: 9}, {Op: 11, A: 3}, {Op: 1, A: 3}, {Op: 13}, {Op: 12, A: 3}, {Op: 9}, {Op: 26, A: 36}, {Op: 2}, {Op: 9}, {Op: 11, A: 1}, {Op: 11, A: 2}, {Op: 30, A: 7, B: 1}, {Op: 9}, {Op: 11, A: 1}, {Op: 1, A: 1}, {Op: 30, A: 4, B: 1, Flags: 3}, {Op: 53}},
+						Insns: []bytecode.Instr{{Op: 52}, {Op: 25}, {Op: 28, A: 8}, {Op: 5}, {Op: 33}, {Op: 1}, {Op: 30, A: 1, B: 2, Flags: 2}, {Op: 26, A: 9}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 2, Flags: 8}, {Op: 12}, {Op: 9}, {Op: 11}, {Op: 30, A: 3, Flags: 1}, {Op: 28, A: 22}, {Op: 6}, {Op: 1, A: 1}, {Op: 30, A: 4, B: 1, Flags: 3}, {Op: 53}, {Op: 26, A: 23}, {Op: 2}, {Op: 9}, {Op: 6}, {Op: 12, A: 1}, {Op: 9}, {Op: 11}, {Op: 1, A: 2}, {Op: 30, A: 5, B: 1, Flags: 3}, {Op: 6, A: 1}, {Op: 12, A: 2}, {Op: 9}, {Op: 1, A: 3}, {Op: 12, A: 3}, {Op: 9}, {Op: 11, A: 3}, {Op: 11}, {Op: 30, A: 6, Flags: 1}, {Op: 18}, {Op: 28, A: 73}, {Op: 11}, {Op: 11, A: 3}, {Op: 1, A: 3}, {Op: 14}, {Op: 30, A: 5, B: 1, Flags: 3}, {Op: 11}, {Op: 11, A: 3}, {Op: 30, A: 5, B: 1, Flags: 3}, {Op: 48, A: 2, Flags: 2}, {Op: 28, A: 61}, {Op: 11, A: 1}, {Op: 11, A: 2}, {Op: 30, A: 7, B: 1}, {Op: 9}, {Op: 11}, {Op: 11, A: 3}, {Op: 30, A: 5, B: 1, Flags: 3}, {Op: 6, A: 1}, {Op: 12, A: 2}, {Op: 26, A: 66}, {Op: 11, A: 2}, {Op: 11}, {Op: 11, A: 3}, {Op: 30, A: 5, B: 1, Flags: 3}, {Op: 30, A: 7, B: 1}, {Op: 9}, {Op: 11, A: 3}, {Op: 1, A: 3}, {Op: 13}, {Op: 12, A: 3}, {Op: 9}, {Op: 26, A: 36}, {Op: 2}, {Op: 9}, {Op: 11, A: 1}, {Op: 11, A: 2}, {Op: 30, A: 7, B: 1}, {Op: 9}, {Op: 11, A: 1}, {Op: 1, A: 1}, {Op: 30, A: 4, B: 1, Flags: 3}, {Op: 53}},
 						Consts: []object.Value{
 							object.NewString("tried to create Proc object without a block"),
 							object.Symbol("each"),
@@ -2752,7 +2752,7 @@ func embeddedPrelude() *bytecode.ISeq {
 						Children: []*bytecode.ISeq{
 							&bytecode.ISeq{
 								Name:  "block in minmax_by",
-								Insns: []bytecode.Instr{{Op: 5}, {Op: 1}, {Op: 30, B: 1, Flags: 2}, {Op: 28, A: 7}, {Op: 5}, {Op: 30, A: 1}, {Op: 26, A: 8}, {Op: 2}, {Op: 53}},
+								Insns: []bytecode.Instr{{Op: 5}, {Op: 1}, {Op: 30, B: 1, Flags: 2}, {Op: 28, A: 7}, {Op: 5}, {Op: 30, A: 1, Flags: 8}, {Op: 26, A: 8}, {Op: 2}, {Op: 53}},
 								Consts: []object.Value{
 									object.Symbol("size"),
 								},
@@ -2822,7 +2822,7 @@ func embeddedPrelude() *bytecode.ISeq {
 						Children: []*bytecode.ISeq{
 							&bytecode.ISeq{
 								Name:  "block in cycle",
-								Insns: []bytecode.Instr{{Op: 5}, {Op: 1}, {Op: 30, B: 1, Flags: 2}, {Op: 28, A: 7}, {Op: 5}, {Op: 30, A: 1}, {Op: 26, A: 8}, {Op: 2}, {Op: 12}, {Op: 9}, {Op: 11}, {Op: 30, A: 2, Flags: 1}, {Op: 10}, {Op: 27, A: 18}, {Op: 9}, {Op: 11}, {Op: 1, A: 1}, {Op: 22}, {Op: 28, A: 21}, {Op: 11}, {Op: 26, A: 36}, {Op: 11, B: 1}, {Op: 30, A: 2, Flags: 1}, {Op: 28, A: 27}, {Op: 33, A: 3}, {Op: 34, A: 4}, {Op: 26, A: 36}, {Op: 11, B: 1}, {Op: 1, A: 1}, {Op: 20}, {Op: 28, A: 33}, {Op: 1, A: 1}, {Op: 26, A: 36}, {Op: 11}, {Op: 11, B: 1}, {Op: 15}, {Op: 53}},
+								Insns: []bytecode.Instr{{Op: 5}, {Op: 1}, {Op: 30, B: 1, Flags: 2}, {Op: 28, A: 7}, {Op: 5}, {Op: 30, A: 1, Flags: 8}, {Op: 26, A: 8}, {Op: 2}, {Op: 12}, {Op: 9}, {Op: 11}, {Op: 30, A: 2, Flags: 1}, {Op: 10}, {Op: 27, A: 18}, {Op: 9}, {Op: 11}, {Op: 1, A: 1}, {Op: 22}, {Op: 28, A: 21}, {Op: 11}, {Op: 26, A: 36}, {Op: 11, B: 1}, {Op: 30, A: 2, Flags: 1}, {Op: 28, A: 27}, {Op: 33, A: 3}, {Op: 34, A: 4}, {Op: 26, A: 36}, {Op: 11, B: 1}, {Op: 1, A: 1}, {Op: 20}, {Op: 28, A: 33}, {Op: 1, A: 1}, {Op: 26, A: 36}, {Op: 11}, {Op: 11, B: 1}, {Op: 15}, {Op: 53}},
 								Consts: []object.Value{
 									object.Symbol("size"),
 									object.IntValue(0),
@@ -2938,7 +2938,7 @@ func embeddedPrelude() *bytecode.ISeq {
 				Children: []*bytecode.ISeq{
 					&bytecode.ISeq{
 						Name:        "numerator",
-						Insns:       []bytecode.Instr{{Op: 5}, {Op: 30}, {Op: 30, A: 1, Flags: 1}, {Op: 53}},
+						Insns:       []bytecode.Instr{{Op: 5}, {Op: 30, Flags: 8}, {Op: 30, A: 1, Flags: 1}, {Op: 53}},
 						Names:       []string{"to_r", "numerator"},
 						NumRequired: 0,
 						SplatIndex:  -1,
@@ -2952,7 +2952,7 @@ func embeddedPrelude() *bytecode.ISeq {
 					},
 					&bytecode.ISeq{
 						Name:        "denominator",
-						Insns:       []bytecode.Instr{{Op: 5}, {Op: 30}, {Op: 30, A: 1, Flags: 1}, {Op: 53}},
+						Insns:       []bytecode.Instr{{Op: 5}, {Op: 30, Flags: 8}, {Op: 30, A: 1, Flags: 1}, {Op: 53}},
 						Names:       []string{"to_r", "denominator"},
 						NumRequired: 0,
 						SplatIndex:  -1,
@@ -3027,7 +3027,7 @@ func embeddedPrelude() *bytecode.ISeq {
 				Children: []*bytecode.ISeq{
 					&bytecode.ISeq{
 						Name:        "numerator",
-						Insns:       []bytecode.Instr{{Op: 5}, {Op: 30}, {Op: 28, A: 7}, {Op: 5}, {Op: 30, A: 1}, {Op: 30, A: 2, Flags: 1}, {Op: 26, A: 8}, {Op: 5}, {Op: 53}},
+						Insns:       []bytecode.Instr{{Op: 5}, {Op: 30, Flags: 8}, {Op: 28, A: 7}, {Op: 5}, {Op: 30, A: 1, Flags: 8}, {Op: 30, A: 2, Flags: 1}, {Op: 26, A: 8}, {Op: 5}, {Op: 53}},
 						Names:       []string{"finite?", "to_r", "numerator"},
 						NumRequired: 0,
 						SplatIndex:  -1,
@@ -3041,7 +3041,7 @@ func embeddedPrelude() *bytecode.ISeq {
 					},
 					&bytecode.ISeq{
 						Name:  "denominator",
-						Insns: []bytecode.Instr{{Op: 5}, {Op: 30}, {Op: 28, A: 7}, {Op: 5}, {Op: 30, A: 1}, {Op: 30, A: 2, Flags: 1}, {Op: 26, A: 8}, {Op: 1}, {Op: 53}},
+						Insns: []bytecode.Instr{{Op: 5}, {Op: 30, Flags: 8}, {Op: 28, A: 7}, {Op: 5}, {Op: 30, A: 1, Flags: 8}, {Op: 30, A: 2, Flags: 1}, {Op: 26, A: 8}, {Op: 1}, {Op: 53}},
 						Consts: []object.Value{
 							object.IntValue(1),
 						},
@@ -3131,7 +3131,7 @@ func embeddedPrelude() *bytecode.ISeq {
 				Children: []*bytecode.ISeq{
 					&bytecode.ISeq{
 						Name:        "==",
-						Insns:       []bytecode.Instr{{Op: 5}, {Op: 11}, {Op: 30, B: 1, Flags: 2}, {Op: 28, A: 7}, {Op: 3}, {Op: 53}, {Op: 26, A: 8}, {Op: 2}, {Op: 9}, {Op: 11}, {Op: 33, A: 1}, {Op: 30, A: 2, B: 1, Flags: 3}, {Op: 25}, {Op: 28, A: 17}, {Op: 4}, {Op: 53}, {Op: 26, A: 18}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 3}, {Op: 11}, {Op: 30, A: 3, Flags: 1}, {Op: 22}, {Op: 10}, {Op: 28, A: 32}, {Op: 9}, {Op: 5}, {Op: 30, A: 4}, {Op: 11}, {Op: 30, A: 4, Flags: 1}, {Op: 22}, {Op: 10}, {Op: 28, A: 40}, {Op: 9}, {Op: 5}, {Op: 30, A: 5}, {Op: 11}, {Op: 30, A: 5, Flags: 1}, {Op: 22}, {Op: 53}},
+						Insns:       []bytecode.Instr{{Op: 5}, {Op: 11}, {Op: 30, B: 1, Flags: 2}, {Op: 28, A: 7}, {Op: 3}, {Op: 53}, {Op: 26, A: 8}, {Op: 2}, {Op: 9}, {Op: 11}, {Op: 33, A: 1}, {Op: 30, A: 2, B: 1, Flags: 3}, {Op: 25}, {Op: 28, A: 17}, {Op: 4}, {Op: 53}, {Op: 26, A: 18}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 3}, {Op: 11}, {Op: 30, A: 3, Flags: 1}, {Op: 22}, {Op: 10}, {Op: 28, A: 32}, {Op: 9}, {Op: 5}, {Op: 30, A: 4}, {Op: 11}, {Op: 30, A: 4, Flags: 1}, {Op: 22}, {Op: 10}, {Op: 28, A: 40}, {Op: 9}, {Op: 5}, {Op: 30, A: 5, Flags: 8}, {Op: 11}, {Op: 30, A: 5, Flags: 1}, {Op: 22}, {Op: 53}},
 						Names:       []string{"equal?", "Range", "is_a?", "begin", "end", "exclude_end?"},
 						Params:      []string{"other"},
 						NumRequired: 1,
@@ -3147,7 +3147,7 @@ func embeddedPrelude() *bytecode.ISeq {
 					},
 					&bytecode.ISeq{
 						Name:        "eql?",
-						Insns:       []bytecode.Instr{{Op: 5}, {Op: 11}, {Op: 30, B: 1, Flags: 2}, {Op: 28, A: 7}, {Op: 3}, {Op: 53}, {Op: 26, A: 8}, {Op: 2}, {Op: 9}, {Op: 11}, {Op: 33, A: 1}, {Op: 30, A: 2, B: 1, Flags: 3}, {Op: 25}, {Op: 28, A: 17}, {Op: 4}, {Op: 53}, {Op: 26, A: 18}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 3}, {Op: 11}, {Op: 30, A: 3, Flags: 1}, {Op: 30, A: 4, B: 1, Flags: 3}, {Op: 10}, {Op: 28, A: 32}, {Op: 9}, {Op: 5}, {Op: 30, A: 5}, {Op: 11}, {Op: 30, A: 5, Flags: 1}, {Op: 30, A: 4, B: 1, Flags: 3}, {Op: 10}, {Op: 28, A: 40}, {Op: 9}, {Op: 5}, {Op: 30, A: 6}, {Op: 11}, {Op: 30, A: 6, Flags: 1}, {Op: 22}, {Op: 53}},
+						Insns:       []bytecode.Instr{{Op: 5}, {Op: 11}, {Op: 30, B: 1, Flags: 2}, {Op: 28, A: 7}, {Op: 3}, {Op: 53}, {Op: 26, A: 8}, {Op: 2}, {Op: 9}, {Op: 11}, {Op: 33, A: 1}, {Op: 30, A: 2, B: 1, Flags: 3}, {Op: 25}, {Op: 28, A: 17}, {Op: 4}, {Op: 53}, {Op: 26, A: 18}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 3}, {Op: 11}, {Op: 30, A: 3, Flags: 1}, {Op: 30, A: 4, B: 1, Flags: 3}, {Op: 10}, {Op: 28, A: 32}, {Op: 9}, {Op: 5}, {Op: 30, A: 5}, {Op: 11}, {Op: 30, A: 5, Flags: 1}, {Op: 30, A: 4, B: 1, Flags: 3}, {Op: 10}, {Op: 28, A: 40}, {Op: 9}, {Op: 5}, {Op: 30, A: 6, Flags: 8}, {Op: 11}, {Op: 30, A: 6, Flags: 1}, {Op: 22}, {Op: 53}},
 						Names:       []string{"equal?", "Range", "is_a?", "begin", "eql?", "end", "exclude_end?"},
 						Params:      []string{"other"},
 						NumRequired: 1,
@@ -3163,7 +3163,7 @@ func embeddedPrelude() *bytecode.ISeq {
 					},
 					&bytecode.ISeq{
 						Name:        "hash",
-						Insns:       []bytecode.Instr{{Op: 5}, {Op: 30}, {Op: 5}, {Op: 30, A: 1}, {Op: 5}, {Op: 30, A: 2}, {Op: 6, A: 3}, {Op: 30, A: 3, Flags: 1}, {Op: 53}},
+						Insns:       []bytecode.Instr{{Op: 5}, {Op: 30}, {Op: 5}, {Op: 30, A: 1}, {Op: 5}, {Op: 30, A: 2, Flags: 8}, {Op: 6, A: 3}, {Op: 30, A: 3, Flags: 1}, {Op: 53}},
 						Names:       []string{"begin", "end", "exclude_end?", "hash"},
 						NumRequired: 0,
 						SplatIndex:  -1,
@@ -3318,7 +3318,7 @@ func embeddedPrelude() *bytecode.ISeq {
 						Children: []*bytecode.ISeq{
 							&bytecode.ISeq{
 								Name:        "block in each",
-								Insns:       []bytecode.Instr{{Op: 5}, {Op: 30}, {Op: 53}},
+								Insns:       []bytecode.Instr{{Op: 5}, {Op: 30, Flags: 8}, {Op: 53}},
 								Names:       []string{"size"},
 								NumRequired: 0,
 								SplatIndex:  -1,
@@ -3335,7 +3335,7 @@ func embeddedPrelude() *bytecode.ISeq {
 					},
 					&bytecode.ISeq{
 						Name:  "empty?",
-						Insns: []bytecode.Instr{{Op: 5}, {Op: 30}, {Op: 1}, {Op: 22}, {Op: 53}},
+						Insns: []bytecode.Instr{{Op: 5}, {Op: 30, Flags: 8}, {Op: 1}, {Op: 22}, {Op: 53}},
 						Consts: []object.Value{
 							object.IntValue(0),
 						},
@@ -3384,7 +3384,7 @@ func embeddedPrelude() *bytecode.ISeq {
 					},
 					&bytecode.ISeq{
 						Name:        "|",
-						Insns:       []bytecode.Instr{{Op: 5}, {Op: 30}, {Op: 12, A: 1}, {Op: 9}, {Op: 5}, {Op: 11}, {Op: 30, A: 1, B: 1, C: 1, Flags: 2}, {Op: 9}, {Op: 11, A: 1}, {Op: 53}},
+						Insns:       []bytecode.Instr{{Op: 5}, {Op: 30, Flags: 8}, {Op: 12, A: 1}, {Op: 9}, {Op: 5}, {Op: 11}, {Op: 30, A: 1, B: 1, C: 1, Flags: 2}, {Op: 9}, {Op: 11, A: 1}, {Op: 53}},
 						Names:       []string{"dup", "__do_with_enum"},
 						Params:      []string{"other"},
 						NumRequired: 1,
@@ -3452,7 +3452,7 @@ func embeddedPrelude() *bytecode.ISeq {
 					},
 					&bytecode.ISeq{
 						Name:        "-",
-						Insns:       []bytecode.Instr{{Op: 5}, {Op: 30}, {Op: 12, A: 1}, {Op: 9}, {Op: 5}, {Op: 11}, {Op: 30, A: 1, B: 1, C: 1, Flags: 2}, {Op: 9}, {Op: 11, A: 1}, {Op: 53}},
+						Insns:       []bytecode.Instr{{Op: 5}, {Op: 30, Flags: 8}, {Op: 12, A: 1}, {Op: 9}, {Op: 5}, {Op: 11}, {Op: 30, A: 1, B: 1, C: 1, Flags: 2}, {Op: 9}, {Op: 11, A: 1}, {Op: 53}},
 						Names:       []string{"dup", "__do_with_enum"},
 						Params:      []string{"other"},
 						NumRequired: 1,
@@ -3606,7 +3606,7 @@ func embeddedPrelude() *bytecode.ISeq {
 					},
 					&bytecode.ISeq{
 						Name:  "replace",
-						Insns: []bytecode.Instr{{Op: 11}, {Op: 33}, {Op: 30, A: 1, B: 1, Flags: 3}, {Op: 28, A: 12}, {Op: 5}, {Op: 11}, {Op: 30, A: 2, Flags: 1}, {Op: 30, A: 3, B: 1, Flags: 2}, {Op: 9}, {Op: 11}, {Op: 30, A: 4, C: 1, Flags: 1}, {Op: 26, A: 38}, {Op: 11}, {Op: 1}, {Op: 30, A: 5, B: 1, Flags: 3}, {Op: 10}, {Op: 27, A: 21}, {Op: 9}, {Op: 11}, {Op: 1, A: 1}, {Op: 30, A: 5, B: 1, Flags: 3}, {Op: 25}, {Op: 28, A: 28}, {Op: 5}, {Op: 33, A: 6}, {Op: 1, A: 2}, {Op: 30, A: 7, B: 2, Flags: 2}, {Op: 26, A: 29}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 5}, {Op: 30, A: 2}, {Op: 30, A: 3, B: 1, Flags: 2}, {Op: 9}, {Op: 5}, {Op: 11}, {Op: 30, A: 8, B: 1, C: 2, Flags: 2}, {Op: 9}, {Op: 5}, {Op: 53}},
+						Insns: []bytecode.Instr{{Op: 11}, {Op: 33}, {Op: 30, A: 1, B: 1, Flags: 3}, {Op: 28, A: 12}, {Op: 5}, {Op: 11}, {Op: 30, A: 2, Flags: 1}, {Op: 30, A: 3, B: 1, Flags: 2}, {Op: 9}, {Op: 11}, {Op: 30, A: 4, C: 1, Flags: 1}, {Op: 26, A: 38}, {Op: 11}, {Op: 1}, {Op: 30, A: 5, B: 1, Flags: 3}, {Op: 10}, {Op: 27, A: 21}, {Op: 9}, {Op: 11}, {Op: 1, A: 1}, {Op: 30, A: 5, B: 1, Flags: 3}, {Op: 25}, {Op: 28, A: 28}, {Op: 5}, {Op: 33, A: 6}, {Op: 1, A: 2}, {Op: 30, A: 7, B: 2, Flags: 2}, {Op: 26, A: 29}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 5}, {Op: 30, A: 2, Flags: 8}, {Op: 30, A: 3, B: 1, Flags: 2}, {Op: 9}, {Op: 5}, {Op: 11}, {Op: 30, A: 8, B: 1, C: 2, Flags: 2}, {Op: 9}, {Op: 5}, {Op: 53}},
 						Consts: []object.Value{
 							object.Symbol("each_entry"),
 							object.Symbol("each"),
@@ -3661,7 +3661,7 @@ func embeddedPrelude() *bytecode.ISeq {
 					},
 					&bytecode.ISeq{
 						Name:        "reset",
-						Insns:       []bytecode.Instr{{Op: 5}, {Op: 30}, {Op: 12}, {Op: 9}, {Op: 5}, {Op: 5}, {Op: 30, A: 1}, {Op: 30, A: 2, B: 1, Flags: 2}, {Op: 9}, {Op: 11}, {Op: 30, A: 3, C: 1, Flags: 1}, {Op: 9}, {Op: 5}, {Op: 53}},
+						Insns:       []bytecode.Instr{{Op: 5}, {Op: 30, Flags: 8}, {Op: 12}, {Op: 9}, {Op: 5}, {Op: 5}, {Op: 30, A: 1, Flags: 8}, {Op: 30, A: 2, B: 1, Flags: 2}, {Op: 9}, {Op: 11}, {Op: 30, A: 3, C: 1, Flags: 1}, {Op: 9}, {Op: 5}, {Op: 53}},
 						Names:       []string{"to_a", "compare_by_identity?", "__replace_cbi", "each"},
 						NumRequired: 0,
 						SplatIndex:  -1,
@@ -3694,7 +3694,7 @@ func embeddedPrelude() *bytecode.ISeq {
 					},
 					&bytecode.ISeq{
 						Name:  "subset?",
-						Insns: []bytecode.Instr{{Op: 11}, {Op: 33}, {Op: 30, A: 1, B: 1, Flags: 3}, {Op: 25}, {Op: 28, A: 10}, {Op: 5}, {Op: 33, A: 2}, {Op: 1}, {Op: 30, A: 3, B: 2, Flags: 2}, {Op: 26, A: 11}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 4}, {Op: 11}, {Op: 30, A: 4, Flags: 1}, {Op: 19}, {Op: 28, A: 21}, {Op: 4}, {Op: 53}, {Op: 26, A: 22}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 5, C: 1}, {Op: 53}},
+						Insns: []bytecode.Instr{{Op: 11}, {Op: 33}, {Op: 30, A: 1, B: 1, Flags: 3}, {Op: 25}, {Op: 28, A: 10}, {Op: 5}, {Op: 33, A: 2}, {Op: 1}, {Op: 30, A: 3, B: 2, Flags: 2}, {Op: 26, A: 11}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 4, Flags: 8}, {Op: 11}, {Op: 30, A: 4, Flags: 1}, {Op: 19}, {Op: 28, A: 21}, {Op: 4}, {Op: 53}, {Op: 26, A: 22}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 5, C: 1}, {Op: 53}},
 						Consts: []object.Value{
 							object.NewString("value must be a set"),
 						},
@@ -3731,7 +3731,7 @@ func embeddedPrelude() *bytecode.ISeq {
 					},
 					&bytecode.ISeq{
 						Name:  "proper_subset?",
-						Insns: []bytecode.Instr{{Op: 11}, {Op: 33}, {Op: 30, A: 1, B: 1, Flags: 3}, {Op: 25}, {Op: 28, A: 10}, {Op: 5}, {Op: 33, A: 2}, {Op: 1}, {Op: 30, A: 3, B: 2, Flags: 2}, {Op: 26, A: 11}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 4}, {Op: 11}, {Op: 30, A: 4, Flags: 1}, {Op: 21}, {Op: 28, A: 21}, {Op: 4}, {Op: 53}, {Op: 26, A: 22}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 5, C: 1}, {Op: 53}},
+						Insns: []bytecode.Instr{{Op: 11}, {Op: 33}, {Op: 30, A: 1, B: 1, Flags: 3}, {Op: 25}, {Op: 28, A: 10}, {Op: 5}, {Op: 33, A: 2}, {Op: 1}, {Op: 30, A: 3, B: 2, Flags: 2}, {Op: 26, A: 11}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 4, Flags: 8}, {Op: 11}, {Op: 30, A: 4, Flags: 1}, {Op: 21}, {Op: 28, A: 21}, {Op: 4}, {Op: 53}, {Op: 26, A: 22}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 5, C: 1}, {Op: 53}},
 						Consts: []object.Value{
 							object.NewString("value must be a set"),
 						},
@@ -3768,7 +3768,7 @@ func embeddedPrelude() *bytecode.ISeq {
 					},
 					&bytecode.ISeq{
 						Name:  "superset?",
-						Insns: []bytecode.Instr{{Op: 11}, {Op: 33}, {Op: 30, A: 1, B: 1, Flags: 3}, {Op: 25}, {Op: 28, A: 10}, {Op: 5}, {Op: 33, A: 2}, {Op: 1}, {Op: 30, A: 3, B: 2, Flags: 2}, {Op: 26, A: 11}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 4}, {Op: 11}, {Op: 30, A: 4, Flags: 1}, {Op: 18}, {Op: 28, A: 21}, {Op: 4}, {Op: 53}, {Op: 26, A: 22}, {Op: 2}, {Op: 9}, {Op: 11}, {Op: 30, A: 5, C: 1, Flags: 1}, {Op: 53}},
+						Insns: []bytecode.Instr{{Op: 11}, {Op: 33}, {Op: 30, A: 1, B: 1, Flags: 3}, {Op: 25}, {Op: 28, A: 10}, {Op: 5}, {Op: 33, A: 2}, {Op: 1}, {Op: 30, A: 3, B: 2, Flags: 2}, {Op: 26, A: 11}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 4, Flags: 8}, {Op: 11}, {Op: 30, A: 4, Flags: 1}, {Op: 18}, {Op: 28, A: 21}, {Op: 4}, {Op: 53}, {Op: 26, A: 22}, {Op: 2}, {Op: 9}, {Op: 11}, {Op: 30, A: 5, C: 1, Flags: 1}, {Op: 53}},
 						Consts: []object.Value{
 							object.NewString("value must be a set"),
 						},
@@ -3805,7 +3805,7 @@ func embeddedPrelude() *bytecode.ISeq {
 					},
 					&bytecode.ISeq{
 						Name:  "proper_superset?",
-						Insns: []bytecode.Instr{{Op: 11}, {Op: 33}, {Op: 30, A: 1, B: 1, Flags: 3}, {Op: 25}, {Op: 28, A: 10}, {Op: 5}, {Op: 33, A: 2}, {Op: 1}, {Op: 30, A: 3, B: 2, Flags: 2}, {Op: 26, A: 11}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 4}, {Op: 11}, {Op: 30, A: 4, Flags: 1}, {Op: 20}, {Op: 28, A: 21}, {Op: 4}, {Op: 53}, {Op: 26, A: 22}, {Op: 2}, {Op: 9}, {Op: 11}, {Op: 30, A: 5, C: 1, Flags: 1}, {Op: 53}},
+						Insns: []bytecode.Instr{{Op: 11}, {Op: 33}, {Op: 30, A: 1, B: 1, Flags: 3}, {Op: 25}, {Op: 28, A: 10}, {Op: 5}, {Op: 33, A: 2}, {Op: 1}, {Op: 30, A: 3, B: 2, Flags: 2}, {Op: 26, A: 11}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 4, Flags: 8}, {Op: 11}, {Op: 30, A: 4, Flags: 1}, {Op: 20}, {Op: 28, A: 21}, {Op: 4}, {Op: 53}, {Op: 26, A: 22}, {Op: 2}, {Op: 9}, {Op: 11}, {Op: 30, A: 5, C: 1, Flags: 1}, {Op: 53}},
 						Consts: []object.Value{
 							object.NewString("value must be a set"),
 						},
@@ -3842,7 +3842,7 @@ func embeddedPrelude() *bytecode.ISeq {
 					},
 					&bytecode.ISeq{
 						Name:  "<=>",
-						Insns: []bytecode.Instr{{Op: 11}, {Op: 33}, {Op: 30, A: 1, B: 1, Flags: 3}, {Op: 25}, {Op: 28, A: 8}, {Op: 2}, {Op: 53}, {Op: 26, A: 9}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 2}, {Op: 11}, {Op: 30, A: 2, Flags: 1}, {Op: 30, A: 3, B: 1}, {Op: 12, A: 1}, {Op: 9}, {Op: 1}, {Op: 11, A: 1}, {Op: 30, A: 4, B: 1}, {Op: 27, A: 22}, {Op: 26, A: 30}, {Op: 5}, {Op: 11}, {Op: 30, A: 5, B: 1, Flags: 2}, {Op: 28, A: 28}, {Op: 1}, {Op: 26, A: 29}, {Op: 2}, {Op: 26, A: 50}, {Op: 1, A: 1}, {Op: 11, A: 1}, {Op: 30, A: 4, B: 1}, {Op: 27, A: 35}, {Op: 26, A: 43}, {Op: 5}, {Op: 11}, {Op: 30, A: 6, B: 1, Flags: 2}, {Op: 28, A: 41}, {Op: 1, A: 1}, {Op: 26, A: 42}, {Op: 2}, {Op: 26, A: 50}, {Op: 5}, {Op: 11}, {Op: 22}, {Op: 28, A: 49}, {Op: 1, A: 2}, {Op: 26, A: 50}, {Op: 2}, {Op: 53}},
+						Insns: []bytecode.Instr{{Op: 11}, {Op: 33}, {Op: 30, A: 1, B: 1, Flags: 3}, {Op: 25}, {Op: 28, A: 8}, {Op: 2}, {Op: 53}, {Op: 26, A: 9}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 2, Flags: 8}, {Op: 11}, {Op: 30, A: 2, Flags: 1}, {Op: 30, A: 3, B: 1}, {Op: 12, A: 1}, {Op: 9}, {Op: 1}, {Op: 11, A: 1}, {Op: 30, A: 4, B: 1}, {Op: 27, A: 22}, {Op: 26, A: 30}, {Op: 5}, {Op: 11}, {Op: 30, A: 5, B: 1, Flags: 2}, {Op: 28, A: 28}, {Op: 1}, {Op: 26, A: 29}, {Op: 2}, {Op: 26, A: 50}, {Op: 1, A: 1}, {Op: 11, A: 1}, {Op: 30, A: 4, B: 1}, {Op: 27, A: 35}, {Op: 26, A: 43}, {Op: 5}, {Op: 11}, {Op: 30, A: 6, B: 1, Flags: 2}, {Op: 28, A: 41}, {Op: 1, A: 1}, {Op: 26, A: 42}, {Op: 2}, {Op: 26, A: 50}, {Op: 5}, {Op: 11}, {Op: 22}, {Op: 28, A: 49}, {Op: 1, A: 2}, {Op: 26, A: 50}, {Op: 2}, {Op: 53}},
 						Consts: []object.Value{
 							object.IntValue(-1),
 							object.IntValue(1),
@@ -3863,7 +3863,7 @@ func embeddedPrelude() *bytecode.ISeq {
 					},
 					&bytecode.ISeq{
 						Name:  "==",
-						Insns: []bytecode.Instr{{Op: 5}, {Op: 11}, {Op: 30, B: 1, Flags: 2}, {Op: 28, A: 7}, {Op: 3}, {Op: 53}, {Op: 26, A: 8}, {Op: 2}, {Op: 9}, {Op: 11}, {Op: 33, A: 1}, {Op: 30, A: 2, B: 1, Flags: 3}, {Op: 25}, {Op: 28, A: 17}, {Op: 4}, {Op: 53}, {Op: 26, A: 18}, {Op: 2}, {Op: 9}, {Op: 11}, {Op: 1}, {Op: 30, A: 3, B: 1, Flags: 3}, {Op: 10}, {Op: 28, A: 30}, {Op: 9}, {Op: 5}, {Op: 30, A: 4}, {Op: 11}, {Op: 30, A: 4, Flags: 1}, {Op: 23}, {Op: 28, A: 34}, {Op: 4}, {Op: 53}, {Op: 26, A: 35}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 5}, {Op: 11}, {Op: 30, A: 5, Flags: 1}, {Op: 22}, {Op: 25}, {Op: 28, A: 46}, {Op: 4}, {Op: 53}, {Op: 26, A: 47}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 6, C: 1}, {Op: 53}},
+						Insns: []bytecode.Instr{{Op: 5}, {Op: 11}, {Op: 30, B: 1, Flags: 2}, {Op: 28, A: 7}, {Op: 3}, {Op: 53}, {Op: 26, A: 8}, {Op: 2}, {Op: 9}, {Op: 11}, {Op: 33, A: 1}, {Op: 30, A: 2, B: 1, Flags: 3}, {Op: 25}, {Op: 28, A: 17}, {Op: 4}, {Op: 53}, {Op: 26, A: 18}, {Op: 2}, {Op: 9}, {Op: 11}, {Op: 1}, {Op: 30, A: 3, B: 1, Flags: 3}, {Op: 10}, {Op: 28, A: 30}, {Op: 9}, {Op: 5}, {Op: 30, A: 4, Flags: 8}, {Op: 11}, {Op: 30, A: 4, Flags: 1}, {Op: 23}, {Op: 28, A: 34}, {Op: 4}, {Op: 53}, {Op: 26, A: 35}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 5, Flags: 8}, {Op: 11}, {Op: 30, A: 5, Flags: 1}, {Op: 22}, {Op: 25}, {Op: 28, A: 46}, {Op: 4}, {Op: 53}, {Op: 26, A: 47}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 6, C: 1}, {Op: 53}},
 						Consts: []object.Value{
 							object.Symbol("compare_by_identity?"),
 						},
@@ -3900,7 +3900,7 @@ func embeddedPrelude() *bytecode.ISeq {
 					},
 					&bytecode.ISeq{
 						Name:  "hash",
-						Insns: []bytecode.Instr{{Op: 5}, {Op: 30}, {Op: 1}, {Op: 66, A: 1, Flags: 1}, {Op: 30, A: 2, Flags: 1}, {Op: 30, A: 3, Flags: 1}, {Op: 53}},
+						Insns: []bytecode.Instr{{Op: 5}, {Op: 30, Flags: 8}, {Op: 1}, {Op: 66, A: 1, Flags: 1}, {Op: 30, A: 2, Flags: 1}, {Op: 30, A: 3, Flags: 1}, {Op: 53}},
 						Consts: []object.Value{
 							object.Symbol("hash"),
 						},
@@ -3917,7 +3917,7 @@ func embeddedPrelude() *bytecode.ISeq {
 					},
 					&bytecode.ISeq{
 						Name:        "disjoint?",
-						Insns:       []bytecode.Instr{{Op: 5}, {Op: 30}, {Op: 11}, {Op: 30, Flags: 1}, {Op: 18}, {Op: 28, A: 9}, {Op: 5}, {Op: 30, A: 1, C: 1}, {Op: 26, A: 11}, {Op: 11}, {Op: 30, A: 1, C: 2, Flags: 1}, {Op: 53}},
+						Insns:       []bytecode.Instr{{Op: 5}, {Op: 30, Flags: 8}, {Op: 11}, {Op: 30, Flags: 1}, {Op: 18}, {Op: 28, A: 9}, {Op: 5}, {Op: 30, A: 1, C: 1}, {Op: 26, A: 11}, {Op: 11}, {Op: 30, A: 1, C: 2, Flags: 1}, {Op: 53}},
 						Names:       []string{"size", "none?"},
 						Params:      []string{"other"},
 						NumRequired: 1,
@@ -3983,7 +3983,7 @@ func embeddedPrelude() *bytecode.ISeq {
 					},
 					&bytecode.ISeq{
 						Name:  "delete_if",
-						Insns: []bytecode.Instr{{Op: 11}, {Op: 25}, {Op: 28, A: 8}, {Op: 5}, {Op: 1}, {Op: 30, B: 1, C: 1, Flags: 2}, {Op: 53}, {Op: 26, A: 9}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 1}, {Op: 30, A: 2, C: 2, Flags: 1}, {Op: 9}, {Op: 5}, {Op: 53}},
+						Insns: []bytecode.Instr{{Op: 11}, {Op: 25}, {Op: 28, A: 8}, {Op: 5}, {Op: 1}, {Op: 30, B: 1, C: 1, Flags: 2}, {Op: 53}, {Op: 26, A: 9}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 1, Flags: 8}, {Op: 30, A: 2, C: 2, Flags: 1}, {Op: 9}, {Op: 5}, {Op: 53}},
 						Consts: []object.Value{
 							object.Symbol("delete_if"),
 						},
@@ -4000,7 +4000,7 @@ func embeddedPrelude() *bytecode.ISeq {
 						Children: []*bytecode.ISeq{
 							&bytecode.ISeq{
 								Name:        "block in delete_if",
-								Insns:       []bytecode.Instr{{Op: 5}, {Op: 30}, {Op: 53}},
+								Insns:       []bytecode.Instr{{Op: 5}, {Op: 30, Flags: 8}, {Op: 53}},
 								Names:       []string{"size"},
 								NumRequired: 0,
 								SplatIndex:  -1,
@@ -4033,7 +4033,7 @@ func embeddedPrelude() *bytecode.ISeq {
 					},
 					&bytecode.ISeq{
 						Name:  "keep_if",
-						Insns: []bytecode.Instr{{Op: 11}, {Op: 25}, {Op: 28, A: 8}, {Op: 5}, {Op: 1}, {Op: 30, B: 1, C: 1, Flags: 2}, {Op: 53}, {Op: 26, A: 9}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 1}, {Op: 30, A: 2, C: 2, Flags: 1}, {Op: 9}, {Op: 5}, {Op: 53}},
+						Insns: []bytecode.Instr{{Op: 11}, {Op: 25}, {Op: 28, A: 8}, {Op: 5}, {Op: 1}, {Op: 30, B: 1, C: 1, Flags: 2}, {Op: 53}, {Op: 26, A: 9}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 1, Flags: 8}, {Op: 30, A: 2, C: 2, Flags: 1}, {Op: 9}, {Op: 5}, {Op: 53}},
 						Consts: []object.Value{
 							object.Symbol("keep_if"),
 						},
@@ -4050,7 +4050,7 @@ func embeddedPrelude() *bytecode.ISeq {
 						Children: []*bytecode.ISeq{
 							&bytecode.ISeq{
 								Name:        "block in keep_if",
-								Insns:       []bytecode.Instr{{Op: 5}, {Op: 30}, {Op: 53}},
+								Insns:       []bytecode.Instr{{Op: 5}, {Op: 30, Flags: 8}, {Op: 53}},
 								Names:       []string{"size"},
 								NumRequired: 0,
 								SplatIndex:  -1,
@@ -4083,7 +4083,7 @@ func embeddedPrelude() *bytecode.ISeq {
 					},
 					&bytecode.ISeq{
 						Name:  "select!",
-						Insns: []bytecode.Instr{{Op: 11}, {Op: 25}, {Op: 28, A: 8}, {Op: 5}, {Op: 1}, {Op: 30, B: 1, C: 1, Flags: 2}, {Op: 53}, {Op: 26, A: 9}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 1}, {Op: 12, A: 1}, {Op: 9}, {Op: 5}, {Op: 11}, {Op: 66, A: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 1}, {Op: 11, A: 1}, {Op: 22}, {Op: 28, A: 25}, {Op: 2}, {Op: 26, A: 26}, {Op: 5}, {Op: 53}},
+						Insns: []bytecode.Instr{{Op: 11}, {Op: 25}, {Op: 28, A: 8}, {Op: 5}, {Op: 1}, {Op: 30, B: 1, C: 1, Flags: 2}, {Op: 53}, {Op: 26, A: 9}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 1, Flags: 8}, {Op: 12, A: 1}, {Op: 9}, {Op: 5}, {Op: 11}, {Op: 66, A: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 1, Flags: 8}, {Op: 11, A: 1}, {Op: 22}, {Op: 28, A: 25}, {Op: 2}, {Op: 26, A: 26}, {Op: 5}, {Op: 53}},
 						Consts: []object.Value{
 							object.Symbol("select!"),
 						},
@@ -4100,7 +4100,7 @@ func embeddedPrelude() *bytecode.ISeq {
 						Children: []*bytecode.ISeq{
 							&bytecode.ISeq{
 								Name:        "block in select!",
-								Insns:       []bytecode.Instr{{Op: 5}, {Op: 30}, {Op: 53}},
+								Insns:       []bytecode.Instr{{Op: 5}, {Op: 30, Flags: 8}, {Op: 53}},
 								Names:       []string{"size"},
 								NumRequired: 0,
 								SplatIndex:  -1,
@@ -4117,7 +4117,7 @@ func embeddedPrelude() *bytecode.ISeq {
 					},
 					&bytecode.ISeq{
 						Name:  "reject!",
-						Insns: []bytecode.Instr{{Op: 11}, {Op: 25}, {Op: 28, A: 8}, {Op: 5}, {Op: 1}, {Op: 30, B: 1, C: 1, Flags: 2}, {Op: 53}, {Op: 26, A: 9}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 1}, {Op: 12, A: 1}, {Op: 9}, {Op: 5}, {Op: 11}, {Op: 66, A: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 1}, {Op: 11, A: 1}, {Op: 22}, {Op: 28, A: 25}, {Op: 2}, {Op: 26, A: 26}, {Op: 5}, {Op: 53}},
+						Insns: []bytecode.Instr{{Op: 11}, {Op: 25}, {Op: 28, A: 8}, {Op: 5}, {Op: 1}, {Op: 30, B: 1, C: 1, Flags: 2}, {Op: 53}, {Op: 26, A: 9}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 1, Flags: 8}, {Op: 12, A: 1}, {Op: 9}, {Op: 5}, {Op: 11}, {Op: 66, A: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 1, Flags: 8}, {Op: 11, A: 1}, {Op: 22}, {Op: 28, A: 25}, {Op: 2}, {Op: 26, A: 26}, {Op: 5}, {Op: 53}},
 						Consts: []object.Value{
 							object.Symbol("reject!"),
 						},
@@ -4134,7 +4134,7 @@ func embeddedPrelude() *bytecode.ISeq {
 						Children: []*bytecode.ISeq{
 							&bytecode.ISeq{
 								Name:        "block in reject!",
-								Insns:       []bytecode.Instr{{Op: 5}, {Op: 30}, {Op: 53}},
+								Insns:       []bytecode.Instr{{Op: 5}, {Op: 30, Flags: 8}, {Op: 53}},
 								Names:       []string{"size"},
 								NumRequired: 0,
 								SplatIndex:  -1,
@@ -4151,7 +4151,7 @@ func embeddedPrelude() *bytecode.ISeq {
 					},
 					&bytecode.ISeq{
 						Name:  "map!",
-						Insns: []bytecode.Instr{{Op: 11}, {Op: 25}, {Op: 28, A: 8}, {Op: 5}, {Op: 1}, {Op: 30, B: 1, C: 1, Flags: 2}, {Op: 53}, {Op: 26, A: 9}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 1}, {Op: 11}, {Op: 66, A: 2, Flags: 1}, {Op: 12, A: 1}, {Op: 9}, {Op: 5}, {Op: 4}, {Op: 30, A: 3, B: 1, Flags: 2}, {Op: 9}, {Op: 11, A: 1}, {Op: 30, A: 4, C: 2, Flags: 1}, {Op: 9}, {Op: 5}, {Op: 53}},
+						Insns: []bytecode.Instr{{Op: 11}, {Op: 25}, {Op: 28, A: 8}, {Op: 5}, {Op: 1}, {Op: 30, B: 1, C: 1, Flags: 2}, {Op: 53}, {Op: 26, A: 9}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 1, Flags: 8}, {Op: 11}, {Op: 66, A: 2, Flags: 1}, {Op: 12, A: 1}, {Op: 9}, {Op: 5}, {Op: 4}, {Op: 30, A: 3, B: 1, Flags: 2}, {Op: 9}, {Op: 11, A: 1}, {Op: 30, A: 4, C: 2, Flags: 1}, {Op: 9}, {Op: 5}, {Op: 53}},
 						Consts: []object.Value{
 							object.Symbol("map!"),
 						},
@@ -4168,7 +4168,7 @@ func embeddedPrelude() *bytecode.ISeq {
 						Children: []*bytecode.ISeq{
 							&bytecode.ISeq{
 								Name:        "block in map!",
-								Insns:       []bytecode.Instr{{Op: 5}, {Op: 30}, {Op: 53}},
+								Insns:       []bytecode.Instr{{Op: 5}, {Op: 30, Flags: 8}, {Op: 53}},
 								Names:       []string{"size"},
 								NumRequired: 0,
 								SplatIndex:  -1,
@@ -4218,7 +4218,7 @@ func embeddedPrelude() *bytecode.ISeq {
 						Children: []*bytecode.ISeq{
 							&bytecode.ISeq{
 								Name:        "block in classify",
-								Insns:       []bytecode.Instr{{Op: 5}, {Op: 30}, {Op: 53}},
+								Insns:       []bytecode.Instr{{Op: 5}, {Op: 30, Flags: 8}, {Op: 53}},
 								Names:       []string{"size"},
 								NumRequired: 0,
 								SplatIndex:  -1,
@@ -4269,7 +4269,7 @@ func embeddedPrelude() *bytecode.ISeq {
 						Children: []*bytecode.ISeq{
 							&bytecode.ISeq{
 								Name:        "block in divide",
-								Insns:       []bytecode.Instr{{Op: 5}, {Op: 30}, {Op: 53}},
+								Insns:       []bytecode.Instr{{Op: 5}, {Op: 30, Flags: 8}, {Op: 53}},
 								Names:       []string{"size"},
 								NumRequired: 0,
 								SplatIndex:  -1,
@@ -4286,7 +4286,7 @@ func embeddedPrelude() *bytecode.ISeq {
 					},
 					&bytecode.ISeq{
 						Name:  "__divide_graph",
-						Insns: []bytecode.Instr{{Op: 5}, {Op: 30}, {Op: 12, A: 1}, {Op: 9}, {Op: 11, A: 1}, {Op: 30, A: 1, Flags: 1}, {Op: 12, A: 2}, {Op: 9}, {Op: 33, A: 2}, {Op: 11, A: 2}, {Op: 30, A: 3, B: 1, C: 1, Flags: 3}, {Op: 12, A: 3}, {Op: 9}, {Op: 11, A: 2}, {Op: 30, A: 4, C: 2, Flags: 1}, {Op: 9}, {Op: 1}, {Op: 12, A: 4}, {Op: 9}, {Op: 33, A: 2}, {Op: 11, A: 2}, {Op: 30, A: 3, B: 1, Flags: 3}, {Op: 12, A: 5}, {Op: 9}, {Op: 33, A: 2}, {Op: 11, A: 2}, {Op: 1}, {Op: 30, A: 3, B: 2, Flags: 3}, {Op: 12, A: 6}, {Op: 9}, {Op: 33, A: 2}, {Op: 11, A: 2}, {Op: 4}, {Op: 30, A: 3, B: 2, Flags: 3}, {Op: 12, A: 7}, {Op: 9}, {Op: 6}, {Op: 12, A: 8}, {Op: 9}, {Op: 6}, {Op: 12, A: 9}, {Op: 9}, {Op: 2}, {Op: 12, A: 10}, {Op: 9}, {Op: 5}, {Op: 30, A: 5, C: 3}, {Op: 12, A: 10}, {Op: 9}, {Op: 11, A: 2}, {Op: 30, A: 4, C: 4, Flags: 1}, {Op: 9}, {Op: 5}, {Op: 30, A: 6}, {Op: 11, A: 9}, {Op: 30, A: 7, C: 5, Flags: 1}, {Op: 30, A: 3, B: 1, Flags: 3}, {Op: 53}},
+						Insns: []bytecode.Instr{{Op: 5}, {Op: 30, Flags: 8}, {Op: 12, A: 1}, {Op: 9}, {Op: 11, A: 1}, {Op: 30, A: 1, Flags: 1}, {Op: 12, A: 2}, {Op: 9}, {Op: 33, A: 2}, {Op: 11, A: 2}, {Op: 30, A: 3, B: 1, C: 1, Flags: 3}, {Op: 12, A: 3}, {Op: 9}, {Op: 11, A: 2}, {Op: 30, A: 4, C: 2, Flags: 1}, {Op: 9}, {Op: 1}, {Op: 12, A: 4}, {Op: 9}, {Op: 33, A: 2}, {Op: 11, A: 2}, {Op: 30, A: 3, B: 1, Flags: 3}, {Op: 12, A: 5}, {Op: 9}, {Op: 33, A: 2}, {Op: 11, A: 2}, {Op: 1}, {Op: 30, A: 3, B: 2, Flags: 3}, {Op: 12, A: 6}, {Op: 9}, {Op: 33, A: 2}, {Op: 11, A: 2}, {Op: 4}, {Op: 30, A: 3, B: 2, Flags: 3}, {Op: 12, A: 7}, {Op: 9}, {Op: 6}, {Op: 12, A: 8}, {Op: 9}, {Op: 6}, {Op: 12, A: 9}, {Op: 9}, {Op: 2}, {Op: 12, A: 10}, {Op: 9}, {Op: 5}, {Op: 30, A: 5, C: 3}, {Op: 12, A: 10}, {Op: 9}, {Op: 11, A: 2}, {Op: 30, A: 4, C: 4, Flags: 1}, {Op: 9}, {Op: 5}, {Op: 30, A: 6}, {Op: 11, A: 9}, {Op: 30, A: 7, C: 5, Flags: 1}, {Op: 30, A: 3, B: 1, Flags: 3}, {Op: 53}},
 						Consts: []object.Value{
 							object.IntValue(0),
 						},
@@ -4451,7 +4451,7 @@ func embeddedPrelude() *bytecode.ISeq {
 					},
 					&bytecode.ISeq{
 						Name:        "flatten!",
-						Insns:       []bytecode.Instr{{Op: 5}, {Op: 30, C: 1}, {Op: 28, A: 10}, {Op: 5}, {Op: 5}, {Op: 30, A: 1}, {Op: 30, A: 2, B: 1, Flags: 2}, {Op: 9}, {Op: 5}, {Op: 26, A: 11}, {Op: 2}, {Op: 53}},
+						Insns:       []bytecode.Instr{{Op: 5}, {Op: 30, C: 1}, {Op: 28, A: 10}, {Op: 5}, {Op: 5}, {Op: 30, A: 1, Flags: 8}, {Op: 30, A: 2, B: 1, Flags: 2}, {Op: 9}, {Op: 5}, {Op: 26, A: 11}, {Op: 2}, {Op: 53}},
 						Names:       []string{"any?", "flatten", "replace"},
 						NumRequired: 0,
 						SplatIndex:  -1,
@@ -4520,7 +4520,7 @@ func embeddedPrelude() *bytecode.ISeq {
 					},
 					&bytecode.ISeq{
 						Name:        "join",
-						Insns:       []bytecode.Instr{{Op: 54}, {Op: 27, A: 5}, {Op: 2}, {Op: 12}, {Op: 9}, {Op: 5}, {Op: 30}, {Op: 11}, {Op: 30, A: 1, B: 1, Flags: 3}, {Op: 53}},
+						Insns:       []bytecode.Instr{{Op: 54}, {Op: 27, A: 5}, {Op: 2}, {Op: 12}, {Op: 9}, {Op: 5}, {Op: 30, Flags: 8}, {Op: 11}, {Op: 30, A: 1, B: 1, Flags: 3}, {Op: 53}},
 						Names:       []string{"to_a", "join"},
 						Params:      []string{"sep"},
 						NumRequired: 0,
@@ -4565,7 +4565,7 @@ func embeddedPrelude() *bytecode.ISeq {
 				Children: []*bytecode.ISeq{
 					&bytecode.ISeq{
 						Name:  "<class:Version>",
-						Insns: []bytecode.Instr{{Op: 5}, {Op: 33}, {Op: 30, A: 1, B: 1, Flags: 2}, {Op: 9}, {Op: 1}, {Op: 41, A: 2}, {Op: 9}, {Op: 33, A: 3}, {Op: 1, A: 1}, {Op: 33, A: 2}, {Op: 13}, {Op: 1, A: 2}, {Op: 13}, {Op: 30, A: 4, B: 1, Flags: 3}, {Op: 41, A: 5}, {Op: 9}, {Op: 45, A: 6}, {Op: 9}, {Op: 45, A: 7, B: 1}, {Op: 9}, {Op: 5}, {Op: 1, A: 3}, {Op: 30, A: 8, B: 1, Flags: 2}, {Op: 9}, {Op: 44, A: 9, B: 2}, {Op: 9}, {Op: 44, A: 10, B: 3}, {Op: 9}, {Op: 44, A: 11, B: 4}, {Op: 9}, {Op: 44, A: 12, B: 5}, {Op: 9}, {Op: 44, A: 13, B: 6}, {Op: 9}, {Op: 44, A: 14, B: 7}, {Op: 9}, {Op: 44, A: 15, B: 8}, {Op: 9}, {Op: 44, A: 16, B: 9}, {Op: 9}, {Op: 44, A: 17, B: 10}, {Op: 9}, {Op: 44, A: 18, B: 11}, {Op: 9}, {Op: 44, A: 19, B: 12}, {Op: 9}, {Op: 5}, {Op: 30, A: 20}, {Op: 9}, {Op: 44, A: 21, B: 13}, {Op: 53}},
+						Insns: []bytecode.Instr{{Op: 5}, {Op: 33}, {Op: 30, A: 1, B: 1, Flags: 2}, {Op: 9}, {Op: 1}, {Op: 41, A: 2}, {Op: 9}, {Op: 33, A: 3}, {Op: 1, A: 1}, {Op: 33, A: 2}, {Op: 13}, {Op: 1, A: 2}, {Op: 13}, {Op: 30, A: 4, B: 1, Flags: 3}, {Op: 41, A: 5}, {Op: 9}, {Op: 45, A: 6}, {Op: 9}, {Op: 45, A: 7, B: 1}, {Op: 9}, {Op: 5}, {Op: 1, A: 3}, {Op: 30, A: 8, B: 1, Flags: 2}, {Op: 9}, {Op: 44, A: 9, B: 2}, {Op: 9}, {Op: 44, A: 10, B: 3}, {Op: 9}, {Op: 44, A: 11, B: 4}, {Op: 9}, {Op: 44, A: 12, B: 5}, {Op: 9}, {Op: 44, A: 13, B: 6}, {Op: 9}, {Op: 44, A: 14, B: 7}, {Op: 9}, {Op: 44, A: 15, B: 8}, {Op: 9}, {Op: 44, A: 16, B: 9}, {Op: 9}, {Op: 44, A: 17, B: 10}, {Op: 9}, {Op: 44, A: 18, B: 11}, {Op: 9}, {Op: 44, A: 19, B: 12}, {Op: 9}, {Op: 5}, {Op: 30, A: 20, Flags: 8}, {Op: 9}, {Op: 44, A: 21, B: 13}, {Op: 53}},
 						Consts: []object.Value{
 							object.NewString("[0-9]+(\\.[0-9a-zA-Z]+)*(-[0-9A-Za-z.-]+)?"),
 							object.NewString("\\A\\s*("),
@@ -4720,7 +4720,7 @@ func embeddedPrelude() *bytecode.ISeq {
 							},
 							&bytecode.ISeq{
 								Name:  "release",
-								Insns: []bytecode.Instr{{Op: 5}, {Op: 30}, {Op: 25}, {Op: 28, A: 7}, {Op: 5}, {Op: 53}, {Op: 26, A: 8}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 1}, {Op: 12}, {Op: 9}, {Op: 11}, {Op: 30, A: 2, Flags: 1}, {Op: 25}, {Op: 10}, {Op: 28, A: 24}, {Op: 9}, {Op: 11}, {Op: 30, A: 3, Flags: 1}, {Op: 33, A: 4}, {Op: 30, A: 5, B: 1, Flags: 3}, {Op: 25}, {Op: 28, A: 29}, {Op: 11}, {Op: 30, A: 6, Flags: 1}, {Op: 9}, {Op: 26, A: 13}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 7}, {Op: 11}, {Op: 1}, {Op: 30, A: 8, B: 1, Flags: 3}, {Op: 30, A: 9, B: 1, Flags: 3}, {Op: 53}},
+								Insns: []bytecode.Instr{{Op: 5}, {Op: 30, Flags: 8}, {Op: 25}, {Op: 28, A: 7}, {Op: 5}, {Op: 53}, {Op: 26, A: 8}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 1, Flags: 8}, {Op: 12}, {Op: 9}, {Op: 11}, {Op: 30, A: 2, Flags: 1}, {Op: 25}, {Op: 10}, {Op: 28, A: 24}, {Op: 9}, {Op: 11}, {Op: 30, A: 3, Flags: 1}, {Op: 33, A: 4}, {Op: 30, A: 5, B: 1, Flags: 3}, {Op: 25}, {Op: 28, A: 29}, {Op: 11}, {Op: 30, A: 6, Flags: 1}, {Op: 9}, {Op: 26, A: 13}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 7}, {Op: 11}, {Op: 1}, {Op: 30, A: 8, B: 1, Flags: 3}, {Op: 30, A: 9, B: 1, Flags: 3}, {Op: 53}},
 								Consts: []object.Value{
 									object.NewString("."),
 								},
@@ -4738,7 +4738,7 @@ func embeddedPrelude() *bytecode.ISeq {
 							},
 							&bytecode.ISeq{
 								Name:  "bump",
-								Insns: []bytecode.Instr{{Op: 5}, {Op: 30}, {Op: 30, A: 1, Flags: 1}, {Op: 12}, {Op: 9}, {Op: 11}, {Op: 30, A: 2, Flags: 1}, {Op: 25}, {Op: 10}, {Op: 28, A: 16}, {Op: 9}, {Op: 11}, {Op: 30, A: 3, Flags: 1}, {Op: 33, A: 4}, {Op: 30, A: 5, B: 1, Flags: 3}, {Op: 25}, {Op: 28, A: 21}, {Op: 11}, {Op: 30, A: 6, Flags: 1}, {Op: 9}, {Op: 26, A: 5}, {Op: 2}, {Op: 9}, {Op: 11}, {Op: 30, A: 7, Flags: 1}, {Op: 1}, {Op: 19}, {Op: 28, A: 31}, {Op: 11}, {Op: 30, A: 6, Flags: 1}, {Op: 26, A: 32}, {Op: 2}, {Op: 9}, {Op: 11}, {Op: 1, A: 1}, {Op: 11}, {Op: 1, A: 1}, {Op: 30, A: 8, B: 1, Flags: 3}, {Op: 1}, {Op: 13}, {Op: 12, A: 1}, {Op: 30, A: 9, B: 2, Flags: 3}, {Op: 9}, {Op: 11, A: 1}, {Op: 9}, {Op: 5}, {Op: 30, A: 10}, {Op: 11}, {Op: 1, A: 2}, {Op: 30, A: 11, B: 1, Flags: 3}, {Op: 30, A: 12, B: 1, Flags: 3}, {Op: 53}},
+								Insns: []bytecode.Instr{{Op: 5}, {Op: 30, Flags: 8}, {Op: 30, A: 1, Flags: 1}, {Op: 12}, {Op: 9}, {Op: 11}, {Op: 30, A: 2, Flags: 1}, {Op: 25}, {Op: 10}, {Op: 28, A: 16}, {Op: 9}, {Op: 11}, {Op: 30, A: 3, Flags: 1}, {Op: 33, A: 4}, {Op: 30, A: 5, B: 1, Flags: 3}, {Op: 25}, {Op: 28, A: 21}, {Op: 11}, {Op: 30, A: 6, Flags: 1}, {Op: 9}, {Op: 26, A: 5}, {Op: 2}, {Op: 9}, {Op: 11}, {Op: 30, A: 7, Flags: 1}, {Op: 1}, {Op: 19}, {Op: 28, A: 31}, {Op: 11}, {Op: 30, A: 6, Flags: 1}, {Op: 26, A: 32}, {Op: 2}, {Op: 9}, {Op: 11}, {Op: 1, A: 1}, {Op: 11}, {Op: 1, A: 1}, {Op: 30, A: 8, B: 1, Flags: 3}, {Op: 1}, {Op: 13}, {Op: 12, A: 1}, {Op: 30, A: 9, B: 2, Flags: 3}, {Op: 9}, {Op: 11, A: 1}, {Op: 9}, {Op: 5}, {Op: 30, A: 10}, {Op: 11}, {Op: 1, A: 2}, {Op: 30, A: 11, B: 1, Flags: 3}, {Op: 30, A: 12, B: 1, Flags: 3}, {Op: 53}},
 								Consts: []object.Value{
 									object.IntValue(1),
 									object.IntValue(-1),
@@ -4758,7 +4758,7 @@ func embeddedPrelude() *bytecode.ISeq {
 							},
 							&bytecode.ISeq{
 								Name:  "<=>",
-								Insns: []bytecode.Instr{{Op: 5}, {Op: 30}, {Op: 11}, {Op: 30, A: 1, B: 1, Flags: 3}, {Op: 12}, {Op: 9}, {Op: 11}, {Op: 30, A: 2, Flags: 1}, {Op: 28, A: 12}, {Op: 2}, {Op: 53}, {Op: 26, A: 13}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 3}, {Op: 12, A: 1}, {Op: 9}, {Op: 11}, {Op: 30, A: 3, Flags: 1}, {Op: 12, A: 2}, {Op: 9}, {Op: 11, A: 1}, {Op: 30, A: 4, Flags: 1}, {Op: 11, A: 2}, {Op: 30, A: 4, Flags: 1}, {Op: 19}, {Op: 28, A: 31}, {Op: 11, A: 1}, {Op: 30, A: 4, Flags: 1}, {Op: 26, A: 33}, {Op: 11, A: 2}, {Op: 30, A: 4, Flags: 1}, {Op: 12, A: 3}, {Op: 9}, {Op: 1}, {Op: 12, A: 4}, {Op: 9}, {Op: 11, A: 4}, {Op: 11, A: 3}, {Op: 18}, {Op: 28, A: 90}, {Op: 11, A: 1}, {Op: 11, A: 4}, {Op: 30, A: 5, B: 1, Flags: 3}, {Op: 12, A: 5}, {Op: 9}, {Op: 11, A: 2}, {Op: 11, A: 4}, {Op: 30, A: 5, B: 1, Flags: 3}, {Op: 12, A: 6}, {Op: 9}, {Op: 11, A: 5}, {Op: 30, A: 2, Flags: 1}, {Op: 28, A: 58}, {Op: 1}, {Op: 12, A: 5}, {Op: 26, A: 59}, {Op: 2}, {Op: 9}, {Op: 11, A: 6}, {Op: 30, A: 2, Flags: 1}, {Op: 28, A: 66}, {Op: 1}, {Op: 12, A: 6}, {Op: 26, A: 67}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 11, A: 5}, {Op: 11, A: 6}, {Op: 30, A: 6, B: 2, Flags: 2}, {Op: 12, A: 7}, {Op: 9}, {Op: 11, A: 7}, {Op: 1}, {Op: 22}, {Op: 25}, {Op: 28, A: 82}, {Op: 11, A: 7}, {Op: 53}, {Op: 26, A: 83}, {Op: 2}, {Op: 9}, {Op: 11, A: 4}, {Op: 1, A: 1}, {Op: 13}, {Op: 12, A: 4}, {Op: 9}, {Op: 26, A: 38}, {Op: 2}, {Op: 9}, {Op: 1}, {Op: 53}},
+								Insns: []bytecode.Instr{{Op: 5}, {Op: 30}, {Op: 11}, {Op: 30, A: 1, B: 1, Flags: 3}, {Op: 12}, {Op: 9}, {Op: 11}, {Op: 30, A: 2, Flags: 1}, {Op: 28, A: 12}, {Op: 2}, {Op: 53}, {Op: 26, A: 13}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 3, Flags: 8}, {Op: 12, A: 1}, {Op: 9}, {Op: 11}, {Op: 30, A: 3, Flags: 1}, {Op: 12, A: 2}, {Op: 9}, {Op: 11, A: 1}, {Op: 30, A: 4, Flags: 1}, {Op: 11, A: 2}, {Op: 30, A: 4, Flags: 1}, {Op: 19}, {Op: 28, A: 31}, {Op: 11, A: 1}, {Op: 30, A: 4, Flags: 1}, {Op: 26, A: 33}, {Op: 11, A: 2}, {Op: 30, A: 4, Flags: 1}, {Op: 12, A: 3}, {Op: 9}, {Op: 1}, {Op: 12, A: 4}, {Op: 9}, {Op: 11, A: 4}, {Op: 11, A: 3}, {Op: 18}, {Op: 28, A: 90}, {Op: 11, A: 1}, {Op: 11, A: 4}, {Op: 30, A: 5, B: 1, Flags: 3}, {Op: 12, A: 5}, {Op: 9}, {Op: 11, A: 2}, {Op: 11, A: 4}, {Op: 30, A: 5, B: 1, Flags: 3}, {Op: 12, A: 6}, {Op: 9}, {Op: 11, A: 5}, {Op: 30, A: 2, Flags: 1}, {Op: 28, A: 58}, {Op: 1}, {Op: 12, A: 5}, {Op: 26, A: 59}, {Op: 2}, {Op: 9}, {Op: 11, A: 6}, {Op: 30, A: 2, Flags: 1}, {Op: 28, A: 66}, {Op: 1}, {Op: 12, A: 6}, {Op: 26, A: 67}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 11, A: 5}, {Op: 11, A: 6}, {Op: 30, A: 6, B: 2, Flags: 2}, {Op: 12, A: 7}, {Op: 9}, {Op: 11, A: 7}, {Op: 1}, {Op: 22}, {Op: 25}, {Op: 28, A: 82}, {Op: 11, A: 7}, {Op: 53}, {Op: 26, A: 83}, {Op: 2}, {Op: 9}, {Op: 11, A: 4}, {Op: 1, A: 1}, {Op: 13}, {Op: 12, A: 4}, {Op: 9}, {Op: 26, A: 38}, {Op: 2}, {Op: 9}, {Op: 1}, {Op: 53}},
 								Consts: []object.Value{
 									object.IntValue(0),
 									object.IntValue(1),
@@ -4797,7 +4797,7 @@ func embeddedPrelude() *bytecode.ISeq {
 							},
 							&bytecode.ISeq{
 								Name:        "eql?",
-								Insns:       []bytecode.Instr{{Op: 11}, {Op: 33}, {Op: 30, A: 1, B: 1, Flags: 3}, {Op: 10}, {Op: 28, A: 11}, {Op: 9}, {Op: 5}, {Op: 30, A: 2}, {Op: 11}, {Op: 30, A: 2, Flags: 1}, {Op: 22}, {Op: 53}},
+								Insns:       []bytecode.Instr{{Op: 11}, {Op: 33}, {Op: 30, A: 1, B: 1, Flags: 3}, {Op: 10}, {Op: 28, A: 11}, {Op: 9}, {Op: 5}, {Op: 30, A: 2, Flags: 8}, {Op: 11}, {Op: 30, A: 2, Flags: 1}, {Op: 22}, {Op: 53}},
 								Names:       []string{"Version", "is_a?", "segments"},
 								Params:      []string{"other"},
 								NumRequired: 1,
@@ -4813,7 +4813,7 @@ func embeddedPrelude() *bytecode.ISeq {
 							},
 							&bytecode.ISeq{
 								Name:        "hash",
-								Insns:       []bytecode.Instr{{Op: 5}, {Op: 30}, {Op: 30, A: 1, Flags: 1}, {Op: 53}},
+								Insns:       []bytecode.Instr{{Op: 5}, {Op: 30, Flags: 8}, {Op: 30, A: 1, Flags: 1}, {Op: 53}},
 								Names:       []string{"segments", "hash"},
 								NumRequired: 0,
 								SplatIndex:  -1,
@@ -5708,7 +5708,7 @@ func embeddedPrelude() *bytecode.ISeq {
 					},
 					&bytecode.ISeq{
 						Name:        "method_missing",
-						Insns:       []bytecode.Instr{{Op: 5}, {Op: 30}, {Op: 12, A: 3}, {Op: 9}, {Op: 11, A: 3}, {Op: 11}, {Op: 30, A: 1, B: 1, Flags: 3}, {Op: 28, A: 19}, {Op: 11, A: 3}, {Op: 6}, {Op: 11}, {Op: 6, A: 1}, {Op: 61}, {Op: 11, A: 1}, {Op: 60}, {Op: 61}, {Op: 11, A: 2}, {Op: 67, A: 2, Flags: 3}, {Op: 26, A: 20}, {Op: 47, B: 1}, {Op: 53}},
+						Insns:       []bytecode.Instr{{Op: 5}, {Op: 30, Flags: 8}, {Op: 12, A: 3}, {Op: 9}, {Op: 11, A: 3}, {Op: 11}, {Op: 30, A: 1, B: 1, Flags: 3}, {Op: 28, A: 19}, {Op: 11, A: 3}, {Op: 6}, {Op: 11}, {Op: 6, A: 1}, {Op: 61}, {Op: 11, A: 1}, {Op: 60}, {Op: 61}, {Op: 11, A: 2}, {Op: 67, A: 2, Flags: 3}, {Op: 26, A: 20}, {Op: 47, B: 1}, {Op: 53}},
 						Names:       []string{"__getobj__", "respond_to?", "__send__"},
 						Params:      []string{"name", "args"},
 						NumRequired: 1,
@@ -5724,7 +5724,7 @@ func embeddedPrelude() *bytecode.ISeq {
 					},
 					&bytecode.ISeq{
 						Name:        "respond_to_missing?",
-						Insns:       []bytecode.Instr{{Op: 54, A: 1}, {Op: 27, A: 5}, {Op: 4}, {Op: 12, A: 1}, {Op: 9}, {Op: 5}, {Op: 30}, {Op: 11}, {Op: 11, A: 1}, {Op: 30, A: 1, B: 2, Flags: 3}, {Op: 10}, {Op: 27, A: 14}, {Op: 9}, {Op: 47, B: 1}, {Op: 53}},
+						Insns:       []bytecode.Instr{{Op: 54, A: 1}, {Op: 27, A: 5}, {Op: 4}, {Op: 12, A: 1}, {Op: 9}, {Op: 5}, {Op: 30, Flags: 8}, {Op: 11}, {Op: 11, A: 1}, {Op: 30, A: 1, B: 2, Flags: 3}, {Op: 10}, {Op: 27, A: 14}, {Op: 9}, {Op: 47, B: 1}, {Op: 53}},
 						Names:       []string{"__getobj__", "respond_to?"},
 						Params:      []string{"name", "include_private"},
 						NumRequired: 1,
@@ -5756,7 +5756,7 @@ func embeddedPrelude() *bytecode.ISeq {
 					},
 					&bytecode.ISeq{
 						Name:        "==",
-						Insns:       []bytecode.Instr{{Op: 11}, {Op: 5}, {Op: 30, B: 1, Flags: 3}, {Op: 28, A: 7}, {Op: 3}, {Op: 53}, {Op: 26, A: 8}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 1}, {Op: 11}, {Op: 22}, {Op: 53}},
+						Insns:       []bytecode.Instr{{Op: 11}, {Op: 5}, {Op: 30, B: 1, Flags: 3}, {Op: 28, A: 7}, {Op: 3}, {Op: 53}, {Op: 26, A: 8}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 1, Flags: 8}, {Op: 11}, {Op: 22}, {Op: 53}},
 						Names:       []string{"equal?", "__getobj__"},
 						Params:      []string{"other"},
 						NumRequired: 1,
@@ -5965,7 +5965,7 @@ func embeddedPrelude() *bytecode.ISeq {
 						Children: []*bytecode.ISeq{
 							&bytecode.ISeq{
 								Name:        "block (2 levels) in DelegateClass",
-								Insns:       []bytecode.Instr{{Op: 5}, {Op: 30}, {Op: 6}, {Op: 11, B: 1}, {Op: 6, A: 1}, {Op: 61}, {Op: 11}, {Op: 60}, {Op: 61}, {Op: 11, A: 1}, {Op: 67, A: 1, Flags: 3}, {Op: 53}},
+								Insns:       []bytecode.Instr{{Op: 5}, {Op: 30, Flags: 8}, {Op: 6}, {Op: 11, B: 1}, {Op: 6, A: 1}, {Op: 61}, {Op: 11}, {Op: 60}, {Op: 61}, {Op: 11, A: 1}, {Op: 67, A: 1, Flags: 3}, {Op: 53}},
 								Names:       []string{"__getobj__", "__send__"},
 								Params:      []string{"args"},
 								NumRequired: 0,
@@ -6143,7 +6143,7 @@ func embeddedPrelude() *bytecode.ISeq {
 					},
 					&bytecode.ISeq{
 						Name:        "relative?",
-						Insns:       []bytecode.Instr{{Op: 5}, {Op: 30}, {Op: 25}, {Op: 53}},
+						Insns:       []bytecode.Instr{{Op: 5}, {Op: 30, Flags: 8}, {Op: 25}, {Op: 53}},
 						Names:       []string{"absolute?"},
 						NumRequired: 0,
 						SplatIndex:  -1,
@@ -6282,7 +6282,7 @@ func embeddedPrelude() *bytecode.ISeq {
 					},
 					&bytecode.ISeq{
 						Name:        "split",
-						Insns:       []bytecode.Instr{{Op: 5}, {Op: 30}, {Op: 5}, {Op: 30, A: 1}, {Op: 6, A: 2}, {Op: 53}},
+						Insns:       []bytecode.Instr{{Op: 5}, {Op: 30, Flags: 8}, {Op: 5}, {Op: 30, A: 1, Flags: 8}, {Op: 6, A: 2}, {Op: 53}},
 						Names:       []string{"dirname", "basename"},
 						NumRequired: 0,
 						SplatIndex:  -1,
@@ -6581,7 +6581,7 @@ func embeddedPrelude() *bytecode.ISeq {
 						Children: []*bytecode.ISeq{
 							&bytecode.ISeq{
 								Name:        "instance",
-								Insns:       []bytecode.Instr{{Op: 31}, {Op: 10}, {Op: 27, A: 6}, {Op: 9}, {Op: 5}, {Op: 30, A: 1}, {Op: 32}, {Op: 53}},
+								Insns:       []bytecode.Instr{{Op: 31}, {Op: 10}, {Op: 27, A: 6}, {Op: 9}, {Op: 5}, {Op: 30, A: 1, Flags: 8}, {Op: 32}, {Op: 53}},
 								Names:       []string{"@__singleton_instance__", "new"},
 								NumRequired: 0,
 								SplatIndex:  -1,
@@ -6621,7 +6621,7 @@ func embeddedPrelude() *bytecode.ISeq {
 			},
 			&bytecode.ISeq{
 				Name:  "<class:ERB>",
-				Insns: []bytecode.Instr{{Op: 5}, {Op: 1}, {Op: 1, A: 1}, {Op: 30, B: 2, Flags: 2}, {Op: 9}, {Op: 5}, {Op: 1, A: 2}, {Op: 1, A: 3}, {Op: 30, A: 1, B: 2, Flags: 2}, {Op: 9}, {Op: 44, A: 2}, {Op: 9}, {Op: 44, A: 3, B: 1}, {Op: 9}, {Op: 44, A: 4, B: 2}, {Op: 9}, {Op: 44, A: 5, B: 3}, {Op: 9}, {Op: 5}, {Op: 30, A: 6}, {Op: 9}, {Op: 44, A: 7, B: 4}, {Op: 53}},
+				Insns: []bytecode.Instr{{Op: 5}, {Op: 1}, {Op: 1, A: 1}, {Op: 30, B: 2, Flags: 2}, {Op: 9}, {Op: 5}, {Op: 1, A: 2}, {Op: 1, A: 3}, {Op: 30, A: 1, B: 2, Flags: 2}, {Op: 9}, {Op: 44, A: 2}, {Op: 9}, {Op: 44, A: 3, B: 1}, {Op: 9}, {Op: 44, A: 4, B: 2}, {Op: 9}, {Op: 44, A: 5, B: 3}, {Op: 9}, {Op: 5}, {Op: 30, A: 6, Flags: 8}, {Op: 9}, {Op: 44, A: 7, B: 4}, {Op: 53}},
 				Consts: []object.Value{
 					object.Symbol("src"),
 					object.Symbol("encoding"),
@@ -6663,7 +6663,7 @@ func embeddedPrelude() *bytecode.ISeq {
 					},
 					&bytecode.ISeq{
 						Name:  "result",
-						Insns: []bytecode.Instr{{Op: 54}, {Op: 27, A: 6}, {Op: 5}, {Op: 30}, {Op: 12}, {Op: 9}, {Op: 5}, {Op: 31, A: 1}, {Op: 11}, {Op: 31, A: 2}, {Op: 10}, {Op: 27, A: 14}, {Op: 9}, {Op: 1}, {Op: 31, A: 3}, {Op: 30, A: 4, B: 4, Flags: 2}, {Op: 53}},
+						Insns: []bytecode.Instr{{Op: 54}, {Op: 27, A: 6}, {Op: 5}, {Op: 30, Flags: 8}, {Op: 12}, {Op: 9}, {Op: 5}, {Op: 31, A: 1}, {Op: 11}, {Op: 31, A: 2}, {Op: 10}, {Op: 27, A: 14}, {Op: 9}, {Op: 1}, {Op: 31, A: 3}, {Op: 30, A: 4, B: 4, Flags: 2}, {Op: 53}},
 						Consts: []object.Value{
 							object.NewString("(erb)"),
 						},
@@ -6682,7 +6682,7 @@ func embeddedPrelude() *bytecode.ISeq {
 					},
 					&bytecode.ISeq{
 						Name:        "result_with_hash",
-						Insns:       []bytecode.Instr{{Op: 5}, {Op: 30}, {Op: 12, A: 1}, {Op: 9}, {Op: 11}, {Op: 30, A: 1, C: 1, Flags: 1}, {Op: 9}, {Op: 5}, {Op: 11, A: 1}, {Op: 30, A: 2, B: 1, Flags: 2}, {Op: 53}},
+						Insns:       []bytecode.Instr{{Op: 5}, {Op: 30, Flags: 8}, {Op: 12, A: 1}, {Op: 9}, {Op: 11}, {Op: 30, A: 1, C: 1, Flags: 1}, {Op: 9}, {Op: 5}, {Op: 11, A: 1}, {Op: 30, A: 2, B: 1, Flags: 2}, {Op: 53}},
 						Names:       []string{"new_toplevel", "each", "result"},
 						Params:      []string{"hash"},
 						NumRequired: 1,
@@ -6716,7 +6716,7 @@ func embeddedPrelude() *bytecode.ISeq {
 					},
 					&bytecode.ISeq{
 						Name:        "run",
-						Insns:       []bytecode.Instr{{Op: 54}, {Op: 27, A: 6}, {Op: 5}, {Op: 30}, {Op: 12}, {Op: 9}, {Op: 5}, {Op: 5}, {Op: 11}, {Op: 30, A: 1, B: 1, Flags: 2}, {Op: 30, A: 2, B: 1, Flags: 2}, {Op: 53}},
+						Insns:       []bytecode.Instr{{Op: 54}, {Op: 27, A: 6}, {Op: 5}, {Op: 30, Flags: 8}, {Op: 12}, {Op: 9}, {Op: 5}, {Op: 5}, {Op: 11}, {Op: 30, A: 1, B: 1, Flags: 2}, {Op: 30, A: 2, B: 1, Flags: 2}, {Op: 53}},
 						Names:       []string{"new_toplevel", "result", "print"},
 						Params:      []string{"b"},
 						NumRequired: 0,
@@ -7400,7 +7400,7 @@ func embeddedPrelude() *bytecode.ISeq {
 						Children: []*bytecode.ISeq{
 							&bytecode.ISeq{
 								Name:  "initialize",
-								Insns: []bytecode.Instr{{Op: 11}, {Op: 32}, {Op: 9}, {Op: 5}, {Op: 30, A: 1}, {Op: 1}, {Op: 13}, {Op: 11}, {Op: 1, A: 1}, {Op: 30, A: 2, B: 1, Flags: 3}, {Op: 13}, {Op: 47, A: 1, Flags: 2}, {Op: 53}},
+								Insns: []bytecode.Instr{{Op: 11}, {Op: 32}, {Op: 9}, {Op: 5}, {Op: 30, A: 1, Flags: 8}, {Op: 1}, {Op: 13}, {Op: 11}, {Op: 1, A: 1}, {Op: 30, A: 2, B: 1, Flags: 3}, {Op: 13}, {Op: 47, A: 1, Flags: 2}, {Op: 53}},
 								Consts: []object.Value{
 									object.NewString(": "),
 									object.NewString(" "),
@@ -7450,7 +7450,7 @@ func embeddedPrelude() *bytecode.ISeq {
 							},
 							&bytecode.ISeq{
 								Name:  "message",
-								Insns: []bytecode.Instr{{Op: 5}, {Op: 30}, {Op: 1}, {Op: 13}, {Op: 5}, {Op: 30, A: 1}, {Op: 1, A: 1}, {Op: 30, A: 2, B: 1, Flags: 3}, {Op: 13}, {Op: 53}},
+								Insns: []bytecode.Instr{{Op: 5}, {Op: 30, Flags: 8}, {Op: 1}, {Op: 13}, {Op: 5}, {Op: 30, A: 1, Flags: 8}, {Op: 1, A: 1}, {Op: 30, A: 2, B: 1, Flags: 3}, {Op: 13}, {Op: 53}},
 								Consts: []object.Value{
 									object.NewString(": "),
 									object.NewString(" "),
@@ -7719,7 +7719,7 @@ func embeddedPrelude() *bytecode.ISeq {
 					},
 					&bytecode.ISeq{
 						Name:  "initialize",
-						Insns: []bytecode.Instr{{Op: 54}, {Op: 27, A: 5}, {Op: 1}, {Op: 12}, {Op: 9}, {Op: 54, A: 1}, {Op: 27, A: 10}, {Op: 2}, {Op: 12, A: 1}, {Op: 9}, {Op: 63}, {Op: 27, A: 15}, {Op: 1, A: 1}, {Op: 12, A: 2}, {Op: 9}, {Op: 5}, {Op: 1, A: 2}, {Op: 30, B: 1, Flags: 2}, {Op: 9}, {Op: 11}, {Op: 33, A: 1}, {Op: 30, A: 2, B: 1, Flags: 3}, {Op: 28, A: 25}, {Op: 11}, {Op: 26, A: 29}, {Op: 11}, {Op: 30, A: 3, Flags: 1}, {Op: 1, A: 3}, {Op: 6, A: 2}, {Op: 10}, {Op: 59, A: 2}, {Op: 12, A: 4}, {Op: 9}, {Op: 12, A: 5}, {Op: 9}, {Op: 9}, {Op: 11, A: 1}, {Op: 10}, {Op: 27, A: 42}, {Op: 9}, {Op: 33, A: 4}, {Op: 30, A: 5, Flags: 1}, {Op: 12, A: 6}, {Op: 9}, {Op: 2}, {Op: 32, A: 6}, {Op: 9}, {Op: 1, A: 4}, {Op: 30, A: 7, C: 1, Flags: 1}, {Op: 9}, {Op: 11, A: 2}, {Op: 33, A: 8}, {Op: 34, A: 9}, {Op: 30, A: 10, B: 1}, {Op: 33, A: 8}, {Op: 34, A: 11}, {Op: 30, A: 10, B: 1}, {Op: 33, A: 8}, {Op: 34, A: 12}, {Op: 30, A: 10, B: 1}, {Op: 32, A: 13}, {Op: 9}, {Op: 7}, {Op: 12, A: 7}, {Op: 9}, {Op: 11, A: 3}, {Op: 30, A: 14, C: 2, Flags: 1}, {Op: 9}, {Op: 11, A: 7}, {Op: 1, A: 5}, {Op: 1, A: 6}, {Op: 12, A: 8}, {Op: 30, A: 15, B: 2, Flags: 3}, {Op: 9}, {Op: 11, A: 8}, {Op: 9}, {Op: 33, A: 8}, {Op: 6}, {Op: 31, A: 6}, {Op: 6, A: 1}, {Op: 61}, {Op: 31, A: 13}, {Op: 6, A: 1}, {Op: 61}, {Op: 7}, {Op: 11, A: 7}, {Op: 65}, {Op: 6, A: 1}, {Op: 61}, {Op: 62, A: 16, Flags: 5}, {Op: 32, A: 17}, {Op: 9}, {Op: 52}, {Op: 28, A: 113}, {Op: 56, A: 105, B: 1}, {Op: 5}, {Op: 48, A: 1, Flags: 2}, {Op: 57}, {Op: 5}, {Op: 30, A: 18}, {Op: 9}, {Op: 5}, {Op: 30, A: 19}, {Op: 9}, {Op: 26, A: 112}, {Op: 5}, {Op: 30, A: 18}, {Op: 9}, {Op: 5}, {Op: 30, A: 19}, {Op: 9}, {Op: 58}, {Op: 26, A: 114}, {Op: 2}, {Op: 53}},
+						Insns: []bytecode.Instr{{Op: 54}, {Op: 27, A: 5}, {Op: 1}, {Op: 12}, {Op: 9}, {Op: 54, A: 1}, {Op: 27, A: 10}, {Op: 2}, {Op: 12, A: 1}, {Op: 9}, {Op: 63}, {Op: 27, A: 15}, {Op: 1, A: 1}, {Op: 12, A: 2}, {Op: 9}, {Op: 5}, {Op: 1, A: 2}, {Op: 30, B: 1, Flags: 2}, {Op: 9}, {Op: 11}, {Op: 33, A: 1}, {Op: 30, A: 2, B: 1, Flags: 3}, {Op: 28, A: 25}, {Op: 11}, {Op: 26, A: 29}, {Op: 11}, {Op: 30, A: 3, Flags: 1}, {Op: 1, A: 3}, {Op: 6, A: 2}, {Op: 10}, {Op: 59, A: 2}, {Op: 12, A: 4}, {Op: 9}, {Op: 12, A: 5}, {Op: 9}, {Op: 9}, {Op: 11, A: 1}, {Op: 10}, {Op: 27, A: 42}, {Op: 9}, {Op: 33, A: 4}, {Op: 30, A: 5, Flags: 1}, {Op: 12, A: 6}, {Op: 9}, {Op: 2}, {Op: 32, A: 6}, {Op: 9}, {Op: 1, A: 4}, {Op: 30, A: 7, C: 1, Flags: 1}, {Op: 9}, {Op: 11, A: 2}, {Op: 33, A: 8}, {Op: 34, A: 9}, {Op: 30, A: 10, B: 1}, {Op: 33, A: 8}, {Op: 34, A: 11}, {Op: 30, A: 10, B: 1}, {Op: 33, A: 8}, {Op: 34, A: 12}, {Op: 30, A: 10, B: 1}, {Op: 32, A: 13}, {Op: 9}, {Op: 7}, {Op: 12, A: 7}, {Op: 9}, {Op: 11, A: 3}, {Op: 30, A: 14, C: 2, Flags: 1}, {Op: 9}, {Op: 11, A: 7}, {Op: 1, A: 5}, {Op: 1, A: 6}, {Op: 12, A: 8}, {Op: 30, A: 15, B: 2, Flags: 3}, {Op: 9}, {Op: 11, A: 8}, {Op: 9}, {Op: 33, A: 8}, {Op: 6}, {Op: 31, A: 6}, {Op: 6, A: 1}, {Op: 61}, {Op: 31, A: 13}, {Op: 6, A: 1}, {Op: 61}, {Op: 7}, {Op: 11, A: 7}, {Op: 65}, {Op: 6, A: 1}, {Op: 61}, {Op: 62, A: 16, Flags: 5}, {Op: 32, A: 17}, {Op: 9}, {Op: 52}, {Op: 28, A: 113}, {Op: 56, A: 105, B: 1}, {Op: 5}, {Op: 48, A: 1, Flags: 2}, {Op: 57}, {Op: 5}, {Op: 30, A: 18, Flags: 8}, {Op: 9}, {Op: 5}, {Op: 30, A: 19, Flags: 8}, {Op: 9}, {Op: 26, A: 112}, {Op: 5}, {Op: 30, A: 18, Flags: 8}, {Op: 9}, {Op: 5}, {Op: 30, A: 19, Flags: 8}, {Op: 9}, {Op: 58}, {Op: 26, A: 114}, {Op: 2}, {Op: 53}},
 						Consts: []object.Value{
 							object.NewString(""),
 							object.IntValue(0),
@@ -7866,7 +7866,7 @@ func embeddedPrelude() *bytecode.ISeq {
 					},
 					&bytecode.ISeq{
 						Name:        "close",
-						Insns:       []bytecode.Instr{{Op: 54}, {Op: 27, A: 5}, {Op: 4}, {Op: 12}, {Op: 9}, {Op: 31}, {Op: 10}, {Op: 28, A: 11}, {Op: 9}, {Op: 31, A: 1}, {Op: 25}, {Op: 28, A: 15}, {Op: 31}, {Op: 30, A: 2, Flags: 1}, {Op: 26, A: 16}, {Op: 2}, {Op: 9}, {Op: 3}, {Op: 32, A: 1}, {Op: 9}, {Op: 11}, {Op: 28, A: 25}, {Op: 5}, {Op: 30, A: 3}, {Op: 26, A: 26}, {Op: 2}, {Op: 9}, {Op: 2}, {Op: 53}},
+						Insns:       []bytecode.Instr{{Op: 54}, {Op: 27, A: 5}, {Op: 4}, {Op: 12}, {Op: 9}, {Op: 31}, {Op: 10}, {Op: 28, A: 11}, {Op: 9}, {Op: 31, A: 1}, {Op: 25}, {Op: 28, A: 15}, {Op: 31}, {Op: 30, A: 2, Flags: 1}, {Op: 26, A: 16}, {Op: 2}, {Op: 9}, {Op: 3}, {Op: 32, A: 1}, {Op: 9}, {Op: 11}, {Op: 28, A: 25}, {Op: 5}, {Op: 30, A: 3, Flags: 8}, {Op: 26, A: 26}, {Op: 2}, {Op: 9}, {Op: 2}, {Op: 53}},
 						Names:       []string{"@file", "@closed", "close", "unlink"},
 						Params:      []string{"unlink_now"},
 						NumRequired: 0,

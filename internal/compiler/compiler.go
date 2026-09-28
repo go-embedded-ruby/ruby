@@ -1369,12 +1369,22 @@ func (c *Compiler) compileCall(v *ast.Call) {
 	// block-pass is pulled out below, because the pull-out is an implementation
 	// detail of how the value is stacked, not a change to what was written.
 	noKW := lastArgIsPositional(callArgs)
+	// vcall marks MRI's NODE_VCALL shape: a receiver-less, argument-less,
+	// block-less name that the local-variable check above did NOT resolve
+	// (gettable's "method call without arguments", parse.y-ruby_4_0:13086). It
+	// travels on the send so a miss can raise NameError rather than NoMethodError
+	// — see bytecode.FlagSendVCall, which also records what this test cannot yet
+	// see (`foo` vs `foo()`).
+	vcall := v.Recv == nil && v.Block == nil && !v.Safe && len(v.Args) == 0
 	sendFlags := func(at int) int {
 		if explicit {
 			b.insns[at].Flags |= bytecode.FlagSendExplicit
 		}
 		if noKW {
 			b.insns[at].Flags |= bytecode.FlagSendNoKW
+		}
+		if vcall {
+			b.insns[at].Flags |= bytecode.FlagSendVCall
 		}
 		return at
 	}
@@ -2048,20 +2058,50 @@ func hideImplicitBlockParams(b *builder, blk *ast.Block, positionals []string) {
 }
 
 // scopeParent inspects a ClassDef/ModuleDef NamePath. It returns the parent
-// expression to evaluate (nil when none — a bare name or a leading-`::`
-// top-level name, both of which define into the global constant table) and the
-// trailing constant name. A nil namePath is the bare case (name unchanged).
-func scopeParent(namePath ast.Node, name string) (parent ast.Node, trailing string) {
+// expression to evaluate (nil when there is none), whether the path was written
+// with a LEADING `::` (rooted at Object), and the trailing constant name. A nil
+// namePath is the bare case (name unchanged).
+//
+// The three results are MRI's three `cpath` productions, which are three
+// DIFFERENT nodes (parse.y-ruby_4_0:3831-3845):
+//
+//	cpath : tCOLON3 cname            { NEW_COLON3($2, …) }        // ::Bar
+//	      | cname                    { NEW_COLON2(0, $1, …) }     // Bar
+//	      | primary_value tCOLON2 cname { NEW_COLON2($1, $3, …) } // Foo::Bar
+//
+// and compile_cpath (compile.c) lowers them to three different operand pushes:
+// the parent expression for Foo::Bar, `putobject rb_cObject` for ::Bar (both
+// with VM_DEFINECLASS_FLAG_SCOPED, vm_core.h-ruby_4_0:1237), and
+// `putspecialobject VM_SPECIAL_OBJECT_CONST_BASE` — the cref base — with no
+// flag for a bare Bar.
+//
+// rbgo used to fold ::Bar into the bare case, on the theory that both "define
+// into the global constant table". That is only true at the top level: inside
+// `module M`, a bare `Bar` is M::Bar while `::Bar` is the top-level one. So
+// `module M; class ::C; end; end` reopened nothing and created M::C.
+func scopeParent(namePath ast.Node, name string) (parent ast.Node, global bool, trailing string) {
 	sc, ok := namePath.(*ast.ScopedConst)
 	if !ok {
-		return nil, name
+		return nil, false, name
 	}
-	// `class ::Bar` (Global, no Recv) targets the top level, same as bare `Bar`.
-	return sc.Recv, sc.Name
+	if sc.Recv == nil { // leading `::Bar`: rooted at Object, whatever the nesting
+		return nil, true, sc.Name
+	}
+	return sc.Recv, false, sc.Name
+}
+
+// pushTopLevelScope emits the operand that MRI's compile_cpath emits for a
+// leading-`::` cpath: the Object class, under VM_DEFINECLASS_FLAG_SCOPED. MRI
+// pushes rb_cObject as a literal; rbgo has no literal-class operand, so it uses
+// the top-level constant lookup (OpGetConstTop, i.e. `::Object`), which reaches
+// the same class and — unlike a bare OpGetConst — cannot be shadowed by an
+// `Object` constant nested in the enclosing lexical scope.
+func (c *Compiler) pushTopLevelScope(b *builder) {
+	b.emit(bytecode.OpGetConstTop, b.addName("Object"), 0)
 }
 
 func (c *Compiler) compileClass(v *ast.ClassDef) {
-	parentExpr, name := scopeParent(v.NamePath, v.Name)
+	parentExpr, global, name := scopeParent(v.NamePath, v.Name)
 	c.push(newBuilder("<class:"+name+">", nil))
 	savedCtxs := c.ctxs
 	c.ctxs = nil
@@ -2074,15 +2114,19 @@ func (c *Compiler) compileClass(v *ast.ClassDef) {
 	parent := c.cur()
 	childIdx := len(parent.children)
 	parent.children = append(parent.children, child)
-	if parentExpr == nil && v.SuperExpr == nil {
+	if parentExpr == nil && !global && v.SuperExpr == nil {
 		parent.emit(bytecode.OpDefineClass, parent.addName(name), childIdx)
 		return
 	}
 	// Scoped path and/or an expression superclass: push the parent module then
 	// the superclass value (in that order), and record which are present in C.
 	flags := 0
-	if parentExpr != nil {
+	switch {
+	case parentExpr != nil:
 		c.compileNode(parentExpr)
+		flags |= 1
+	case global: // `class ::C`: the parent is Object, not the current cref
+		c.pushTopLevelScope(parent)
 		flags |= 1
 	}
 	if v.SuperExpr != nil {
@@ -2094,7 +2138,7 @@ func (c *Compiler) compileClass(v *ast.ClassDef) {
 }
 
 func (c *Compiler) compileModule(v *ast.ModuleDef) {
-	parentExpr, name := scopeParent(v.NamePath, v.Name)
+	parentExpr, global, name := scopeParent(v.NamePath, v.Name)
 	c.push(newBuilder("<module:"+name+">", nil))
 	savedCtxs := c.ctxs
 	c.ctxs = nil
@@ -2106,11 +2150,15 @@ func (c *Compiler) compileModule(v *ast.ModuleDef) {
 	parent := c.cur()
 	childIdx := len(parent.children)
 	parent.children = append(parent.children, child)
-	if parentExpr == nil {
+	if parentExpr == nil && !global {
 		parent.emit(bytecode.OpDefineModule, parent.addName(name), childIdx)
 		return
 	}
-	c.compileNode(parentExpr)
+	if parentExpr != nil {
+		c.compileNode(parentExpr)
+	} else { // `module ::M`: the parent is Object, not the current cref
+		c.pushTopLevelScope(parent)
+	}
 	parent.emit(bytecode.OpDefineModuleScoped, parent.addName(name), childIdx)
 }
 
