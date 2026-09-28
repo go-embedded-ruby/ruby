@@ -6562,11 +6562,23 @@ func (vm *VM) registerKernelPublicMethods() {
 // Kernel.private_instance_methods(false) from ruby 4.0.6 intersected with what
 // rbgo defines; a name absent on this build (e.g. fork/exec/system under wasm) is
 // simply skipped. Runs after every listed method is registered.
+//
+// "binding" is on the list for the same reason every other name is, and it was
+// MISSING: rb_define_global_function("binding", rb_f_binding, 0) (proc.c
+// ruby_4_0:4726) is the module-function form, registerBinding already marks the
+// Object-side record private, but nothing mirrored it onto Kernel — so
+// Kernel.private_instance_methods(false).include?(:binding) answered false while
+// self.send(:binding) worked. A hand-kept list drifts one name at a time; the
+// symmetric difference against ruby 4.0.5 is now four genuinely-undefined names
+// (iterator?, local_variables, set_trace_func, instance_variables_to_inspect),
+// one that is an intrinsic and not yet a method (block_given?), and the rubygems
+// /pp additions MRI preloads (gem, gem_original_require, pp, Pathname) — none of
+// which this mirror can reach, since it only reflects records that exist.
 func (vm *VM) registerKernelModuleFunctions() {
 	names := []string{
 		"Array", "Complex", "Float", "Hash", "Integer", "Rational", "String",
-		"__dir__", "`", "abort", "at_exit", "autoload", "autoload?", "caller",
-		"caller_locations",
+		"__dir__", "`", "abort", "at_exit", "autoload", "autoload?", "binding",
+		"caller", "caller_locations",
 		"catch", "eval", "exec", "exit", "exit!", "fail", "fork", "format", "gets",
 		"global_variables", "lambda",
 		"load", "loop", "open", "p", "print", "printf", "proc", "putc", "puts",
