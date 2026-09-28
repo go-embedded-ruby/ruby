@@ -119,6 +119,19 @@ func (vm *VM) registerModuleExtras() {
 			native: func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
 				return vm.send(vm.cObject, "define_method", args, blk)
 			}}
+		// Top-level `ruby2_keywords :foo` marks a method on Object, main's default
+		// definee. MRI registers it exactly like top_public/top_private — as a
+		// PRIVATE singleton method of main (vm_method.c:3560 at tag ruby_4_0),
+		// whose body is rb_mod_ruby2_keywords applied to rb_top_main_class, i.e.
+		// Object. It has to be a singleton method and not merely Module's private
+		// instance method, because main is not a Module: without this entry
+		// `main.private_methods(false)` does not list it and a top-level
+		// `ruby2_keywords :foo` finds no receiver that answers.
+		sc.methods["ruby2_keywords"] = &Method{name: "ruby2_keywords", owner: sc, vis: visPrivate,
+			native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+				return vm.send(vm.cObject, "ruby2_keywords", args, nil)
+			}}
+
 		// Bare `include M` at the top level mixes M into Object, so its constants
 		// and methods become globally visible. MRI defines this as a PRIVATE
 		// singleton method on main that forwards to Module#include on Object —
