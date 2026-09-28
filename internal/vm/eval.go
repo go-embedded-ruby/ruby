@@ -108,6 +108,13 @@ func (vm *VM) evalLineno(v object.Value) int {
 // would be a path no MRI behaviour asks for. Deleting it rather than leaving it
 // uncalled is the point, exactly as for evalDefinee below: an unreachable
 // compile path is the shape a later wave would trust.
+//
+// Its front-end seam parseCompileEvalFn (frontend_open.go / frontend_closed.go)
+// goes with it, which #727 deliberately left in place as out of its scope: with
+// compileEval gone it has no caller at all. A package-level var needs none to
+// compile, which is exactly why it would have sat there unnoticed.
+// openParseCompileEval stays, reached through openParseCompile by require and
+// the prelude.
 
 // raiseEvalSyntaxError raises the SyntaxError for a string that would not parse,
 // with the LOCATION in front of the message as MRI reports it: MRI's parser

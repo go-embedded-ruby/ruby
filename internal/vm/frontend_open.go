@@ -20,13 +20,6 @@ func openParseCompile(src string) (*bytecode.ISeq, error) {
 	return openParseCompileEval(src, 1)
 }
 
-// parseCompileEvalFn is parseCompileFn for a string-eval given an explicit first
-// line: the offset must reach the COMPILER (see compiler.CompileEval), because
-// `__LINE__` becomes an Integer in the constant pool that no later pass can
-// distinguish from any other. It is a second seam rather than an argument to the
-// first so the many require/prelude callers keep the shape they have.
-var parseCompileEvalFn = openParseCompileEval
-
 func openParseCompileEval(src string, firstLine int) (*bytecode.ISeq, error) {
 	prog, err := parser.Parse(src)
 	if err != nil {
