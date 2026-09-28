@@ -1129,7 +1129,7 @@ func (vm *VM) bootstrap() {
 	// Kernel#fail is a genuine alias of Kernel#raise in MRI: the two names share one
 	// method record, so Kernel.instance_method(:fail) == …(:raise) and
 	// Kernel.method(:fail) == …(:raise). The shared record is mirrored onto the
-	// Kernel module by registerKernelModuleFunctions ("fail" listed beside "raise").
+	// Kernel module by rehomeKernelMethods ("fail" listed beside "raise").
 	// Reference: ruby/ruby v3_4_0 eval.c (rb_f_raise registered under both names).
 	aliasBuiltin(vm.cObject, "fail", "raise")
 	vm.cObject.define("Integer", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
