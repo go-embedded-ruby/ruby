@@ -290,124 +290,124 @@ func (vm *VM) registerActiveSupportCoreExt() {
 }
 
 func (vm *VM) registerASString() {
-	d := func(name string, fn NativeFn) { vm.cString.define(name, fn) }
+	d := func(name string, argc int, fn NativeFn) { vm.cString.defineArgc(name, argc, fn) }
 	str := func(self object.Value) string { return self.(*object.String).Str() }
 
-	d("blank?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	d("blank?", 0, func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(coreext.StringBlank(str(self)))
 	})
-	d("present?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	d("present?", 0, func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(coreext.StringPresent(str(self)))
 	})
-	d("presence", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	d("presence", 0, func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		if s, ok := coreext.StringPresence(str(self)); ok {
 			return object.NewString(s)
 		}
 		return object.NilV
 	})
-	d("squish", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	d("squish", 0, func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(coreext.Squish(str(self)))
 	})
-	d("truncate", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cString.define("truncate", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return object.NewString(coreext.Truncate(str(self), int(intArg(args[0])), "", ""))
 	})
-	d("camelize", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	d("camelize", -1, func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		upper := true
 		if len(args) > 0 {
 			upper = camelUpper(args[0])
 		}
 		return object.NewString(vm.asInflections.Camelize(str(self), upper))
 	})
-	d("underscore", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	d("underscore", 0, func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(vm.asInflections.Underscore(str(self)))
 	})
-	d("pluralize", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	d("pluralize", -1, func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(vm.asInflections.Pluralize(str(self)))
 	})
-	d("titleize", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	d("titleize", -1, func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(vm.asInflections.Titleize(str(self), false))
 	})
-	d("parameterize", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	d("parameterize", -1, func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(inflector.Parameterize(str(self), "-", false))
 	})
-	d("classify", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	d("classify", 0, func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(vm.asInflections.Classify(str(self)))
 	})
-	d("humanize", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	d("humanize", -1, func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(vm.asInflections.Humanize(str(self), true, false))
 	})
-	d("starts_with?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	d("starts_with?", -1, func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return object.Bool(coreext.StartsWith(str(self), strArg(args[0])))
 	})
-	d("ends_with?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	d("ends_with?", -1, func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return object.Bool(coreext.EndsWith(str(self), strArg(args[0])))
 	})
 }
 
 func (vm *VM) registerASArray() {
-	d := func(name string, fn NativeFn) { vm.cArray.define(name, fn) }
+	d := func(name string, argc int, fn NativeFn) { vm.cArray.defineArgc(name, argc, fn) }
 	elems := func(self object.Value) []object.Value { return self.(*object.Array).Elems }
 
-	d("blank?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	d("blank?", 0, func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(coreext.ArrayBlank(boxSlice(elems(self))))
 	})
-	d("in_groups", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cArray.define("in_groups", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		n := int(intArg(args[0]))
 		if len(args) > 1 && isFalse(args[1]) {
 			return rubyFromGroups(coreext.InGroupsNoFill(boxSlice(elems(self)), n))
 		}
 		return rubyFromGroups(coreext.InGroups(boxSlice(elems(self)), n, fillArg(args)))
 	})
-	d("in_groups_of", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cArray.define("in_groups_of", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		n := int(intArg(args[0]))
 		if len(args) > 1 && isFalse(args[1]) {
 			return rubyFromGroups(coreext.InGroupsOfNoFill(boxSlice(elems(self)), n))
 		}
 		return rubyFromGroups(coreext.InGroupsOf(boxSlice(elems(self)), n, fillArg(args)))
 	})
-	d("to_sentence", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	d("to_sentence", -1, func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		strs := make([]any, len(elems(self)))
 		for i, e := range elems(self) {
 			strs[i] = vm.send(e, "to_s", nil, nil).(*object.String).Str()
 		}
 		return object.NewString(coreext.ToSentence(strs))
 	})
-	d("second", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	d("second", 0, func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return rubyFrom(coreext.Second(boxSlice(elems(self))))
 	})
-	d("third", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	d("third", 0, func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return rubyFrom(coreext.Third(boxSlice(elems(self))))
 	})
-	d("fourth", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	d("fourth", 0, func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return rubyFrom(coreext.Fourth(boxSlice(elems(self))))
 	})
-	d("fifth", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	d("fifth", 0, func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return rubyFrom(coreext.Fifth(boxSlice(elems(self))))
 	})
 }
 
 func (vm *VM) registerASHash() {
-	d := func(name string, fn NativeFn) { vm.cHash.define(name, fn) }
+	d := func(name string, argc int, fn NativeFn) { vm.cHash.defineArgc(name, argc, fn) }
 	h := func(self object.Value) *object.Hash { return self.(*object.Hash) }
 
-	d("blank?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	d("blank?", 0, func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(coreext.HashBlank(hashToGo(h(self))))
 	})
-	d("deep_merge", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	d("deep_merge", 1, func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		other := hashArg(args[0])
 		gh, gother := hashToGo(h(self)), hashToGo(other)
 		return rubyHashOrdered(coreext.DeepMerge(gh, gother), mergeOrder(h(self), other))
 	})
-	d("deep_dup", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	d("deep_dup", 0, func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return rubyHashOrdered(coreext.DeepDup(hashToGo(h(self))), hashGoKeys(h(self)))
 	})
-	d("symbolize_keys", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	d("symbolize_keys", 0, func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return rubyHashOrdered(coreext.SymbolizeKeys(hashToGo(h(self))), mapKeys(hashGoKeys(h(self)), asSymKey))
 	})
-	d("stringify_keys", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	d("stringify_keys", 0, func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return rubyHashOrdered(coreext.StringifyKeys(hashToGo(h(self))), mapKeys(hashGoKeys(h(self)), asStrKey))
 	})
-	d("reverse_merge", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	d("reverse_merge", 1, func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		other := hashArg(args[0])
 		gh, gother := hashToGo(h(self)), hashToGo(other)
 		return rubyHashOrdered(coreext.ReverseMerge(gh, gother), reverseMergeOrder(h(self), other))
@@ -415,12 +415,12 @@ func (vm *VM) registerASHash() {
 }
 
 func (vm *VM) registerASInteger() {
-	d := func(name string, fn NativeFn) { vm.cInteger.define(name, fn) }
+	d := func(name string, argc int, fn NativeFn) { vm.cInteger.defineArgc(name, argc, fn) }
 
-	d("ordinalize", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	d("ordinalize", 0, func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(coreext.Ordinalize(int(self.(object.Integer))))
 	})
-	d("multiple_of?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	d("multiple_of?", 1, func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return object.Bool(coreext.MultipleOf(int(self.(object.Integer)), int(intArg(args[0]))))
 	})
 }

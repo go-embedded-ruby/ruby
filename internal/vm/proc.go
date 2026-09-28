@@ -29,6 +29,15 @@ func (vm *VM) registerProcMethods() {
 				asLambda = v.Truthy()
 			}
 		}
+		if p.iseq == nil {
+			// A Go-backed Proc — notably Method#to_proc, whose nativeArity is the
+			// method's arity. MRI answers rb_unnamed_parameters(rb_proc_arity(self))
+			// here (rb_proc_parameters, proc.c r4:1617), so `method(:length).to_proc`
+			// reports arity 0 AND parameters []. Reading the arity keeps the two
+			// sides of one Proc agreeing once a native method can declare a count; a
+			// flat [[:rest]] would have contradicted the arity for every one of them.
+			return unnamedParameters(p.arityVal())
+		}
 		return procParameters(p.iseq, asLambda)
 	})
 
@@ -86,7 +95,10 @@ func (vm *VM) registerProcMethods() {
 
 // procParameters builds a Proc's MRI #parameters array by way of the shared
 // buildParamsList: a non-lambda proc reports every required positional as :opt
-// (it never enforces them), while a lambda reports them as :req.
+// (it never enforces them), while a lambda reports them as :req. is must be
+// non-nil — a Go-backed Proc has no ISeq to read and takes the
+// unnamedParameters(arity) route MRI's rb_proc_parameters takes, at the call
+// site.
 func procParameters(is *bytecode.ISeq, isLambda bool) object.Value {
 	reqKind := "opt"
 	if isLambda {

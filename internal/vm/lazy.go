@@ -133,9 +133,9 @@ func (vm *VM) registerLazy() {
 	}
 	// Sources that lazy iteration can drive directly. (#lazy on a Lazy is itself,
 	// defined separately below.)
-	vm.cArray.define("lazy", makeLazy)
-	vm.cRange.define("lazy", makeLazy)
-	vm.cHash.define("lazy", makeLazy)
+	vm.cArray.defineArgc("lazy", 0, makeLazy)
+	vm.cRange.defineArgc("lazy", 0, makeLazy)
+	vm.cHash.defineArgc("lazy", 0, makeLazy)
 	vm.cEnumerator.define("lazy", makeLazy)
 	// Every Enumerable (a class that mixes in Enumerable and defines #each) gets
 	// #lazy too; the source is driven through #each (see lazySource's default).

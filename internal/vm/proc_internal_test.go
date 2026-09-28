@@ -33,8 +33,17 @@ func TestProcParameters(t *testing.T) {
 		{"kw_truthy_int", `p proc{|x| }.parameters(lambda: 123)`, "[[:req, :x]]\n"},
 		{"kw_nil_ignored_proc", `p proc{|x| }.parameters(lambda: nil)`, "[[:opt, :x]]\n"},
 		{"kw_nil_ignored_lambda", `p(->x{}.parameters(lambda: nil))`, "[[:req, :x]]\n"},
-		// A native proc (Symbol#to_proc has no iseq): MRI reports a catch-all rest.
-		{"native_proc", `p :foo.to_proc.parameters`, "[[:rest]]\n"},
+		// A native proc (Symbol#to_proc has no iseq). The expectation here used to be
+		// a flat [[:rest]], and it was WRONG: MRI answers
+		// rb_unnamed_parameters(rb_proc_arity(self)) for an ISeq-less Proc
+		// (rb_proc_parameters, proc.c r4:1617), and Symbol#to_proc's arity is -2, so
+		// the answer is [[:req], [:rest]]. ruby 4.0.5 gives that, and so does
+		// ruby/spec's own core/symbol/to_proc_spec.rb ("produces a Proc that always
+		// returns [[:req], [:rest]] for #parameters"). The old value agreed with rbgo
+		// and disagreed with the oracle -- see #714.
+		{"native_proc", `p :foo.to_proc.parameters`, "[[:req], [:rest]]\n"},
+		// The same Proc's arity, so the two cannot be corrected apart.
+		{"native_proc_arity", `p :foo.to_proc.arity`, "-2\n"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

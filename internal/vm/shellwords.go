@@ -80,13 +80,13 @@ func (vm *VM) installShellwords() {
 
 	// Core extensions added on require, MRI-style: String#shellsplit /
 	// #shellescape and Array#shelljoin operate on the receiver.
-	vm.cString.define("shellsplit", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	vm.cString.defineArgc("shellsplit", 0, func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return shellSplit(strArg(self))
 	})
-	vm.cString.define("shellescape", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	vm.cString.defineArgc("shellescape", 0, func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(libsw.Escape(strArg(self)))
 	})
-	vm.cArray.define("shelljoin", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	vm.cArray.defineArgc("shelljoin", 0, func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(libsw.Join(vm.shellWords(self)))
 	})
 }

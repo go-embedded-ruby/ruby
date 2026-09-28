@@ -1,0 +1,501 @@
+# Measured arity / parameters oracle for the core-class instance methods rbgo
+# registers natively. Every row was READ FROM AN ORACLE, never from rbgo:
+#
+#   ruby-4.0.5           ruby 4.0.5 (2026-05-20 revision 64336ffd0e) +PRISM
+#                        [arm64-darwin25], Klass.instance_method(m)
+#   ruby-4.0.5-stdlib    the same, after require "abbrev" / "shellwords" /
+#                        "prime" / "scanf" (and for the private #initialize,
+#                        which instance_method reaches but instance_methods
+#                        does not list)
+#   activesupport-8.1.3  the same, after require "active_support/all", for
+#                        the shims rbgo registers on the core classes at boot
+#
+# The arity column is the ORACLE, so a row where rbgo cannot match it is a
+# divergence to report, not a number to soften: see
+# arityInexpressibleAsArgc in method_arity_native_test.go, which names the
+# only three and why.
+#
+# class	method	arity	parameters	oracle
+Array	&	1	[[:req]]	ruby-4.0.5
+Array	<<	1	[[:req]]	ruby-4.0.5
+Array	<=>	1	[[:req]]	ruby-4.0.5
+Array	[]	-1	[[:rest]]	ruby-4.0.5
+Array	[]=	-1	[[:rest]]	ruby-4.0.5
+Array	abbrev	-1	[[:opt, :pattern]]	ruby-4.0.5-stdlib
+Array	append	-1	[[:rest]]	ruby-4.0.5
+Array	assoc	1	[[:req]]	ruby-4.0.5
+Array	at	1	[[:req]]	ruby-4.0.5
+Array	blank?	0	[]	activesupport-8.1.3
+Array	bsearch	0	[]	ruby-4.0.5
+Array	bsearch_index	0	[]	ruby-4.0.5
+Array	clear	0	[]	ruby-4.0.5
+Array	collect	0	[]	ruby-4.0.5
+Array	collect!	0	[]	ruby-4.0.5
+Array	combination	1	[[:req]]	ruby-4.0.5
+Array	compact	0	[]	ruby-4.0.5
+Array	compact!	0	[]	ruby-4.0.5
+Array	concat	-1	[[:rest]]	ruby-4.0.5
+Array	cycle	-1	[[:rest]]	ruby-4.0.5
+Array	deconstruct	0	[]	ruby-4.0.5
+Array	delete	1	[[:req]]	ruby-4.0.5
+Array	delete_at	1	[[:req]]	ruby-4.0.5
+Array	delete_if	0	[]	ruby-4.0.5
+Array	difference	-1	[[:rest]]	ruby-4.0.5
+Array	dig	-1	[[:rest]]	ruby-4.0.5
+Array	drop	1	[[:req]]	ruby-4.0.5
+Array	drop_while	0	[]	ruby-4.0.5
+Array	each	0	[]	ruby-4.0.5
+Array	each_cons	1	[[:req]]	ruby-4.0.5
+Array	each_index	0	[]	ruby-4.0.5
+Array	each_slice	1	[[:req]]	ruby-4.0.5
+Array	each_with_object	1	[[:req]]	ruby-4.0.5
+Array	empty?	0	[]	ruby-4.0.5
+Array	fetch	-1	[[:rest]]	ruby-4.0.5
+Array	fetch_values	-1	[[:rest, :indexes], [:block, :block]]	ruby-4.0.5
+Array	fifth	0	[]	activesupport-8.1.3
+Array	fill	-1	[[:rest]]	ruby-4.0.5
+Array	filter	0	[]	ruby-4.0.5
+Array	filter!	0	[]	ruby-4.0.5
+Array	find_index	-1	[[:rest]]	ruby-4.0.5
+Array	first	-1	[[:opt, :n]]	ruby-4.0.5
+Array	flatten	-1	[[:rest]]	ruby-4.0.5
+Array	flatten!	-1	[[:rest]]	ruby-4.0.5
+Array	fourth	0	[]	activesupport-8.1.3
+Array	in_groups	-2	[[:req, :number], [:opt, :fill_with], [:block, :block]]	activesupport-8.1.3
+Array	in_groups_of	-2	[[:req, :number], [:opt, :fill_with], [:block, :block]]	activesupport-8.1.3
+Array	include?	1	[[:req]]	ruby-4.0.5
+Array	index	-1	[[:rest]]	ruby-4.0.5
+Array	initialize	-1	[[:rest]]	ruby-4.0.5-stdlib
+Array	insert	-1	[[:rest]]	ruby-4.0.5
+Array	inspect	0	[]	ruby-4.0.5
+Array	intersect?	1	[[:req]]	ruby-4.0.5
+Array	intersection	-1	[[:rest]]	ruby-4.0.5
+Array	join	-1	[[:rest]]	ruby-4.0.5
+Array	keep_if	0	[]	ruby-4.0.5
+Array	last	-1	[[:opt, :n]]	ruby-4.0.5
+Array	lazy	0	[]	ruby-4.0.5
+Array	length	0	[]	ruby-4.0.5
+Array	map	0	[]	ruby-4.0.5
+Array	map!	0	[]	ruby-4.0.5
+Array	max_by	-1	[[:rest]]	ruby-4.0.5
+Array	member?	1	[[:req]]	ruby-4.0.5
+Array	min_by	-1	[[:rest]]	ruby-4.0.5
+Array	pack	-2	[[:req, :fmt], [:key, :buffer]]	ruby-4.0.5
+Array	permutation	-1	[[:rest]]	ruby-4.0.5
+Array	pop	-1	[[:rest]]	ruby-4.0.5
+Array	prepend	-1	[[:rest]]	ruby-4.0.5
+Array	product	-1	[[:rest]]	ruby-4.0.5
+Array	push	-1	[[:rest]]	ruby-4.0.5
+Array	rassoc	1	[[:req]]	ruby-4.0.5
+Array	reduce	-1	[[:rest]]	ruby-4.0.5
+Array	reject!	0	[]	ruby-4.0.5
+Array	repeated_combination	1	[[:req]]	ruby-4.0.5
+Array	repeated_permutation	1	[[:req]]	ruby-4.0.5
+Array	replace	1	[[:req]]	ruby-4.0.5
+Array	reverse	0	[]	ruby-4.0.5
+Array	reverse!	0	[]	ruby-4.0.5
+Array	reverse_each	0	[]	ruby-4.0.5
+Array	rindex	-1	[[:rest]]	ruby-4.0.5
+Array	rotate	-1	[[:rest]]	ruby-4.0.5
+Array	rotate!	-1	[[:rest]]	ruby-4.0.5
+Array	sample	-1	[[:opt, :n], [:key, :random]]	ruby-4.0.5
+Array	second	0	[]	activesupport-8.1.3
+Array	select	0	[]	ruby-4.0.5
+Array	select!	0	[]	ruby-4.0.5
+Array	shelljoin	0	[]	ruby-4.0.5-stdlib
+Array	shift	-1	[[:rest]]	ruby-4.0.5
+Array	shuffle	-1	[[:key, :random]]	ruby-4.0.5
+Array	shuffle!	-1	[[:key, :random]]	ruby-4.0.5
+Array	size	0	[]	ruby-4.0.5
+Array	slice	-1	[[:rest]]	ruby-4.0.5
+Array	slice!	-1	[[:rest]]	ruby-4.0.5
+Array	sort	0	[]	ruby-4.0.5
+Array	sort!	0	[]	ruby-4.0.5
+Array	sort_by	0	[]	ruby-4.0.5
+Array	sort_by!	0	[]	ruby-4.0.5
+Array	sum	-1	[[:rest]]	ruby-4.0.5
+Array	take	1	[[:req]]	ruby-4.0.5
+Array	take_while	0	[]	ruby-4.0.5
+Array	third	0	[]	activesupport-8.1.3
+Array	to_ary	0	[]	ruby-4.0.5
+Array	to_h	0	[]	ruby-4.0.5
+Array	to_s	0	[]	ruby-4.0.5
+Array	to_sentence	-1	[[:opt, :options]]	activesupport-8.1.3
+Array	transpose	0	[]	ruby-4.0.5
+Array	union	-1	[[:rest]]	ruby-4.0.5
+Array	uniq	0	[]	ruby-4.0.5
+Array	uniq!	0	[]	ruby-4.0.5
+Array	unshift	-1	[[:rest]]	ruby-4.0.5
+Array	values_at	-1	[[:rest]]	ruby-4.0.5
+Array	|	1	[[:req]]	ruby-4.0.5
+Float	%	1	[[:req]]	ruby-4.0.5
+Float	**	1	[[:req]]	ruby-4.0.5
+Float	<=>	1	[[:req]]	ruby-4.0.5
+Float	abs	0	[]	ruby-4.0.5
+Float	ceil	-1	[[:rest]]	ruby-4.0.5
+Float	coerce	1	[[:req]]	ruby-4.0.5
+Float	denominator	0	[]	ruby-4.0.5
+Float	divmod	1	[[:req]]	ruby-4.0.5
+Float	fdiv	1	[[:req]]	ruby-4.0.5
+Float	finite?	0	[]	ruby-4.0.5
+Float	floor	-1	[[:rest]]	ruby-4.0.5
+Float	infinite?	0	[]	ruby-4.0.5
+Float	magnitude	0	[]	ruby-4.0.5
+Float	modulo	1	[[:req]]	ruby-4.0.5
+Float	nan?	0	[]	ruby-4.0.5
+Float	negative?	0	[]	ruby-4.0.5
+Float	next_float	0	[]	ruby-4.0.5
+Float	numerator	0	[]	ruby-4.0.5
+Float	positive?	0	[]	ruby-4.0.5
+Float	prev_float	0	[]	ruby-4.0.5
+Float	quo	1	[[:req]]	ruby-4.0.5
+Float	rationalize	-1	[[:rest]]	ruby-4.0.5
+Float	remainder	1	[[:req]]	ruby-4.0.5
+Float	round	-1	[[:rest]]	ruby-4.0.5
+Float	step	-1	[[:rest]]	ruby-4.0.5
+Float	to_c	0	[]	ruby-4.0.5
+Float	to_f	0	[]	ruby-4.0.5
+Float	to_i	0	[]	ruby-4.0.5
+Float	to_int	0	[]	ruby-4.0.5
+Float	to_r	0	[]	ruby-4.0.5
+Float	truncate	-1	[[:rest]]	ruby-4.0.5
+Float	zero?	0	[]	ruby-4.0.5
+Hash	<	1	[[:req]]	ruby-4.0.5
+Hash	<=	1	[[:req]]	ruby-4.0.5
+Hash	>	1	[[:req]]	ruby-4.0.5
+Hash	>=	1	[[:req]]	ruby-4.0.5
+Hash	[]	1	[[:req]]	ruby-4.0.5
+Hash	[]=	2	[[:req], [:req]]	ruby-4.0.5
+Hash	assoc	1	[[:req]]	ruby-4.0.5
+Hash	blank?	0	[]	activesupport-8.1.3
+Hash	clear	0	[]	ruby-4.0.5
+Hash	compact	0	[]	ruby-4.0.5
+Hash	compact!	0	[]	ruby-4.0.5
+Hash	compare_by_identity	0	[]	ruby-4.0.5
+Hash	compare_by_identity?	0	[]	ruby-4.0.5
+Hash	deconstruct_keys	1	[[:req]]	ruby-4.0.5
+Hash	deep_dup	0	[]	activesupport-8.1.3
+Hash	deep_merge	1	[[:req, :other], [:block, :block]]	activesupport-8.1.3
+Hash	deep_merge!	1	[[:req, :other], [:block, :block]]	activesupport-8.1.3
+Hash	default	-1	[[:rest]]	ruby-4.0.5
+Hash	default=	1	[[:req]]	ruby-4.0.5
+Hash	default_proc	0	[]	ruby-4.0.5
+Hash	default_proc=	1	[[:req]]	ruby-4.0.5
+Hash	delete	1	[[:req]]	ruby-4.0.5
+Hash	delete_if	0	[]	ruby-4.0.5
+Hash	dig	-1	[[:rest]]	ruby-4.0.5
+Hash	each	0	[]	ruby-4.0.5
+Hash	each_key	0	[]	ruby-4.0.5
+Hash	each_pair	0	[]	ruby-4.0.5
+Hash	each_value	0	[]	ruby-4.0.5
+Hash	empty?	0	[]	ruby-4.0.5
+Hash	except	-1	[[:rest]]	ruby-4.0.5
+Hash	fetch	-1	[[:rest]]	ruby-4.0.5
+Hash	fetch_values	-1	[[:rest]]	ruby-4.0.5
+Hash	filter	0	[]	ruby-4.0.5
+Hash	filter!	0	[]	ruby-4.0.5
+Hash	flatten	-1	[[:rest]]	ruby-4.0.5
+Hash	has_key?	1	[[:req]]	ruby-4.0.5
+Hash	has_value?	1	[[:req]]	ruby-4.0.5
+Hash	include?	1	[[:req]]	ruby-4.0.5
+Hash	initialize	-1	[[:opt, :ifnone], [:key, :capacity], [:block, :block]]	ruby-4.0.5-stdlib
+Hash	inspect	0	[]	ruby-4.0.5
+Hash	invert	0	[]	ruby-4.0.5
+Hash	keep_if	0	[]	ruby-4.0.5
+Hash	key	1	[[:req]]	ruby-4.0.5
+Hash	key?	1	[[:req]]	ruby-4.0.5
+Hash	keys	0	[]	ruby-4.0.5
+Hash	lazy	0	[]	ruby-4.0.5
+Hash	length	0	[]	ruby-4.0.5
+Hash	member?	1	[[:req]]	ruby-4.0.5
+Hash	merge	-1	[[:rest]]	ruby-4.0.5
+Hash	merge!	-1	[[:rest]]	ruby-4.0.5
+Hash	rassoc	1	[[:req]]	ruby-4.0.5
+Hash	rehash	0	[]	ruby-4.0.5
+Hash	reject	0	[]	ruby-4.0.5
+Hash	reject!	0	[]	ruby-4.0.5
+Hash	replace	1	[[:req]]	ruby-4.0.5
+Hash	reverse_merge	1	[[:req, :other_hash]]	activesupport-8.1.3
+Hash	select	0	[]	ruby-4.0.5
+Hash	select!	0	[]	ruby-4.0.5
+Hash	shift	0	[]	ruby-4.0.5
+Hash	size	0	[]	ruby-4.0.5
+Hash	slice	-1	[[:rest]]	ruby-4.0.5
+Hash	store	2	[[:req], [:req]]	ruby-4.0.5
+Hash	stringify_keys	0	[]	activesupport-8.1.3
+Hash	symbolize_keys	0	[]	activesupport-8.1.3
+Hash	to_h	0	[]	ruby-4.0.5
+Hash	to_hash	0	[]	ruby-4.0.5
+Hash	to_proc	0	[]	ruby-4.0.5
+Hash	to_s	0	[]	ruby-4.0.5
+Hash	transform_keys	-1	[[:rest]]	ruby-4.0.5
+Hash	transform_keys!	-1	[[:rest]]	ruby-4.0.5
+Hash	transform_values	0	[]	ruby-4.0.5
+Hash	transform_values!	0	[]	ruby-4.0.5
+Hash	update	-1	[[:rest]]	ruby-4.0.5
+Hash	value?	1	[[:req]]	ruby-4.0.5
+Hash	values	0	[]	ruby-4.0.5
+Hash	values_at	-1	[[:rest]]	ruby-4.0.5
+Integer	&	1	[[:req]]	ruby-4.0.5
+Integer	**	1	[[:req]]	ruby-4.0.5
+Integer	<<	1	[[:req]]	ruby-4.0.5
+Integer	<=>	1	[[:req]]	ruby-4.0.5
+Integer	>>	1	[[:req]]	ruby-4.0.5
+Integer	[]	-1	[[:rest]]	ruby-4.0.5
+Integer	^	1	[[:req]]	ruby-4.0.5
+Integer	abs	0	[]	ruby-4.0.5
+Integer	allbits?	1	[[:req]]	ruby-4.0.5
+Integer	anybits?	1	[[:req]]	ruby-4.0.5
+Integer	bit_length	0	[]	ruby-4.0.5
+Integer	ceil	-1	[[:rest]]	ruby-4.0.5
+Integer	ceildiv	1	[[:req, :other]]	ruby-4.0.5
+Integer	chr	-1	[[:rest]]	ruby-4.0.5
+Integer	coerce	1	[[:req]]	ruby-4.0.5
+Integer	denominator	0	[]	ruby-4.0.5
+Integer	digits	-1	[[:rest]]	ruby-4.0.5
+Integer	div	1	[[:req]]	ruby-4.0.5
+Integer	divmod	1	[[:req]]	ruby-4.0.5
+Integer	downto	1	[[:req]]	ruby-4.0.5
+Integer	even?	0	[]	ruby-4.0.5
+Integer	fdiv	1	[[:req]]	ruby-4.0.5
+Integer	floor	-1	[[:rest]]	ruby-4.0.5
+Integer	gcd	1	[[:req]]	ruby-4.0.5
+Integer	gcdlcm	1	[[:req]]	ruby-4.0.5
+Integer	inspect	-1	[[:rest]]	ruby-4.0.5
+Integer	integer?	0	[]	ruby-4.0.5
+Integer	lcm	1	[[:req]]	ruby-4.0.5
+Integer	magnitude	0	[]	ruby-4.0.5
+Integer	multiple_of?	1	[[:req, :number]]	activesupport-8.1.3
+Integer	negative?	0	[]	ruby-4.0.5
+Integer	next	0	[]	ruby-4.0.5
+Integer	nobits?	1	[[:req]]	ruby-4.0.5
+Integer	numerator	0	[]	ruby-4.0.5
+Integer	odd?	0	[]	ruby-4.0.5
+Integer	ord	0	[]	ruby-4.0.5
+Integer	ordinalize	0	[]	activesupport-8.1.3
+Integer	positive?	0	[]	ruby-4.0.5
+Integer	pow	-1	[[:rest]]	ruby-4.0.5
+Integer	pred	0	[]	ruby-4.0.5
+Integer	prime?	0	[]	ruby-4.0.5-stdlib
+Integer	prime_division	-1	[[:opt, :generator]]	ruby-4.0.5-stdlib
+Integer	quo	1	[[:req]]	ruby-4.0.5
+Integer	rationalize	-1	[[:rest]]	ruby-4.0.5
+Integer	remainder	1	[[:req]]	ruby-4.0.5
+Integer	round	-1	[[:rest]]	ruby-4.0.5
+Integer	size	0	[]	ruby-4.0.5
+Integer	step	-1	[[:rest]]	ruby-4.0.5
+Integer	succ	0	[]	ruby-4.0.5
+Integer	times	0	[]	ruby-4.0.5
+Integer	to_c	0	[]	ruby-4.0.5
+Integer	to_f	0	[]	ruby-4.0.5
+Integer	to_i	0	[]	ruby-4.0.5
+Integer	to_int	0	[]	ruby-4.0.5
+Integer	to_r	0	[]	ruby-4.0.5
+Integer	to_s	-1	[[:rest]]	ruby-4.0.5
+Integer	truncate	-1	[[:rest]]	ruby-4.0.5
+Integer	upto	1	[[:req]]	ruby-4.0.5
+Integer	zero?	0	[]	ruby-4.0.5
+Integer	|	1	[[:req]]	ruby-4.0.5
+Integer	~	0	[]	ruby-4.0.5
+Range	%	1	[[:req]]	ruby-4.0.5
+Range	==	1	[[:req]]	ruby-4.0.5
+Range	===	1	[[:req]]	ruby-4.0.5
+Range	begin	0	[]	ruby-4.0.5
+Range	bsearch	0	[]	ruby-4.0.5
+Range	count	-1	[[:rest]]	ruby-4.0.5
+Range	cover?	1	[[:req]]	ruby-4.0.5
+Range	drop	1	[[:req]]	ruby-4.0.5
+Range	each	0	[]	ruby-4.0.5
+Range	end	0	[]	ruby-4.0.5
+Range	entries	0	[]	ruby-4.0.5
+Range	eql?	1	[[:req]]	ruby-4.0.5
+Range	exclude_end?	0	[]	ruby-4.0.5
+Range	first	-1	[[:rest]]	ruby-4.0.5
+Range	hash	0	[]	ruby-4.0.5
+Range	include?	1	[[:req]]	ruby-4.0.5
+Range	initialize	-1	[[:rest]]	ruby-4.0.5-stdlib
+Range	last	-1	[[:rest]]	ruby-4.0.5
+Range	lazy	0	[]	ruby-4.0.5
+Range	map	0	[]	ruby-4.0.5
+Range	max	-1	[[:rest]]	ruby-4.0.5
+Range	member?	1	[[:req]]	ruby-4.0.5
+Range	min	-1	[[:rest]]	ruby-4.0.5
+Range	overlap?	1	[[:req]]	ruby-4.0.5
+Range	reverse_each	0	[]	ruby-4.0.5
+Range	size	0	[]	ruby-4.0.5
+Range	step	-1	[[:rest]]	ruby-4.0.5
+Range	take	1	[[:req]]	ruby-4.0.5
+Range	to_a	0	[]	ruby-4.0.5
+String	+@	0	[]	ruby-4.0.5
+String	-@	0	[]	ruby-4.0.5
+String	<<	1	[[:req]]	ruby-4.0.5
+String	<=>	1	[[:req]]	ruby-4.0.5
+String	==	1	[[:req]]	ruby-4.0.5
+String	=~	1	[[:req]]	ruby-4.0.5
+String	[]	-1	[[:rest]]	ruby-4.0.5
+String	[]=	-1	[[:rest]]	ruby-4.0.5
+String	append_as_bytes	-1	[[:rest]]	ruby-4.0.5
+String	ascii_only?	0	[]	ruby-4.0.5
+String	b	0	[]	ruby-4.0.5
+String	blank?	0	[]	activesupport-8.1.3
+String	byteindex	-1	[[:rest]]	ruby-4.0.5
+String	byterindex	-1	[[:rest]]	ruby-4.0.5
+String	bytes	0	[]	ruby-4.0.5
+String	bytesize	0	[]	ruby-4.0.5
+String	byteslice	-1	[[:rest]]	ruby-4.0.5
+String	bytesplice	-1	[[:rest]]	ruby-4.0.5
+String	camelize	-1	[[:opt, :first_letter]]	activesupport-8.1.3
+String	capitalize	-1	[[:rest]]	ruby-4.0.5
+String	capitalize!	-1	[[:rest]]	ruby-4.0.5
+String	casecmp	1	[[:req]]	ruby-4.0.5
+String	casecmp?	1	[[:req]]	ruby-4.0.5
+String	center	-1	[[:rest]]	ruby-4.0.5
+String	chars	0	[]	ruby-4.0.5
+String	chomp	-1	[[:rest]]	ruby-4.0.5
+String	chomp!	-1	[[:rest]]	ruby-4.0.5
+String	chop	0	[]	ruby-4.0.5
+String	chop!	0	[]	ruby-4.0.5
+String	chr	0	[]	ruby-4.0.5
+String	classify	0	[]	activesupport-8.1.3
+String	clear	0	[]	ruby-4.0.5
+String	codepoints	0	[]	ruby-4.0.5
+String	concat	-1	[[:rest]]	ruby-4.0.5
+String	count	-1	[[:rest]]	ruby-4.0.5
+String	delete	-1	[[:rest]]	ruby-4.0.5
+String	delete!	-1	[[:rest]]	ruby-4.0.5
+String	delete_prefix	1	[[:req]]	ruby-4.0.5
+String	delete_prefix!	1	[[:req]]	ruby-4.0.5
+String	delete_suffix	1	[[:req]]	ruby-4.0.5
+String	delete_suffix!	1	[[:req]]	ruby-4.0.5
+String	downcase	-1	[[:rest]]	ruby-4.0.5
+String	downcase!	-1	[[:rest]]	ruby-4.0.5
+String	dump	0	[]	ruby-4.0.5
+String	each_byte	0	[]	ruby-4.0.5
+String	each_char	0	[]	ruby-4.0.5
+String	each_codepoint	0	[]	ruby-4.0.5
+String	each_grapheme_cluster	0	[]	ruby-4.0.5
+String	each_line	-1	[[:rest]]	ruby-4.0.5
+String	empty?	0	[]	ruby-4.0.5
+String	encode	-1	[[:rest]]	ruby-4.0.5
+String	encode!	-1	[[:rest]]	ruby-4.0.5
+String	encoding	0	[]	ruby-4.0.5
+String	end_with?	-1	[[:rest]]	ruby-4.0.5
+String	ends_with?	-1	[[:rest]]	activesupport-8.1.3
+String	eql?	1	[[:req]]	ruby-4.0.5
+String	force_encoding	1	[[:req]]	ruby-4.0.5
+String	getbyte	1	[[:req]]	ruby-4.0.5
+String	grapheme_clusters	0	[]	ruby-4.0.5
+String	gsub	-1	[[:rest]]	ruby-4.0.5
+String	gsub!	-1	[[:rest]]	ruby-4.0.5
+String	hex	0	[]	ruby-4.0.5
+String	html_safe	0	[]	activesupport-8.1.3
+String	html_safe?	0	[]	activesupport-8.1.3
+String	humanize	-1	[[:key, :capitalize], [:key, :keep_id_suffix]]	activesupport-8.1.3
+String	include?	1	[[:req]]	ruby-4.0.5
+String	index	-1	[[:rest]]	ruby-4.0.5
+String	initialize	-1	[[:rest]]	ruby-4.0.5-stdlib
+String	insert	2	[[:req], [:req]]	ruby-4.0.5
+String	intern	0	[]	ruby-4.0.5
+String	length	0	[]	ruby-4.0.5
+String	lines	-1	[[:rest]]	ruby-4.0.5
+String	ljust	-1	[[:rest]]	ruby-4.0.5
+String	lstrip	-1	[[:rest]]	ruby-4.0.5
+String	lstrip!	-1	[[:rest]]	ruby-4.0.5
+String	match	-1	[[:rest]]	ruby-4.0.5
+String	match?	-1	[[:rest]]	ruby-4.0.5
+String	next	0	[]	ruby-4.0.5
+String	next!	0	[]	ruby-4.0.5
+String	oct	0	[]	ruby-4.0.5
+String	ord	0	[]	ruby-4.0.5
+String	parameterize	-1	[[:key, :separator], [:key, :preserve_case], [:key, :locale]]	activesupport-8.1.3
+String	partition	1	[[:req]]	ruby-4.0.5
+String	pluralize	-1	[[:opt, :count], [:opt, :locale]]	activesupport-8.1.3
+String	prepend	-1	[[:rest]]	ruby-4.0.5
+String	presence	0	[]	activesupport-8.1.3
+String	present?	0	[]	activesupport-8.1.3
+String	replace	1	[[:req]]	ruby-4.0.5
+String	reverse	0	[]	ruby-4.0.5
+String	reverse!	0	[]	ruby-4.0.5
+String	rindex	-1	[[:rest]]	ruby-4.0.5
+String	rjust	-1	[[:rest]]	ruby-4.0.5
+String	rpartition	1	[[:req]]	ruby-4.0.5
+String	rstrip	-1	[[:rest]]	ruby-4.0.5
+String	rstrip!	-1	[[:rest]]	ruby-4.0.5
+String	scan	1	[[:req]]	ruby-4.0.5
+String	scanf	1	[[:req, :fstr], [:block, :b]]	ruby-4.0.5-stdlib
+String	scrub	-1	[[:rest]]	ruby-4.0.5
+String	scrub!	-1	[[:rest]]	ruby-4.0.5
+String	setbyte	2	[[:req], [:req]]	ruby-4.0.5
+String	shellescape	0	[]	ruby-4.0.5-stdlib
+String	shellsplit	0	[]	ruby-4.0.5-stdlib
+String	size	0	[]	ruby-4.0.5
+String	slice	-1	[[:rest]]	ruby-4.0.5
+String	slice!	-1	[[:rest]]	ruby-4.0.5
+String	split	-1	[[:rest]]	ruby-4.0.5
+String	squeeze	-1	[[:rest]]	ruby-4.0.5
+String	squeeze!	-1	[[:rest]]	ruby-4.0.5
+String	squish	0	[]	activesupport-8.1.3
+String	start_with?	-1	[[:rest]]	ruby-4.0.5
+String	starts_with?	-1	[[:rest]]	activesupport-8.1.3
+String	strip	-1	[[:rest]]	ruby-4.0.5
+String	strip!	-1	[[:rest]]	ruby-4.0.5
+String	sub	-1	[[:rest]]	ruby-4.0.5
+String	sub!	-1	[[:rest]]	ruby-4.0.5
+String	succ	0	[]	ruby-4.0.5
+String	succ!	0	[]	ruby-4.0.5
+String	sum	-1	[[:rest]]	ruby-4.0.5
+String	swapcase	-1	[[:rest]]	ruby-4.0.5
+String	swapcase!	-1	[[:rest]]	ruby-4.0.5
+String	titleize	-1	[[:key, :keep_id_suffix]]	activesupport-8.1.3
+String	to_c	0	[]	ruby-4.0.5
+String	to_f	0	[]	ruby-4.0.5
+String	to_i	-1	[[:rest]]	ruby-4.0.5
+String	to_r	0	[]	ruby-4.0.5
+String	to_s	0	[]	ruby-4.0.5
+String	to_str	0	[]	ruby-4.0.5
+String	to_sym	0	[]	ruby-4.0.5
+String	tr	2	[[:req], [:req]]	ruby-4.0.5
+String	tr!	2	[[:req], [:req]]	ruby-4.0.5
+String	tr_s	2	[[:req], [:req]]	ruby-4.0.5
+String	tr_s!	2	[[:req], [:req]]	ruby-4.0.5
+String	truncate	-2	[[:req, :truncate_to], [:opt, :options]]	activesupport-8.1.3
+String	underscore	0	[]	activesupport-8.1.3
+String	undump	0	[]	ruby-4.0.5
+String	unicode_normalize	-1	[[:rest]]	ruby-4.0.5
+String	unicode_normalize!	-1	[[:rest]]	ruby-4.0.5
+String	unicode_normalized?	-1	[[:rest]]	ruby-4.0.5
+String	unpack	-2	[[:req, :fmt], [:key, :offset]]	ruby-4.0.5
+String	unpack1	-2	[[:req, :fmt], [:key, :offset]]	ruby-4.0.5
+String	upcase	-1	[[:rest]]	ruby-4.0.5
+String	upcase!	-1	[[:rest]]	ruby-4.0.5
+String	upto	-1	[[:rest]]	ruby-4.0.5
+String	valid_encoding?	0	[]	ruby-4.0.5
+Symbol	<=>	1	[[:req]]	ruby-4.0.5
+Symbol	==	1	[[:req]]	ruby-4.0.5
+Symbol	===	1	[[:req]]	ruby-4.0.5
+Symbol	=~	1	[[:req]]	ruby-4.0.5
+Symbol	[]	-1	[[:rest]]	ruby-4.0.5
+Symbol	capitalize	-1	[[:rest]]	ruby-4.0.5
+Symbol	casecmp	1	[[:req]]	ruby-4.0.5
+Symbol	casecmp?	1	[[:req]]	ruby-4.0.5
+Symbol	downcase	-1	[[:rest]]	ruby-4.0.5
+Symbol	empty?	0	[]	ruby-4.0.5
+Symbol	encoding	0	[]	ruby-4.0.5
+Symbol	end_with?	-1	[[:rest]]	ruby-4.0.5
+Symbol	id2name	0	[]	ruby-4.0.5
+Symbol	inspect	0	[]	ruby-4.0.5
+Symbol	intern	0	[]	ruby-4.0.5
+Symbol	length	0	[]	ruby-4.0.5
+Symbol	match	-1	[[:rest]]	ruby-4.0.5
+Symbol	match?	-1	[[:rest]]	ruby-4.0.5
+Symbol	name	0	[]	ruby-4.0.5
+Symbol	next	0	[]	ruby-4.0.5
+Symbol	size	0	[]	ruby-4.0.5
+Symbol	slice	-1	[[:rest]]	ruby-4.0.5
+Symbol	start_with?	-1	[[:rest]]	ruby-4.0.5
+Symbol	succ	0	[]	ruby-4.0.5
+Symbol	swapcase	-1	[[:rest]]	ruby-4.0.5
+Symbol	to_proc	0	[]	ruby-4.0.5
+Symbol	to_s	0	[]	ruby-4.0.5
+Symbol	to_sym	0	[]	ruby-4.0.5
+Symbol	upcase	-1	[[:rest]]	ruby-4.0.5

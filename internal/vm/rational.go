@@ -428,7 +428,7 @@ func (vm *VM) registerRational() {
 
 	// String#to_r parses a rational literal leniently (unrecognised input yields
 	// Rational(0, 1)); a zero denominator ("1/0") raises ZeroDivisionError.
-	vm.cString.define("to_r", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	vm.cString.defineArgc("to_r", 0, func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		r, _ := stringToR(self.(*object.String).Str(), false)
 		return r
 	})

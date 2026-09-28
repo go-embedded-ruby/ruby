@@ -390,28 +390,28 @@ func asciiOnly(b []byte) bool {
 // registerStringEncoding adds the encoding-aware String methods. (Called from the
 // String setup so it shares cString.)
 func (vm *VM) registerStringEncoding() {
-	vm.cString.define("encoding", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	vm.cString.defineArgc("encoding", 0, func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return vm.internEncoding(self.(*object.String).EncName())
 	})
-	vm.cString.define("force_encoding", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cString.defineArgc("force_encoding", 1, func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		s := self.(*object.String)
 		vm.checkFrozen(s)
 		s.Enc = vm.forceEncodingName(args[0])
 		return s
 	})
-	vm.cString.define("b", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	vm.cString.defineArgc("b", 0, func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		d := self.(*object.String).Dup()
 		d.Enc = "ASCII-8BIT"
 		return d
 	})
-	vm.cString.define("ascii_only?", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	vm.cString.defineArgc("ascii_only?", 0, func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		// #ascii_only? is ENC_CODERANGE_7BIT: content in a non-ASCII-compatible
 		// encoding (UTF-16/32, …) is never 7-bit, even when empty or all-ASCII in
 		// bytes, so it reports false regardless of the bytes.
 		s := self.(*object.String)
 		return object.Bool(vm.internEncoding(s.EncName()).asciiCompat && asciiOnly(s.Bytes()))
 	})
-	vm.cString.define("valid_encoding?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	vm.cString.defineArgc("valid_encoding?", 0, func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		s := self.(*object.String)
 		return object.Bool(validInEncoding(s.Bytes(), s.EncName()))
 	})

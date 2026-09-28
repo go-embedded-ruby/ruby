@@ -19,7 +19,7 @@ func (vm *VM) registerArrayEdges() {
 	// bsearch / bsearch_index share the same search; only the returned projection
 	// (element vs index) differs. Without a block both return an Enumerator, as MRI
 	// does.
-	vm.cArray.define("bsearch", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+	vm.cArray.defineArgc("bsearch", 0, func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
 			// MRI's bsearch Enumerator reports an unknown (nil) size.
 			return enumForSized(self, "bsearch", func(*VM) object.Value { return object.NilV })
@@ -30,7 +30,7 @@ func (vm *VM) registerArrayEdges() {
 		}
 		return object.NilV
 	})
-	vm.cArray.define("bsearch_index", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+	vm.cArray.defineArgc("bsearch_index", 0, func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
 			// MRI's bsearch_index Enumerator reports an unknown (nil) size.
 			return enumForSized(self, "bsearch_index", func(*VM) object.Value { return object.NilV })
@@ -44,7 +44,7 @@ func (vm *VM) registerArrayEdges() {
 	// difference keeps every element of the receiver that is eql? to no element of
 	// any argument array — duplicates in the receiver are preserved, exactly like a
 	// chained `-`.
-	vm.cArray.define("difference", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cArray.defineArgc("difference", -1, func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		others := vm.toAryArgs(args)
 		var out []object.Value
 		for _, e := range self.(*object.Array).Elems {
@@ -56,7 +56,7 @@ func (vm *VM) registerArrayEdges() {
 	})
 	// union concatenates the receiver and every argument, then removes eql?
 	// duplicates keeping first-seen order — a multi-argument, de-duplicating `|`.
-	vm.cArray.define("union", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cArray.defineArgc("union", -1, func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		others := vm.toAryArgs(args)
 		var out []object.Value
 		add := func(elems []object.Value) {
@@ -75,7 +75,7 @@ func (vm *VM) registerArrayEdges() {
 	// intersection keeps each element of the receiver that is eql? to some element
 	// of every argument array, de-duplicated in receiver order. With no arguments
 	// it is simply the receiver de-duplicated (like #uniq under eql?).
-	vm.cArray.define("intersection", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cArray.defineArgc("intersection", -1, func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		others := vm.toAryArgs(args)
 		var out []object.Value
 		for _, e := range self.(*object.Array).Elems {
@@ -90,7 +90,7 @@ func (vm *VM) registerArrayEdges() {
 	})
 	// intersect? reports whether the receiver and the one argument array share any
 	// element (compared with eql?), short-circuiting on the first match.
-	vm.cArray.define("intersect?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cArray.defineArgc("intersect?", 1, func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		other := vm.toAryArg(args[0])
 		for _, e := range self.(*object.Array).Elems {
 			if vm.arrayIncludesEql(other.Elems, e) {
@@ -102,7 +102,7 @@ func (vm *VM) registerArrayEdges() {
 
 	// each_index yields every valid index in order and returns the array; without a
 	// block it returns an Enumerator whose #size is the array length.
-	vm.cArray.define("each_index", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+	vm.cArray.defineArgc("each_index", 0, func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		a := self.(*object.Array)
 		if blk == nil {
 			n := len(a.Elems)
@@ -121,7 +121,7 @@ func (vm *VM) registerArrayEdges() {
 	// completes (an unbounded cycle only ends via break); without a block it returns
 	// an Enumerator whose #size is n*length, 0 for a non-positive count, or infinity
 	// for an unbounded cycle.
-	vm.cArray.define("cycle", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+	vm.cArray.defineArgc("cycle", -1, func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		a := self.(*object.Array)
 		hasN := len(args) > 0 && !object.IsNil(args[0])
 		if blk == nil {
