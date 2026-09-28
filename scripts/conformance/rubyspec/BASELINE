@@ -2,11 +2,31 @@
 # One record per spec file: OK<TAB>path<TAB>passing, or FILEFAIL<TAB>path.
 # Judged per file, so no margin is needed and every move is attributable.
 #
-# Recorded 2026-09-28 on main @de8da46, darwin/arm64, corpus SPEC_SHA
+# Recorded 2026-09-28 on main @862a9f3, corpus SPEC_SHA
 # 87b1631992bd00cf0c4934474766d54dad088191, 2206 language/+core/ *_spec.rb.
-# Measured TWICE on an isolated corpus snapshot with TIMEOUT=90: the two sweeps
-# were byte-identical, so no per-file minimum had to be taken. A third sweep
-# tallying all four shim counters independently reproduced the 23449 total.
+#
+# THE FRAME MATTERS, twice over, and both are why an earlier attempt at this
+# file was wrong:
+#
+#  1. PATH. Seven path-identity specs answer differently depending on whether
+#     the corpus is reached through a symlink -- /tmp is a symlink to
+#     private/tmp on macOS, and run.sh's default CACHE lives there. Same inode,
+#     different spelling, 20 examples. This was swept from a REAL path. The
+#     underlying divergence from MRI is issue #741.
+#  2. PLATFORM. This lane runs on ubuntu. Four files were measured on darwin and
+#     are recorded at CI's own LOWER ubuntu value instead -- file/stat/inspect,
+#     kernel/backtick, marshal/load, process/setrlimit. Under-recording is the
+#     safe direction: a file that passes more is reported as improved, never
+#     failed. The baseline belongs to the lane that enforces it.
+#
+# Swept twice; the two sweeps were byte-identical across all 2206 records.
+#
+# One file is recorded at its OBSERVED MINIMUM rather than its usual value:
+# core/random/bytes_spec.rb answers 8 or 9 on the same binary, on both engines,
+# and every wave measuring conformance today named it. Recorded at 8, so a run
+# that reads 9 reports an improvement and one that reads 8 passes. Recording a
+# flake at its high value would fail the lane on a coin toss -- two sweeps here
+# read 9 and a third, under heavier load, read 8.
 OK	core/argf/argf_spec.rb	2
 OK	core/argf/argv_spec.rb	1
 OK	core/argf/binmode_spec.rb	2
@@ -570,7 +590,7 @@ OK	core/exception/success_spec.rb	2
 OK	core/exception/syntax_error_spec.rb	0
 OK	core/exception/system_call_error_spec.rb	23
 OK	core/exception/system_exit_spec.rb	2
-OK	core/exception/to_s_spec.rb	4
+OK	core/exception/to_s_spec.rb	5
 OK	core/exception/top_level_spec.rb	0
 OK	core/exception/uncaught_throw_error_spec.rb	1
 OK	core/false/and_spec.rb	0
@@ -670,7 +690,7 @@ OK	core/file/stat/ftype_spec.rb	6
 OK	core/file/stat/gid_spec.rb	1
 OK	core/file/stat/grpowned_spec.rb	3
 OK	core/file/stat/ino_spec.rb	1
-OK	core/file/stat/inspect_spec.rb	1
+OK	core/file/stat/inspect_spec.rb	0
 OK	core/file/stat/mode_spec.rb	1
 OK	core/file/stat/mtime_spec.rb	1
 OK	core/file/stat/new_spec.rb	3
@@ -1049,13 +1069,13 @@ OK	core/kernel/Integer_spec.rb	243
 OK	core/kernel/Rational_spec.rb	32
 OK	core/kernel/String_spec.rb	14
 OK	core/kernel/__callee___spec.rb	12
-OK	core/kernel/__dir___spec.rb	3
+OK	core/kernel/__dir___spec.rb	4
 OK	core/kernel/__method___spec.rb	11
 OK	core/kernel/abort_spec.rb	7
 OK	core/kernel/at_exit_spec.rb	3
 OK	core/kernel/autoload_relative_spec.rb	0
 OK	core/kernel/autoload_spec.rb	19
-OK	core/kernel/backtick_spec.rb	2
+OK	core/kernel/backtick_spec.rb	1
 OK	core/kernel/binding_spec.rb	8
 OK	core/kernel/block_given_spec.rb	4
 OK	core/kernel/caller_locations_spec.rb	16
@@ -1125,8 +1145,8 @@ OK	core/kernel/rand_spec.rb	24
 OK	core/kernel/readline_spec.rb	2
 OK	core/kernel/readlines_spec.rb	2
 OK	core/kernel/remove_instance_variable_spec.rb	11
-OK	core/kernel/require_relative_spec.rb	45
-OK	core/kernel/require_spec.rb	64
+OK	core/kernel/require_relative_spec.rb	54
+OK	core/kernel/require_spec.rb	69
 OK	core/kernel/respond_to_missing_spec.rb	17
 OK	core/kernel/respond_to_spec.rb	18
 OK	core/kernel/select_spec.rb	3
@@ -1168,7 +1188,7 @@ OK	core/main/to_s_spec.rb	1
 OK	core/main/using_spec.rb	4
 OK	core/marshal/dump_spec.rb	191
 OK	core/marshal/float_spec.rb	18
-OK	core/marshal/load_spec.rb	230
+OK	core/marshal/load_spec.rb	229
 OK	core/marshal/major_version_spec.rb	1
 OK	core/marshal/minor_version_spec.rb	1
 OK	core/marshal/restore_spec.rb	1
@@ -1251,7 +1271,7 @@ OK	core/method/private_spec.rb	1
 OK	core/method/protected_spec.rb	1
 OK	core/method/public_spec.rb	1
 OK	core/method/receiver_spec.rb	3
-OK	core/method/source_location_spec.rb	11
+OK	core/method/source_location_spec.rb	12
 OK	core/method/super_method_spec.rb	6
 OK	core/method/to_proc_spec.rb	8
 OK	core/method/to_s_spec.rb	15
@@ -1501,7 +1521,7 @@ OK	core/process/set_proctitle_spec.rb	0
 OK	core/process/setpgid_spec.rb	0
 OK	core/process/setpgrp_spec.rb	0
 OK	core/process/setpriority_spec.rb	0
-OK	core/process/setrlimit_spec.rb	30
+OK	core/process/setrlimit_spec.rb	29
 OK	core/process/setsid_spec.rb	0
 OK	core/process/spawn_spec.rb	38
 OK	core/process/status/bit_and_spec.rb	0
@@ -1962,7 +1982,7 @@ OK	core/thread/add_trace_func_spec.rb	0
 OK	core/thread/alive_spec.rb	10
 OK	core/thread/allocate_spec.rb	1
 OK	core/thread/backtrace/limit_spec.rb	0
-OK	core/thread/backtrace/location/absolute_path_spec.rb	1
+OK	core/thread/backtrace/location/absolute_path_spec.rb	2
 OK	core/thread/backtrace/location/base_label_spec.rb	4
 OK	core/thread/backtrace/location/inspect_spec.rb	1
 OK	core/thread/backtrace/location/label_spec.rb	32
@@ -2125,7 +2145,7 @@ OK	core/unboundmethod/parameters_spec.rb	0
 OK	core/unboundmethod/private_spec.rb	1
 OK	core/unboundmethod/protected_spec.rb	1
 OK	core/unboundmethod/public_spec.rb	1
-OK	core/unboundmethod/source_location_spec.rb	6
+OK	core/unboundmethod/source_location_spec.rb	7
 OK	core/unboundmethod/super_method_spec.rb	6
 OK	core/unboundmethod/to_s_spec.rb	9
 OK	core/warning/categories_spec.rb	1
@@ -2152,7 +2172,7 @@ OK	language/delegation_spec.rb	12
 OK	language/encoding_spec.rb	4
 OK	language/ensure_spec.rb	31
 OK	language/execution_spec.rb	2
-OK	language/file_spec.rb	4
+OK	language/file_spec.rb	6
 OK	language/for_spec.rb	32
 OK	language/hash_spec.rb	29
 OK	language/heredoc_spec.rb	10
@@ -2169,7 +2189,7 @@ OK	language/method_spec.rb	157
 OK	language/module_spec.rb	14
 OK	language/next_spec.rb	31
 OK	language/not_spec.rb	9
-OK	language/numbered_parameters_spec.rb	14
+OK	language/numbered_parameters_spec.rb	16
 OK	language/numbers_spec.rb	21
 OK	language/optional_assignments_spec.rb	74
 OK	language/or_spec.rb	12
@@ -2200,7 +2220,7 @@ OK	language/retry_spec.rb	3
 OK	language/return_spec.rb	37
 OK	language/safe_navigator_spec.rb	9
 OK	language/safe_spec.rb	1
-OK	language/send_spec.rb	72
+OK	language/send_spec.rb	71
 OK	language/singleton_class_spec.rb	47
 OK	language/source_encoding_spec.rb	0
 OK	language/string_spec.rb	24

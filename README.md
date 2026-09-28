@@ -12,7 +12,7 @@ in a Go program with `import "github.com/go-embedded-ruby/ruby"`, or ship it as 
 single static binary that cross-compiles wherever Go does, with no C toolchain and
 no libruby.
 
-**How complete is it?** It runs **23,449** of ruby/spec's `language/` + `core/`
+**How complete is it?** It runs **23,471** of ruby/spec's `language/` + `core/`
 examples ([what that counts](#runtime-conformance--rubyspec)) — a large and growing
 subset of the language, and **not** a drop-in replacement for CRuby. Read
 [What does not work yet](#what-does-not-work-yet) before you depend on it; the
@@ -131,22 +131,25 @@ process under a minimal MSpec-compatible shim that ships with this repo.
 
 | | |
 | --- | --- |
-| **passing examples** | **23,449** |
-| failing / erroring examples | 941 / 328 |
+| **passing examples** | **23,471** |
+| failing / erroring examples | 918 / 329 |
 | skipped (a matcher our shim does not implement) | 491 |
 | examples that actually ran (pass + fail + error) | 24,718 |
-| share of those that passed | **94.9 %** |
+| share of those that passed | **95.0 %** |
 | spec files | 2,202 of 2,206 produced a result; 4 produced none |
 | **enforced by CI** | a **per-file** baseline (`BASELINE`), not a single number |
 
-Measured 2026-09-28 on `de8da46`, darwin/arm64, against the corpus pinned at
+Measured 2026-09-28 on `862a9f3`, darwin/arm64, against the corpus pinned at
 `SPEC_SHA=87b1631992bd00cf0c4934474766d54dad088191`, on an isolated snapshot of
-it so no concurrent run could swap the shim underneath. Three independent
-sweeps — two through `run.sh` and one through a separate sweep that tallies all
-four counters — each reported exactly **23,449**, with the same 4 files
-producing no result (`core/kernel/exit_spec.rb`, `core/mutex/lock_spec.rb`,
-`core/process/exit_spec.rb`, `core/string/unpack/carret_spec.rb`). The two
-`run.sh` sweeps were byte-identical across all 2,206 per-file records.
+it so no concurrent run could swap the shim underneath, and reached through a
+**real path**: seven path-identity specs answer differently behind a symlink,
+which is worth 20 examples and is itself a divergence from MRI (issue #741).
+Three independent sweeps — two through `run.sh` and one tallying all four
+counters — agreed on every one of the 2,206 per-file records except
+`core/random/bytes_spec.rb`, which answers 8 or 9 on the same binary and is the
+1 separating 23,471 from 23,472. Four files produce no result at all:
+`core/kernel/exit_spec.rb`, `core/mutex/lock_spec.rb`,
+`core/process/exit_spec.rb`, `core/string/unpack/carret_spec.rb`.
 
 **What this number is *not*.** It is *not* "rbgo implements 93 % of Ruby", and
 there is no honest way to turn it into a percentage of the language:
@@ -174,7 +177,7 @@ It used to be one frozen scalar, and that could not be calibrated. A spec file
 that fails to load carries its whole count — the largest here is 384 examples
 (`core/encoding/compatible_spec.rb`) — so the floor needed a margin wider than
 the largest file, which would have made it blind to every regression under 384
-out of 23,449. The last scalar floor sat 189 below the measured total, and a
+out of 23,471. The last scalar floor sat 211 below the measured total, and a
 drop of that size could not say whether one file had stopped loading or hundreds
 of specs had regressed.
 
@@ -852,7 +855,7 @@ the oracle catches divergences the specs don't cover.
 of the 2,206 files is compared with its own record, which needs no margin and
 names whatever moved. A single frozen total could not do that: the largest spec
 file here carries 384 examples, so a scalar floor safe against one file failing
-to load would have been blind to every regression under 384 out of 23,449 — and
+to load would have been blind to every regression under 384 out of 23,471 — and
 a drop could not say whether one file had stopped loading or hundreds of specs
 had regressed.
 
@@ -902,7 +905,7 @@ specification of the language — through `rbgo` under a minimal MSpec-compatibl
 shim, and gates CI on a **per-file** baseline
 ([`scripts/conformance/rubyspec/`](scripts/conformance/rubyspec/), in
 `BASELINE`). No file may pass fewer examples than its record or stop loading, so
-measured language conformance moves in one direction; the total, **23,449**, is
+measured language conformance moves in one direction; the total, **23,471**, is
 a derived summary rather than the thing gated. Run it with
 `scripts/conformance/rubyspec/run.sh`, and see *Runtime conformance* under
 *Status* for the full breakdown.
