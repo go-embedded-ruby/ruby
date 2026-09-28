@@ -5,7 +5,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/go-embedded-ruby/ruby/internal/bytecode"
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
 
@@ -23,7 +22,7 @@ import (
 // method, proc or binding the source creates. When no file is given MRI does not
 // borrow the caller's path either: get_eval_default_path (vm_eval.c
 // ruby_4_0:1666) builds the synthetic "(eval at FILE:LINE)" naming where the
-// eval was WRITTEN. evalLocation is that pair, and compileEval stamps it on.
+// eval was WRITTEN. evalLocation is that pair, and bindingEval stamps it on.
 type evalLocation struct {
 	file string
 	line int
@@ -100,25 +99,15 @@ func (vm *VM) evalLineno(v object.Value) int {
 	return 0
 }
 
-// compileEval compiles src at loc and stamps the path onto the ISeq and every one
-// of its children (setISeqFile, so a proc or method the source defines reports
-// the eval's path too, as MRI's whole eval ISeq tree carries one path).
-//
-// The first LINE has to go into the compilation rather than be applied to the
-// finished ISeq: MRI hands it to the parser (pm_options_line_set,
-// rb_parser_compile_string_path), so it reaches not only every insns_info entry
-// and nested first_lineno but also the Integer literal `__LINE__` becomes — and
-// that literal is indistinguishable in the constant pool from any other Integer
-// once compilation is over. compiler.CompileEval takes it for that reason.
-func (vm *VM) compileEval(src string, loc evalLocation) *bytecode.ISeq {
-	iseq, cerr := parseCompileEvalFn(src, loc.line)
-	if cerr != nil {
-		raiseEvalSyntaxError(loc, cerr)
-	}
-	iseq.Name = "(eval)"
-	setISeqFile(iseq, loc.file)
-	return iseq
-}
+// compileEval is GONE. It compiled a string-eval with NO locals and stamped the
+// path on, and its only two callers were instanceEvalString and classEvalString
+// — which now go through bindingEval, because MRI compiles the String form of
+// specific_eval against the caller's scope (see specificEvalString). Every
+// string-eval in the VM therefore reaches the front end through one seam,
+// bindingEval's compiler.CompileEvalWithLocals, and a second no-locals seam
+// would be a path no MRI behaviour asks for. Deleting it rather than leaving it
+// uncalled is the point, exactly as for evalDefinee below: an unreachable
+// compile path is the shape a later wave would trust.
 
 // raiseEvalSyntaxError raises the SyntaxError for a string that would not parse,
 // with the LOCATION in front of the message as MRI reports it: MRI's parser
