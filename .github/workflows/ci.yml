@@ -158,7 +158,7 @@ jobs:
           go-version: stable
       - uses: actions/setup-node@v7
         with:
-          node-version: '22'
+          node-version: '24'
       - run: go version && node --version
       # ./... and not just ./cmd/wasm: #682 was in internal/vm, a package the
       # playground reaches only transitively, and the breakage was three names in
@@ -229,7 +229,7 @@ jobs:
           go-version: stable
       - uses: actions/setup-node@v7
         with:
-          node-version: '22'
+          node-version: '24'
       - run: go version && node --version
       - name: go test ./cmd/rbgo with the integration tests enabled
         env:
