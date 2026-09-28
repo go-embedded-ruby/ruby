@@ -6513,7 +6513,7 @@ func (vm *VM) bootstrap() {
 var kernelPublicNames = []string{
 	"!~", "<=>", "===", "class", "clone", "define_singleton_method",
 	"display", "dup", "enum_for", "eql?", "extend", "freeze", "frozen?",
-	"hash", "inspect", "instance_of?", "instance_variable_defined?",
+	"inspect", "instance_of?", "instance_variable_defined?",
 	"instance_variable_get", "instance_variable_set", "instance_variables",
 	"is_a?", "itself", "kind_of?", "method", "methods", "nil?",
 	"object_id", "private_methods", "protected_methods", "public_method",
@@ -6549,6 +6549,24 @@ var kernelModuleFunctionNames = []string{
 	"sleep", "spawn", "sprintf", "srand", "syscall", "system", "test",
 	"throw", "trace_var", "trap", "untrace_var", "warn",
 }
+
+// kernelNamesHeldBack are Kernel methods this pass deliberately does NOT move,
+// each because a site OUTSIDE this change's file cluster decides something by
+// comparing a method's owner against cObject, and would change behaviour the
+// moment the owner becomes cKernel. They are listed here rather than omitted
+// silently, and wave_d_kernel_homing_test.go asserts the set EXACTLY, so the
+// list cannot grow unnoticed and must be emptied as each site is fixed.
+//
+//	hash — internal/vm/vm.go hasCustomHash reports "this key has a custom
+//	  #hash" as `m.owner != vm.cObject && m.owner != vm.cBasicObject`. Re-homing
+//	  Kernel#hash makes that true for EVERY key, so object.CustomKeyHook engages
+//	  for plain objects and each probe costs a Ruby-level send(:hash) plus
+//	  send(:eql?). Measured: 60k plain Object keys inserted and read back go from
+//	  0.027s to 50s — ~1800x — with no test or spec failing, because correctness
+//	  is preserved and only the cost explodes. The fix is to add
+//	  `&& m.owner != vm.cKernel` there, exactly as isBuiltinValueMethod does
+//	  here; then "hash" moves back into kernelPublicNames.
+var kernelNamesHeldBack = []string{"hash"}
 
 // rehomeKernelMethods moves Kernel's methods onto the Kernel module, where MRI
 // defines them. rbgo builds them on Object because that is where dispatch finds

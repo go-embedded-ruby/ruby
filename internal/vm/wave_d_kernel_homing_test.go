@@ -26,7 +26,7 @@ func TestWaveDKernelMethodsAreOwnedByKernel(t *testing.T) {
 	for _, name := range []string{
 		"puts", "class", "inspect", "frozen?", "raise", "binding", "lambda",
 		"format", "is_a?", "freeze", "object_id", "respond_to?", "require",
-		"loop", "catch", "p", "send", "tap", "dup", "hash",
+		"loop", "catch", "p", "send", "tap", "dup", "itself",
 	} {
 		src := fmt.Sprintf("p Object.instance_method(%s).owner", symLiteral(name))
 		if got := eval(t, src); got != "Kernel\n" {
@@ -61,6 +61,24 @@ func TestWaveDObjectDefinesNothingKernelDefines(t *testing.T) {
 			if m.owner != vm.cObject {
 				t.Errorf("%q is on Object with a non-Object owner %s", name, m.owner.name)
 			}
+		}
+	}
+	// The held-back names are a SEPARATE, deliberate exception with its own exact
+	// assertion: each must still be introduced on Object with an Object owner (so
+	// the out-of-cluster owner comparison that needs it keeps working), and the
+	// set must be exactly what builtins.go documents.
+	if got := strings.Join(kernelNamesHeldBack, " "); got != "hash" {
+		t.Errorf("kernelNamesHeldBack = %q, want exactly \"hash\"; every entry needs "+
+			"its out-of-cluster owner comparison named in builtins.go", got)
+	}
+	for _, name := range kernelNamesHeldBack {
+		m := vm.cObject.methods[name]
+		if m == nil || m.owner != vm.cObject {
+			t.Errorf("held-back %q is not on Object with an Object owner; "+
+				"hasCustomHash would then engage for every key", name)
+		}
+		if vm.cKernel.methods[name] != nil {
+			t.Errorf("held-back %q must not be on Kernel", name)
 		}
 	}
 	sort.Strings(residue)
