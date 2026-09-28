@@ -774,6 +774,20 @@ type VM struct {
 	// GVL-guarded.
 	pendingClassBody bool
 
+	// curCref is the RUNNING frame's lexical scope chain (MRI's cref), innermost
+	// link first; nil is the top level. It is saved and restored by exec, so it
+	// always describes the frame that is executing, and it is what VM.nesting
+	// consults before falling back to the per-class lexParent walk.
+	// GVL-guarded.
+	curCref *crefLink
+	// pendingCref hands the next exec frame the chain to run under, the way
+	// pendingClassBody hands it the class-body flag: a class/module/singleton
+	// body pushes its own scope onto the chain of the frame that opened it, and
+	// an invoked method hands over the chain recorded at its `def` site. Set
+	// immediately before the dispatch, read-and-cleared at the top of exec.
+	// GVL-guarded.
+	pendingCref *crefLink
+
 	// children records finished synthetic child processes (Process.spawn /
 	// Kernel.fork), so Process.waitpid2 can report each one's exit status.
 	// childPidSeq assigns the next synthetic pid. GVL-guarded.
@@ -1466,6 +1480,14 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 	// frame that argument binding might start.
 	pendClassBody := vm.pendingClassBody
 	vm.pendingClassBody = false
+	// The chain this frame runs under, handed over by whoever dispatched it, and
+	// consumed here for the same reason as the flag above. The restore is
+	// deferred rather than written at each return because exec has many exits and
+	// unwinds through panics.
+	pendCref := vm.pendingCref
+	vm.pendingCref = nil
+	savedCref := vm.curCref
+	defer func() { vm.curCref = savedCref }()
 	// This frame's TracePoint description, built lazily: nil unless tracing is on
 	// (see the entry-event site below). Declared here because the exit-event
 	// defers registered further down close over it.
@@ -1774,6 +1796,22 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 	// Now that this frame's lexical scope is settled, record it so Module.nesting
 	// (a native, which pushes no frame of its own) can read the call site's cref.
 	vm.frameCrefs[frameCrefsDepth-1] = lexCref
+
+	// And record the frame's full lexical CHAIN, which is what the nesting is
+	// actually made of (see crefLink). The innermost link must agree with
+	// lexCref, since that is how VM.nesting recognises the chain as this frame's.
+	// In order: a chain handed over by the dispatcher (a class/module/singleton
+	// body, or a method that recorded one at its `def` site), then a block's
+	// captured chain, then — for anything that predates the chain — a chain
+	// rebuilt from lexParent, which is exactly the walk rbgo did before.
+	switch {
+	case pendCref != nil && pendCref.klass == lexCref:
+		vm.curCref = pendCref
+	case selfBlock != nil && selfBlock.crefChain != nil && selfBlock.crefChain.klass == lexCref:
+		vm.curCref = selfBlock.crefChain
+	default:
+		vm.curCref = vm.crefFromLexParents(lexCref)
+	}
 
 	// frameCref is THIS frame's live cref: the scope a refinement lookup resolves
 	// against, and the cref a block literal created here captures.
@@ -2093,7 +2131,11 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				name := iseq.Names[in.A]
 				v, ok := vm.resolveConst(lexCref, name)
 				if !ok {
-					raise("NameError", "uninitialized constant %s", name)
+					// MRI routes a bare miss through #const_missing on the cref base
+					// (vm_get_const_base), so an override answers and the default
+					// NameError names the scope and carries it as #receiver.
+					push(vm.constNotFound(vm.constBase(lexCref), name))
+					break
 				}
 				push(v)
 			case bytecode.OpGetConstTop:
@@ -2113,7 +2155,8 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				}
 				v, ok := vm.cObject.consts[name]
 				if !ok {
-					raise("NameError", "uninitialized constant %s", name)
+					push(vm.constNotFound(vm.cObject, name))
+					break
 				}
 				push(v)
 			case bytecode.OpGetScopedConst:
@@ -2324,7 +2367,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					recv := pop()
 					// A literal block: capture this frame's env, self, block.
 					markEnvCaptured(env)
-					blk := &Proc{iseq: iseq.Children[in.C-1], env: env, defLocals: iseq.Locals, self: self, block: block, cref: frameCref(), refDefinee: refDefineeOf(definee, frameCref()), home: homeTarget(), superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs, dmBody: homeDmBody, methodCtx: fm}
+					blk := &Proc{iseq: iseq.Children[in.C-1], env: env, defLocals: iseq.Locals, self: self, block: block, cref: frameCref(), crefChain: vm.curCref, refDefinee: refDefineeOf(definee, frameCref()), home: homeTarget(), superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs, dmBody: homeDmBody, methodCtx: fm}
 					vm.sendNoKW = in.Flags&bytecode.FlagSendNoKW != 0 // MRI: the call info decides, not the callee
 					if res, done := vm.enforceSendVisRoute(in.Flags, recv, name, callArgs, blk, self); done {
 						push(res)
@@ -2371,6 +2414,10 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				if lexCref != methodDefinee {
 					m.lexScope = lexCref
 				}
+				// The scope alone cannot say what encloses it (see crefLink), so the
+				// whole chain is recorded here, at the `def` site, as MRI stores the
+				// cref on the iseq.
+				m.lexChain = vm.curCref
 				// Attach the AOT-compiled body only on the first definition of
 				// this name; a redefinition gets a fresh, interpreted Method
 				// (deopt), since the compiled body matched the original source.
@@ -2465,6 +2512,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				// A class/module body raises MRI's :class and :end events; the flag is
 				// consumed at the top of exec (see pendingClassBody).
 				vm.pendingClassBody = true
+				vm.pendingCref = crefPush(sc, vm.curCref)
 				push(vm.exec(iseq.Children[in.A], sc, nil, sc, "", nil, nil, nil, nil, nil))
 			case bytecode.OpAlias:
 				vm.aliasMethod(methodDefinee, iseq.Names[in.A], iseq.Names[in.B])
@@ -2515,7 +2563,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				superBlk := block
 				if in.C > 0 { // an explicit `super(...) { … }` literal block overrides the frame block
 					markEnvCaptured(env)
-					superBlk = &Proc{iseq: iseq.Children[in.C-1], env: env, defLocals: iseq.Locals, self: self, block: block, cref: frameCref(), refDefinee: refDefineeOf(definee, frameCref()), home: homeTarget(), superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs, dmBody: homeDmBody, methodCtx: fm}
+					superBlk = &Proc{iseq: iseq.Children[in.C-1], env: env, defLocals: iseq.Locals, self: self, block: block, cref: frameCref(), crefChain: vm.curCref, refDefinee: refDefineeOf(definee, frameCref()), home: homeTarget(), superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs, dmBody: homeDmBody, methodCtx: fm}
 				}
 				var superArgs []object.Value
 				zsuperKW := false
@@ -2557,7 +2605,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					superBlk = vm.toBlock(pop())
 				case in.C > 1: // a literal `super(*a) { … }` block, from child C-2
 					markEnvCaptured(env)
-					superBlk = &Proc{iseq: iseq.Children[in.C-2], env: env, defLocals: iseq.Locals, self: self, block: block, cref: frameCref(), refDefinee: refDefineeOf(definee, frameCref()), home: homeTarget(), superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs, dmBody: homeDmBody, methodCtx: fm}
+					superBlk = &Proc{iseq: iseq.Children[in.C-2], env: env, defLocals: iseq.Locals, self: self, block: block, cref: frameCref(), crefChain: vm.curCref, refDefinee: refDefineeOf(definee, frameCref()), home: homeTarget(), superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs, dmBody: homeDmBody, methodCtx: fm}
 				}
 				argsArr := pop().(*object.Array)
 				suElems, suNoKW := applyKWSplat(argsArr.Elems, in.Flags)
@@ -2890,7 +2938,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				var blk *Proc
 				if in.C > 0 {
 					markEnvCaptured(env)
-					blk = &Proc{iseq: iseq.Children[in.C-1], env: env, defLocals: iseq.Locals, self: self, block: block, cref: frameCref(), refDefinee: refDefineeOf(definee, frameCref()), home: homeTarget(), superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs, dmBody: homeDmBody, methodCtx: fm}
+					blk = &Proc{iseq: iseq.Children[in.C-1], env: env, defLocals: iseq.Locals, self: self, block: block, cref: frameCref(), crefChain: vm.curCref, refDefinee: refDefineeOf(definee, frameCref()), home: homeTarget(), superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs, dmBody: homeDmBody, methodCtx: fm}
 				}
 				saElems, saNoKW := applyKWSplat(argsArr.Elems, in.Flags)
 				vm.sendNoKW = saNoKW // MRI: the call info decides, not the callee
@@ -3500,6 +3548,12 @@ func (vm *VM) defineClassIn(parent *RClass, name string, body *bytecode.ISeq, su
 	// A class body raises MRI's :class and :end events; the flag is consumed at
 	// the top of exec (see pendingClassBody).
 	vm.pendingClassBody = true
+	// MRI's vm_cref_push: the body runs under a chain whose innermost link is the
+	// class itself, pushed onto the chain of the frame that opened it. The PARENT
+	// of a compact `class A::B` is NOT pushed (nesting is [A::B, <enclosing>],
+	// never [A::B, A]) — which is why the chain, not the class's lexParent slot,
+	// has to be what the nesting is read from.
+	vm.pendingCref = crefPush(class, vm.curCref)
 	return vm.exec(body, class, nil, class, "", nil, nil, nil, nil, nil)
 }
 
@@ -3553,6 +3607,7 @@ func (vm *VM) defineModuleIn(parent *RClass, name string, body *bytecode.ISeq, s
 	// A module body raises MRI's :class and :end events; the flag is consumed at
 	// the top of exec (see pendingClassBody).
 	vm.pendingClassBody = true
+	vm.pendingCref = crefPush(mod, vm.curCref)
 	return vm.exec(body, mod, nil, mod, "", nil, nil, nil, nil, nil)
 }
 

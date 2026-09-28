@@ -84,6 +84,13 @@ type Proc struct {
 	// was written, so a bare constant inside the block resolves by the same
 	// lexical nesting as the surrounding method/class body. nil means top level.
 	cref *RClass
+	// crefChain is the FULL lexical nesting at the point the block literal was
+	// written — its innermost link is cref and it continues outward, exactly as
+	// MRI's rb_cref_t chain does. cref alone cannot answer the outer links: a
+	// class reopened in two different lexical positions has ONE lexParent slot
+	// but TWO crefs. nil means "not recorded"; VM.nesting then falls back to the
+	// lexParent walk.
+	crefChain *crefLink
 	// refDefinee is the OTHER end of the cref chain at block-creation time: the
 	// creating frame's definee, when it differs from cref. MRI keeps a chain and
 	// a frame that eval'd into another scope has a cref pushed on top of the one
@@ -171,6 +178,10 @@ type Method struct {
 	// resolves File to ::File rather than the receiver class. nil means "same as
 	// owner" (the common case), keeping normal defs unaffected.
 	lexScope *RClass
+	// lexChain is the full lexical nesting at the `def` site: the chain whose
+	// innermost link is lexScope, or the definee when lexScope is nil. See
+	// Proc.crefChain — nil means "not recorded".
+	lexChain *crefLink
 	// vis is the method's access level (public/private/protected). The zero value
 	// is visPublic, so every method is public unless a visibility directive marks
 	// it otherwise. A per-receiver override (RClass.visOverrides) takes precedence
@@ -734,7 +745,54 @@ func (vm *VM) scopedConst(cls *RClass, name string) object.Value {
 	// An unresolved Recv::Name routes through #const_missing on the receiver, whose
 	// default (Module#const_missing) raises NameError. A user override may return a
 	// value or raise a different error.
-	return vm.constMissing(cls, name)
+	return vm.constNotFound(cls, name)
+}
+
+// constErrPath renders the qualified constant name MRI's uninitialized_constant
+// (variable.c r4:2282) puts in the message: `Scope::NAME`, or a bare `NAME`
+// when the scope is Object — the top level is not spelled out. The scope's own
+// rendering is rb_class_path, so an ANONYMOUS or SINGLETON scope still
+// qualifies, as `#<Class:Q>::Missing` on ruby 4.0.5; .name is empty for those,
+// so ToS is what has to be asked.
+func (vm *VM) constErrPath(scope *RClass, name string) string {
+	if scope == nil || scope == vm.cObject {
+		return name
+	}
+	if scope.name != "" {
+		return scope.name + "::" + name
+	}
+	return scope.ToS() + "::" + name
+}
+
+// constNotFound is what an unresolved constant reference does: MRI does not
+// raise at the lookup, it calls #const_missing on the base module
+// (rb_const_get_0 → rb_const_missing, variable.c r4:3085), so an override is
+// consulted FIRST and may return a value. Only the default
+// Module#const_missing raises, and the NameError it builds carries the base as
+// #receiver and the bare constant as #name (rb_mod_const_missing →
+// uninitialized_constant → rb_name_err_raise, variable.c r4:2342/2282).
+//
+// rbgo raised straight from the bytecode for a BARE constant, so neither an
+// override nor #receiver worked there; and the default hook (in
+// module_residuals.go) still records no receiver, which is why the raise is
+// done here — the same shape privateConstReferenced already uses for its own
+// "default hook or override?" question.
+func (vm *VM) constNotFound(base *RClass, name string) object.Value {
+	if vm.findMethod(base, "const_missing") == vm.cModule.methods["const_missing"] {
+		vm.raiseWithIvars("NameError", "uninitialized constant "+vm.constErrPath(base, name),
+			map[string]object.Value{"@name": object.SymVal(name), "@receiver": base})
+	}
+	return vm.constMissing(base, name)
+}
+
+// constBase is MRI's vm_get_const_base: the innermost link of the running
+// frame's cref chain, which is the module an unresolved bare constant is
+// reported against, or Object at the top level.
+func (vm *VM) constBase(cref *RClass) *RClass {
+	if n := vm.nesting(cref); len(n) > 0 {
+		return n[0]
+	}
+	return vm.cObject
 }
 
 // scopedConstIsPrivate reports whether Recv::name resolves to a constant that
@@ -762,10 +820,69 @@ func (vm *VM) privateConstReferenced(recv, owner *RClass, name string) object.Va
 	return vm.constMissing(recv, name)
 }
 
-// nesting returns the lexical nesting list for a cref (Module.nesting): the cref
-// itself followed by each enclosing lexParent, innermost first. cObject (which
-// terminates the lexParent chain) is not part of nesting.
-func (vm *VM) nesting(cref *RClass) []*RClass {
+// crefLink is one link of MRI's lexical scope chain, rb_cref_t: the class or
+// module a body was written inside, plus the link for the scope that textually
+// encloses it. MRI builds the chain at the `class`/`module`/`def` keyword —
+// vm_cref_push pushes the new scope onto the chain the enclosing frame already
+// had — and stores it on the iseq, so it is a property of the SITE, not of the
+// class.
+//
+// rbgo used to reconstruct the nesting by walking RClass.lexParent, one slot
+// per class. That is a different chain, and it diverges wherever a class is
+// entered from a lexical position other than the one that created it:
+//
+//	module A; class B; end; end     # B.lexParent = A
+//	module Outer
+//	  class A::B                    # MRI nesting [A::B, Outer]
+//	    ...                         # rbgo said  [A::B, A]
+//	  end
+//	end
+//
+// Both ends were wrong there: A was visible when MRI hides it, and Outer was
+// invisible when MRI shows it. A nil chain is the top level (MRI's chain has a
+// bottom link holding Object which rb_mod_nesting stops before; rbgo spells
+// that same "nothing left" as nil).
+type crefLink struct {
+	klass *RClass
+	next  *crefLink
+}
+
+// crefPush returns the chain for a body written inside klass, textually nested
+// in the scope `next` describes — MRI's vm_cref_push.
+func crefPush(klass *RClass, next *crefLink) *crefLink {
+	return &crefLink{klass: klass, next: next}
+}
+
+// crefNesting flattens a chain into Module.nesting's list, innermost first.
+func crefNesting(ch *crefLink) []*RClass {
+	var out []*RClass
+	// Guard against a cycle for the same reason the lexParent walk below does.
+	seen := map[*crefLink]bool{}
+	for c := ch; c != nil && !seen[c]; c = c.next {
+		seen[c] = true
+		if c.klass != nil {
+			out = append(out, c.klass)
+		}
+	}
+	return out
+}
+
+// crefFromLexParents builds a chain for a scope whose real cref was not
+// recorded — a class/module reached through a path that predates the chain
+// (a Proc built outside vm.go, a Method with no lexChain). It reproduces the
+// old lexParent walk exactly, so an unrecorded site behaves as it always did.
+func (vm *VM) crefFromLexParents(scope *RClass) *crefLink {
+	list := vm.lexParentNesting(scope)
+	var ch *crefLink
+	for i := len(list) - 1; i >= 0; i-- {
+		ch = crefPush(list[i], ch)
+	}
+	return ch
+}
+
+// lexParentNesting is the legacy walk: scope followed by each enclosing
+// lexParent, innermost first, stopping at cObject.
+func (vm *VM) lexParentNesting(scope *RClass) []*RClass {
 	var out []*RClass
 	// Stop at a repeat as well as at the top. A lexical chain is shaped by the
 	// program — `class << o; CONST = self; end` used to make a class its own
@@ -773,11 +890,27 @@ func (vm *VM) nesting(cref *RClass) []*RClass {
 	// CI runner. ancestors has guarded itself this way all along; this is the
 	// same guard for the same reason.
 	seen := map[*RClass]bool{}
-	for c := cref; c != nil && c != vm.cObject && !seen[c]; c = c.lexParent {
+	for c := scope; c != nil && c != vm.cObject && !seen[c]; c = c.lexParent {
 		seen[c] = true
 		out = append(out, c)
 	}
 	return out
+}
+
+// nesting returns the lexical nesting list for a scope (Module.nesting),
+// innermost first. When the RUNNING frame's recorded cref chain is the one
+// being asked about — its innermost link is this very scope — the chain
+// answers, because only it knows the outer links. Every other caller (a
+// const_get against an unrelated module, an autoload retry for another scope)
+// falls back to the lexParent walk.
+func (vm *VM) nesting(cref *RClass) []*RClass {
+	if ch := vm.curCref; ch != nil && ch.klass == cref {
+		return crefNesting(ch)
+	}
+	// A frame whose chain is nil IS the top level, and the top level's nesting
+	// is empty — but so is cObject's lexParent walk, so the two agree and there
+	// is nothing to special-case here.
+	return vm.lexParentNesting(cref)
 }
 
 // resolveConst implements Ruby's bare-constant lookup for OpGetConst, using cref
@@ -2188,6 +2321,10 @@ func (vm *VM) invokeBody(m *Method, self object.Value, args []object.Value, blk 
 	// method's original name (unchanged through an alias), __callee__ the name it
 	// was called by (m.name — the alias when aliased).
 	vm.pendingMethodCtx = &frameMethod{orig: methodOriginalName(m), callee: m.name}
+	// Hand the frame the chain recorded at the `def` site: MRI keeps the cref on
+	// the iseq, so a method body's nesting is where it was WRITTEN, not where its
+	// owner happens to sit today.
+	vm.pendingCref = m.lexChain
 	return vm.exec(m.iseq, self, args, m.owner, m.name, nil, blk, nil, blk, m.lexScope)
 }
 
