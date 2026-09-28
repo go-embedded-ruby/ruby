@@ -158,29 +158,61 @@ func parseErrorLine(msg string) (int, string, bool) {
 	return n, rest[i+2:], true
 }
 
-// instanceEvalString backs the String form of BasicObject#instance_eval: it
-// compiles src and runs it with self as the receiver and the receiver's
-// singleton class as the definee, so a `def` in the source becomes a singleton
-// method and `self`/instance variables resolve to the receiver. An immediate
+// specificEvalString is MRI's specific_eval -> eval_under for the STRING form of
+// instance_eval / module_eval / class_eval (vm_eval.c ruby_4_0:2152-2187). Three
+// things come from three different places, and rbgo used to get only two of them:
+//
+//   - the LOCALS are the CALLER'S. eval_under hands the source to
+//     eval_string_with_cref, which builds its base block from
+//     rb_vm_get_ruby_level_next_cfp(ec, ec->cfp) — the Ruby frame below the CFUNC
+//     — so the eval'd source is compiled as a child scope of the calling frame
+//     and sees, and can ASSIGN to, its local variables (vm_eval.c
+//     ruby_4_0:1882-1911). `x = 41; Object.new.instance_eval("x + 1")` is 42 on
+//     ruby 4.0.5; rbgo ran with a FRESH, EMPTY scope and raised NoMethodError for
+//     `x`. The write direction failed silently, which is worse: `x = 1;
+//     Object.new.instance_eval("x = 99"); x` stayed 1 instead of becoming 99, and
+//     a caller local shadowing a method of the same name lost to the method.
+//   - the SELF is the RECEIVER, not the calling frame's — eval_string_with_cref
+//     overwrites block.as.captured.self with it.
+//   - the CREF is PUSHED, not inherited: vm_cref_push(ec, self, NULL, FALSE,
+//     singleton). singleton is TRUE for instance_eval (the definee is the
+//     receiver's singleton class, so a `def` becomes a singleton method) and
+//     FALSE for module_eval/class_eval (the definee is the module itself, so a
+//     `def` becomes an instance method). That half rbgo already had right, and it
+//     is why this takes a caller Binding and OVERWRITES both fields rather than
+//     using the binding's own: callerBinding returns a fresh Binding each call,
+//     so the caller's frame keeps its self and definee.
+//
+// The three used to be split across two code paths — Kernel#eval already went
+// through callerBinding + bindingEval for exactly this, while the specific_eval
+// family compiled with no locals at all. They are one mechanism in MRI and one
+// here now.
+func (vm *VM) specificEvalString(self object.Value, definee *RClass, src string, loc evalLocation) object.Value {
+	cb := vm.callerBinding()
+	cb.self = self
+	cb.definee = definee
+	return vm.bindingEval(cb, src, loc)
+}
+
+// instanceEvalString backs the String form of BasicObject#instance_eval: the
+// source runs with self as the receiver and the receiver's singleton class as
+// the definee, over the CALLER'S locals (see specificEvalString). An immediate
 // receiver has no singleton class, so its own class stands in as the definee
 // (source that only reads still works).
 func (vm *VM) instanceEvalString(self object.Value, src string, loc evalLocation) object.Value {
-	iseq := vm.compileEval(src, loc)
 	definee, ok := vm.ensureSingleton(self)
 	if !ok {
 		definee = vm.classOf(self)
 	}
-	vm.pendingMethodCtx = vm.currentMethodCtxPtr()
-	return vm.exec(iseq, self, nil, definee, "", nil, nil, nil, nil, nil)
+	return vm.specificEvalString(self, definee, src, loc)
 }
 
 // classEvalString backs the String form of Module#module_eval / #class_eval: the
-// class is both self and the method-definition target, with a fresh local scope,
-// so a top-level `def` in the source becomes an instance method of cls — the
-// mechanism racc's runtime uses to graft do_parse/yyparse.
+// class is both self and the method-definition target — so a top-level `def` in
+// the source becomes an instance method of cls, the mechanism racc's runtime uses
+// to graft do_parse/yyparse — over the CALLER'S locals (see specificEvalString).
 func (vm *VM) classEvalString(cls *RClass, src string, loc evalLocation) object.Value {
-	iseq := vm.compileEval(src, loc)
-	return vm.exec(iseq, cls, nil, cls, "", nil, nil, nil, nil, nil)
+	return vm.specificEvalString(cls, cls, src, loc)
 }
 
 // registerEval installs Kernel#eval — the embedded front-end's reason for being.
