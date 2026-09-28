@@ -30,14 +30,17 @@ func (vm *VM) bindingEval(b *Binding, src string, loc evalLocation) object.Value
 	// binding's frame (depth 1) rather than the throwaway eval-block env.
 	if newNames := bindingNewLocals(iseq.Locals); len(newNames) > 0 {
 		for _, n := range newNames {
-			b.names = append(b.names, n)
-			b.added = append(b.added, n)
-			b.env.slots = append(b.env.slots, object.NilV)
+			b.addLocal(n, object.NilV)
 		}
 		// Re-seeding the same program with additional valid local names cannot
 		// introduce a compile error, so the earlier check already covered it.
 		iseq, _ = compiler.CompileEvalWithLocals(prog, b.names, loc.line)
 	}
+	// The front end resolves every binding local at depth 1 against one borrowed
+	// scope; a binding captured inside a BLOCK has its names spread over an env
+	// chain, so the operands are moved onto it here. A no-op for the identity map,
+	// which is what a method-level or top-level binding carries.
+	b.retargetLocals(iseq)
 	iseq.Name = "(eval)"
 	// The location is the eval's own, exactly as on the no-binding path: MRI
 	// reaches eval_string_with_scope through the same rb_f_eval, so the file and
@@ -52,7 +55,13 @@ func (vm *VM) bindingEval(b *Binding, src string, loc evalLocation) object.Value
 	// the capturing frame recorded rides on the Binding for exactly this.
 	mc := b.method
 	vm.pendingMethodCtx = &mc
-	return vm.exec(iseq, b.self, nil, b.definee, "", b.env, nil, nil, nil, nil)
+	// The eval frame inherits the binding's BLOCK, not an empty one: MRI runs the
+	// eval iseq on the captured block's ep (vm_set_eval_stack(ec, iseq, NULL,
+	// &bind->block), vm_eval.c ruby_4_0:2023-2031), so `yield` and `block_given?`
+	// inside the string answer about the frame the binding came from. Measured on
+	// ruby 4.0.5: `def m; eval("yield"); end; m { 7 }` is 7, and rbgo raised
+	// LocalJumpError for want of this argument.
+	return vm.exec(iseq, b.self, nil, b.definee, "", b.env, b.block, nil, nil, nil)
 }
 
 // bindingNewLocals returns the named top-scope locals a compiled eval body

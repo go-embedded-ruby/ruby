@@ -1,6 +1,9 @@
 package vm
 
-import "github.com/go-embedded-ruby/ruby/internal/object"
+import (
+	"github.com/go-embedded-ruby/ruby/internal/bytecode"
+	"github.com/go-embedded-ruby/ruby/internal/object"
+)
 
 // Binding captures a frame's local-variable environment, self and definee, so
 // code can be eval'd against it later (Binding#eval, eval(str, binding)) and its
@@ -12,8 +15,31 @@ type Binding struct {
 	definee *RClass
 	file    string   // source file the binding was captured in ("" for compiled-in code)
 	line    int      // 1-based line the binding was captured at (MRI's bind->first_lineno)
-	names   []string // slot index → local name (original ISeq locals, then injected ones)
+	names   []string // name index → local name (this frame's locals, then the enclosing scopes', then injected ones)
 	added   []string // names injected via local_variable_set/eval, in insertion order
+
+	// locs places each entry of names in the ENV CHAIN: names[i] lives at
+	// locs[i].slot of env.ancestor(locs[i].depth). A nil locs means the identity
+	// map — every name at depth 0, slot == index — which is what a binding with no
+	// enclosing scope has and what every Binding was before this field existed.
+	//
+	// The chain is the whole of the block-scope defect. MRI's binding pins an ep,
+	// and the ep chain out to the method's is intact, so eval_make_iseq ->
+	// pm_eval_make_iseq builds ONE COMPILE SCOPE PER parent_iseq
+	// (vm_eval.c ruby_4_0:1702-1732: `do { scopes_count++; } while ((iseq =
+	// ISEQ_BODY(iseq)->parent_iseq));`) and a name found two scopes out compiles to
+	// a depth-2 reference into the LIVE env. rbgo recorded only the innermost
+	// frame's locals, so `[1].map { eval("y") }` could not see the y beside the
+	// map, and `binding.local_variables` there answered [] — a wrong answer with no
+	// exception.
+	locs []bindLoc
+
+	// block is the block in scope at the capture site — MRI's bind->block, whose
+	// ep is what an eval run through this binding inherits. It is why
+	// `def m; eval("yield"); end; m { 7 }` is 7 and `[1].map { eval("block_given?") }`
+	// inside a method with a block is [true] on ruby 4.0.5: the eval frame is not a
+	// fresh block-less scope, it continues the captured one.
+	block *Proc
 
 	// method is the __method__/__callee__ pair of the frame the binding was
 	// captured in, so eval'd code reports the enclosing method. MRI reaches the
@@ -40,7 +66,16 @@ func (b *Binding) ToS() string     { return "#<Binding>" }
 func (b *Binding) Inspect() string { return "#<Binding>" }
 func (b *Binding) Truthy() bool    { return true }
 
-// slotOf returns the env slot of a named local, or -1.
+// bindLoc is one name's place in a Binding's environment chain: how many parent
+// links out, and which slot there. It is MRI's (level, index) operand pair, the
+// one getlocal/setlocal carry.
+type bindLoc struct{ depth, slot int }
+
+// slotOf returns the NAME INDEX of a local, or -1. The index is not a slot: use
+// at() to reach the value, since a name from an enclosing scope lives in an
+// ancestor env. The first match wins, which is what makes an inner local SHADOW
+// an outer one of the same name — collectBindingLocals adds inner first, and
+// MRI's local_var_list is a hash keyed by name for the same reason.
 func (b *Binding) slotOf(name string) int {
 	for i, n := range b.names {
 		if n == name {
@@ -48,6 +83,101 @@ func (b *Binding) slotOf(name string) int {
 		}
 	}
 	return -1
+}
+
+// at resolves name index i to the environment holding it and the slot within it.
+func (b *Binding) at(i int) (*Env, int) {
+	if b.locs == nil {
+		return b.env, i
+	}
+	l := b.locs[i]
+	return b.env.ancestor(l.depth), l.slot
+}
+
+// ensureLocs materialises the identity map so a later append can extend it. A
+// Binding built without one (the top level's, Proc#binding's) has names and slots
+// in step; once ANY entry is appended the two can no longer be assumed aligned,
+// so the invariant len(locs) == len(names) has to start holding before the first
+// append rather than after it.
+func (b *Binding) ensureLocs() {
+	if b.locs != nil || len(b.names) == 0 {
+		return
+	}
+	b.locs = make([]bindLoc, len(b.names))
+	for i := range b.names {
+		b.locs[i] = bindLoc{slot: i}
+	}
+}
+
+// addLocal appends a binding-only local (local_variable_set, or a name an eval
+// string declares at its top scope) to the binding's innermost env — depth 0,
+// which is the scope MRI's vm_bind_update_env extends.
+func (b *Binding) addLocal(name string, v object.Value) {
+	b.ensureLocs()
+	b.env.slots = append(b.env.slots, v)
+	b.names = append(b.names, name)
+	b.added = append(b.added, name)
+	b.locs = append(b.locs, bindLoc{slot: len(b.env.slots) - 1})
+}
+
+// retargetLocals moves a compiled eval body's references to the binding's locals
+// from the ONE borrowed compile scope the front end builds onto the binding's
+// real environment chain.
+//
+// MRI never needs this step: pm_eval_make_iseq declares one parser scope per
+// parent_iseq and hands the parser the names at each level, so the compiler
+// itself emits getlocal/setlocal with the right (level, index) — vm_eval.c
+// ruby_4_0:1702-1760. rbgo's CompileEvalWithLocals builds a SINGLE synthetic
+// parent holding a flat name list, so every binding local compiles to depth 1.
+// The RUNTIME chain is already correct — the eval frame's env.parent IS the
+// binding's env, whose own parent is the enclosing scope — so only the operands
+// are wrong, and they are wrong by exactly the name's depth.
+//
+// The rewrite is total and local: at tree level k inside the eval (the eval body
+// itself is 0), depth k reaches the eval body's own env and depth k+1 is the
+// borrowed scope — the deepest reference the compiler can emit there, since the
+// borrowed scope is the outermost one it knows. So `B == k+1` identifies a
+// reference to the binding and nothing else. A child that BREAKS the env chain (a
+// `def` or a class body written inside the eval) cannot reach past itself, so its
+// instructions never carry a depth that high and descending into it with k+1
+// rewrites nothing — which is why the walk does not need to tell a block child
+// from a method child.
+func (b *Binding) retargetLocals(iseq *bytecode.ISeq) {
+	if b.locs == nil {
+		return
+	}
+	// The identity map is what a binding with no enclosing scope has, and it is
+	// the overwhelmingly common one: skip the walk rather than rewrite operands
+	// to the values they already hold.
+	identity := true
+	for i, l := range b.locs {
+		if l.depth != 0 || l.slot != i {
+			identity = false
+			break
+		}
+	}
+	if identity {
+		return
+	}
+	b.retargetLevel(iseq, 0)
+}
+
+func (b *Binding) retargetLevel(iseq *bytecode.ISeq, k int) {
+	for i := range iseq.Insns {
+		in := &iseq.Insns[i]
+		if in.Op != bytecode.OpGetLocal && in.Op != bytecode.OpSetLocal {
+			continue
+		}
+		if in.B != k+1 || in.A < 0 || in.A >= len(b.locs) {
+			continue
+		}
+		l := b.locs[in.A]
+		in.A = l.slot
+		in.B += l.depth
+	}
+	for _, c := range iseq.Children {
+		b.retargetLevel(c, k+1)
+	}
 }
 
 func (vm *VM) registerBinding() {
@@ -130,34 +260,19 @@ func (vm *VM) registerBinding() {
 			env:     b.env,
 			self:    b.self,
 			definee: b.definee,
+			block:   b.block,
 			file:    b.file,
 			line:    b.line,
 			method:  b.method,
 			names:   append([]string(nil), b.names...),
+			locs:    append([]bindLoc(nil), b.locs...),
 			added:   append([]string(nil), b.added...),
 		}
 	}
 	cBinding.define("dup", bindingDup)
 	cBinding.define("clone", bindingDup)
 	cBinding.define("local_variables", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		b := self.(*Binding)
-		seen := map[string]bool{}
-		var elems []object.Value
-		add := func(n string) {
-			if n != "" && !seen[n] { // skip anonymous slots (pattern subjects etc.)
-				seen[n] = true
-				elems = append(elems, object.Symbol(n))
-			}
-		}
-		// MRI lists local_variable_set-injected locals first (most-recent first),
-		// then the binding's original locals in slot order.
-		for i := len(b.added) - 1; i >= 0; i-- {
-			add(b.added[i])
-		}
-		for _, n := range b.names[:len(b.names)-len(b.added)] {
-			add(n)
-		}
-		return object.NewArrayFromSlice(elems)
+		return self.(*Binding).localVariableNames()
 	})
 	cBinding.define("local_variable_get", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		b := self.(*Binding)
@@ -166,25 +281,57 @@ func (vm *VM) registerBinding() {
 		if i < 0 {
 			raise("NameError", "local variable '%s' is not defined for %s", name, b.ToS())
 		}
-		return b.env.slots[i]
+		e, slot := b.at(i)
+		return e.slots[slot]
 	})
 	cBinding.define("local_variable_set", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		b := self.(*Binding)
 		name := vm.bindingVarName(args[0])
 		if i := b.slotOf(name); i >= 0 {
-			b.env.slots[i] = args[1]
+			// The write lands where the name LIVES, which for a binding taken inside a
+			// block is an ANCESTOR env. Writing b.env.slots[i] instead put the value in
+			// the block's own frame under an index that named something else there, so
+			// `[1].each { b = binding }; b.local_variable_set(:q, 43)` left q at 42 and
+			// raised nothing — one of this defect's silent faces.
+			e, slot := b.at(i)
+			e.slots[slot] = args[1]
 		} else {
 			// A new binding-local: extend the name map, the environment and the
 			// injected-locals list (which local_variables surfaces first).
-			b.names = append(b.names, name)
-			b.added = append(b.added, name)
-			b.env.slots = append(b.env.slots, args[1])
+			b.addLocal(name, args[1])
 		}
 		return args[1]
 	})
 	cBinding.define("local_variable_defined?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return object.Bool(self.(*Binding).slotOf(vm.bindingVarName(args[0])) >= 0)
 	})
+}
+
+// localVariableNames is the Symbol array Binding#local_variables and
+// Kernel#local_variables both answer with. It is one body because in MRI they are
+// one walk: bind_local_variables calls rb_vm_bind_local_variables, and
+// rb_f_local_variables performs the same collection over the caller's frames
+// (vm_eval.c ruby_4_0:2755-2787). Names are deduplicated, which is how an inner
+// local shadowing an outer one is listed once — MRI's local_var_list is a hash.
+func (b *Binding) localVariableNames() object.Value {
+	seen := map[string]bool{}
+	var elems []object.Value
+	add := func(n string) {
+		if n != "" && !seen[n] { // skip anonymous slots (pattern subjects etc.)
+			seen[n] = true
+			elems = append(elems, object.Symbol(n))
+		}
+	}
+	// MRI lists local_variable_set-injected locals first (most-recent first),
+	// then the binding's own locals — this frame's in slot order, then each
+	// enclosing scope's, which is the order collectBindingLocals built.
+	for i := len(b.added) - 1; i >= 0; i-- {
+		add(b.added[i])
+	}
+	for _, n := range b.names[:len(b.names)-len(b.added)] {
+		add(n)
+	}
+	return object.NewArrayFromSlice(elems)
 }
 
 // bindingVarName coerces a local-variable name argument to a Go string: a Symbol

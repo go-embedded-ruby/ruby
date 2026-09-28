@@ -141,6 +141,72 @@ func (vm *VM) registerKernelIntrospection() {
 		vm.cKernel.smethods[name] = &Method{name: name, owner: vm.cKernel, native: fn}
 	}
 
+	// block_given? / iterator? are METHODS in MRI, not only the compiler's
+	// optimised instruction: rb_define_global_function("iterator?",
+	// rb_f_iterator_p, 0) and rb_define_global_function("block_given?",
+	// rb_f_block_given_p, 0) sit side by side in Init_vm_eval (vm_eval.c
+	// ruby_4_0:2879-2880). MRI keeps BOTH — the specialised instruction the
+	// compiler emits for the bareword AND the real method — so `send(:block_given?)`,
+	// `method(:block_given?)` and Kernel.private_instance_methods all work. rbgo
+	// had only the instruction (OpBlockGiven), which is why every one of those
+	// raised NoMethodError, and why Kernel.private_instance_methods(false) said
+	// false where MRI says true.
+	//
+	// The body is rb_f_block_given_p (vm_eval.c ruby_4_0:2810-2817): it asks about
+	// the frame vm_get_ruby_level_caller_cfp lands on — the CALLING Ruby frame —
+	// and not about itself. callerBlockGiven is that walk; registering a body that
+	// reported its own block would answer wrongly for every caller.
+	vm.cObject.define("block_given?", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) != 0 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 0)", len(args))
+		}
+		return object.Bool(vm.callerBlockGiven())
+	})
+	// rb_f_iterator_p is rb_f_block_given_p behind a deprecation notice
+	// (vm_eval.c ruby_4_0:2826-2831). rb_warn_deprecated reports only when the
+	// :deprecated warning category is enabled — off by default since Ruby 3 —
+	// which is why `iterator?` is silent under a plain `ruby file.rb` and speaks
+	// under `ruby -W:deprecated`. Both measured on ruby 4.0.5.
+	vm.cObject.define("iterator?", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) != 0 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 0)", len(args))
+		}
+		if vm.send(vm.consts["Warning"], "[]", []object.Value{object.SymVal("deprecated")}, nil).Truthy() {
+			vm.writeWarningStr(vm.warnUplevelPrefix(0) + "iterator? is deprecated; use block_given? instead\n")
+		}
+		return object.Bool(vm.callerBlockGiven())
+	})
+	// Both are rb_define_global_function, i.e. the module-function split: a PRIVATE
+	// instance method and a public singleton on Kernel. `Object.new.block_given?`
+	// therefore raises "private method 'block_given?' called for …" rather than
+	// "undefined method", and `Kernel.block_given?` answers false. Both measured.
+	// Kernel#local_variables is rb_f_local_variables (vm_eval.c
+	// ruby_4_0:2755-2787), installed by rb_define_global_function alongside the
+	// two above. It was DEFERRED until the Binding walked its enclosing scopes,
+	// deliberately: its body IS that walk, so shipping it first would have shipped
+	// a method that answered [] inside a block where ruby 4.0.5 answers [:y] —
+	// an MRI-divergent method rather than a missing one.
+	//
+	// It reads the caller's frame for the same reason Kernel#binding does: a native
+	// pushes no frame, so the top of the stack is the calling Ruby frame — the cfp
+	// vm_get_ruby_level_caller_cfp lands on. Sharing localVariableNames with
+	// Binding#local_variables is not a convenience: in MRI the two ARE the same
+	// collection, and letting them drift is how they would come to disagree about
+	// shadowing or about the order.
+	vm.cObject.define("local_variables", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) != 0 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 0)", len(args))
+		}
+		return vm.callerBinding().localVariableNames()
+	})
+
+	for _, name := range []string{"block_given?", "iterator?", "local_variables"} {
+		vm.setInstanceVisibility(vm.cObject, name, visPrivate)
+		fn := vm.cObject.methods[name].native
+		vm.cKernel.methods[name] = &Method{name: name, owner: vm.cKernel, native: fn, vis: visPrivate}
+		vm.cKernel.smethods[name] = &Method{name: name, owner: vm.cKernel, native: fn}
+	}
+
 	// caller(start=1, length=nil) / caller(range): a best-effort backtrace as a
 	// String array, listed nearest-first. Like MRI, `start` omits that many
 	// innermost levels (caller == caller(1) drops the frame that called caller;

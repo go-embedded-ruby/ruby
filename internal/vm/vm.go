@@ -249,6 +249,22 @@ type frameCode struct {
 	env     *Env
 	self    object.Value
 	definee *RClass
+
+	// block is the block in scope for this frame — MRI's
+	// VM_CF_BLOCK_HANDLER(cfp), which reads the block handler off the frame's
+	// LOCAL ep (VM_CF_LEP), so a block frame reports its enclosing METHOD's block
+	// rather than one of its own. rbgo reaches the same answer because exec's
+	// `block` parameter is already the method-level block for a block frame (a
+	// block Proc carries it as Proc.block, which is what makes `yield` inside a
+	// block reach the enclosing method's block).
+	//
+	// It is published for the same reason env/self/definee are: a NATIVE method
+	// pushes no frame, so Kernel#block_given? — rb_f_block_given_p (vm_eval.c
+	// ruby_4_0:2810-2817), which answers about the frame
+	// vm_get_ruby_level_caller_cfp lands on, NOT about itself — has nothing to
+	// read otherwise. That is exactly why block_given? could only ever be the
+	// OpBlockGiven intrinsic here and not a method.
+	block *Proc
 }
 
 // frameBinding builds a Binding for the innermost frame at or below index i that
@@ -270,14 +286,21 @@ func (vm *VM) frameBinding(i int) *Binding {
 		if fc.env == nil || fc.iseq == nil {
 			continue
 		}
+		// The Binding outlives the frame, so the env chain it pins must not be
+		// recycled — and now that the chain is WALKED, every ancestor is reachable
+		// through it, which is exactly what markEnvCaptured's own walk covers.
+		// OpBinding marked only because it was the single door; Kernel#binding came
+		// in through frameBinding without marking at all.
+		markEnvCaptured(fc.env)
 		b := &Binding{
 			env:     fc.env,
 			self:    fc.self,
 			definee: fc.definee,
+			block:   fc.block,
 			file:    fc.iseq.File,
 			line:    vm.frameLine(i),
-			names:   append([]string(nil), fc.iseq.Locals...),
 		}
+		vm.collectBindingLocals(b, i)
 		// A Binding is transparent to Kernel#__method__ / #__callee__: code eval'd
 		// through it reports the method the binding was captured in, which is the
 		// pair that frame recorded.
@@ -293,12 +316,111 @@ func (vm *VM) frameBinding(i int) *Binding {
 	return vm.newToplevelBinding()
 }
 
+// collectBindingLocals fills b.names/b.locs for a binding captured at frame i:
+// this frame's locals at depth 0, then each ENCLOSING scope's at depth 1, 2, …
+//
+// It is rb_f_local_variables (vm_eval.c ruby_4_0:2755-2787) walked the same way.
+// MRI adds ISEQ_BODY(cfp->iseq)->local_table for the frame it is on, and while
+// the frame is a BLOCK (!VM_ENV_LOCAL_P(cfp->ep)) it takes the previous ep
+// (VM_CF_PREV_EP) and steps back through the control frames until it finds the
+// one whose ep IS that ep — `while (cfp->ep != ep) cfp = PREVIOUS(cfp)` — then
+// repeats. Matching each parent Env against the frame that published it is that
+// same search: rbgo's frame stack is MRI's cfp stack and Env.parent is its ep
+// chain, and a method frame's env has no parent, which is where both stop.
+//
+// The ORDER is MRI's too, and observable: local_variables lists the innermost
+// scope's names first, so an inner local of the same name shadows an outer one
+// (slotOf takes the first match) exactly as the compiler resolves it.
+//
+// LIMIT, stated because it is a real divergence and not an oversight: MRI has a
+// second arm for a scope whose frame has already returned —
+// vm_collect_local_variables_in_heap reads the escaped env's own local table,
+// because an MRI env carries a pointer to its iseq. An rbgo Env carries only
+// slots and a parent, so a Binding taken inside a block belonging to a frame that
+// has SINCE RETURNED (a Proc stored and called later) names the scopes still on
+// the stack and stops. Everything measured for this wave — a binding taken while
+// the enclosing frame is live, which is every shape in the defect report — takes
+// the first arm.
+func (vm *VM) collectBindingLocals(b *Binding, i int) {
+	fc := vm.frameCode[i]
+	// Depth 0 keeps EVERY slot, anonymous ones included and in slot order, so the
+	// innermost scope's name index is still its slot. Nothing depends on that any
+	// more — locs carries the slot — but a binding with no enclosing scope then
+	// has the identity map it always had, and reads the same in a dump.
+	b.names = append(b.names, fc.iseq.Locals...)
+	b.locs = make([]bindLoc, len(b.names))
+	for k := range b.locs {
+		b.locs[k] = bindLoc{slot: k}
+	}
+	seen := make(map[string]bool, len(b.names))
+	for _, n := range b.names {
+		if n != "" {
+			seen[n] = true
+		}
+	}
+	j := i - 1
+	depth := 1
+	for e := fc.env.parent; e != nil; depth++ {
+		k := -1
+		for ; j >= 0; j-- {
+			if vm.frameCode[j].env == e {
+				k = j
+				break
+			}
+		}
+		if k < 0 {
+			return
+		}
+		if fk := vm.frameCode[k]; fk.iseq != nil {
+			for slot, n := range fk.iseq.Locals {
+				// An anonymous slot cannot be named from an eval and has nothing to
+				// list; only depth 0 keeps them, for the slot identity above.
+				if n == "" || seen[n] {
+					continue
+				}
+				seen[n] = true
+				b.names = append(b.names, n)
+				b.locs = append(b.locs, bindLoc{depth: depth, slot: slot})
+			}
+		}
+		e = e.parent
+		j = k - 1
+	}
+}
+
 // callerBinding is the Binding a NATIVE method's caller would get from
 // Kernel#binding. A native pushes no frame, so the top of the frame stack IS the
 // calling Ruby frame — the cfp rb_vm_get_binding_creatable_next_cfp lands on once
 // it has skipped the CFUNC frame.
 func (vm *VM) callerBinding() *Binding {
 	return vm.frameBinding(len(vm.frameNames) - 1)
+}
+
+// callerBlockGiven answers Kernel#block_given? / #iterator? for a NATIVE method's
+// caller: rb_f_block_given_p takes ec->cfp, steps to the PREVIOUS control frame
+// and runs vm_get_ruby_level_caller_cfp over it, then tests
+// VM_CF_BLOCK_HANDLER(cfp) != VM_BLOCK_HANDLER_NONE (vm_eval.c
+// ruby_4_0:2810-2817). A native pushes no frame in rbgo, so the top of the frame
+// stack already IS that cfp; the walk outward only has to skip a frame whose
+// scope exec has not published yet, exactly as frameBinding does.
+//
+// It answers about the CALLING frame, never about itself — which is why merely
+// registering a method that reported its own block would answer wrongly, and why
+// the frame has to carry the block at all. With no Ruby frame at all (cfp ==
+// NULL) MRI answers false, and so does the empty walk here.
+func (vm *VM) callerBlockGiven() bool {
+	i := len(vm.frameNames) - 1
+	if i >= len(vm.frameCode) {
+		i = len(vm.frameCode) - 1
+	}
+	for ; i >= 0; i-- {
+		fc := vm.frameCode[i]
+		if fc.env == nil || fc.iseq == nil {
+			continue
+		}
+		return fc.block != nil
+	}
+	return false
 }
 
 func (vm *VM) uncaughtBacktrace(e RubyError) []object.Value {
@@ -1670,6 +1792,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 	vm.frameCode[myFrame].env = env
 	vm.frameCode[myFrame].self = self
 	vm.frameCode[myFrame].definee = definee
+	vm.frameCode[myFrame].block = block
 	// frameCrefs mirrors frameNames too; the cref is filled in below once lexCref
 	// is known (a nil placeholder keeps the stacks aligned until then).
 	vm.frameCrefs = append(vm.frameCrefs, nil)

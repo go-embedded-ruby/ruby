@@ -15,10 +15,3 @@ func frontendDropped(string) (*bytecode.ISeq, error) {
 	raise("NotImplementedError", "eval/require of source is unavailable in a closed-world binary (built with rbgo build --closed, without the front-end)")
 	return nil, nil // unreachable: raise panics
 }
-
-// parseCompileEvalFn is the closed-world stub of the eval seam (see
-// frontend_open.go): it refuses for the same reason and with the same message.
-var parseCompileEvalFn = func(src string, firstLine int) (*bytecode.ISeq, error) {
-	_ = firstLine
-	return frontendDropped(src)
-}

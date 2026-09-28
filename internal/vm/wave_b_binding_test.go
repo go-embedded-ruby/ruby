@@ -138,33 +138,53 @@ func TestSpecificEvalStringSeesCallerLocals(t *testing.T) {
 	}
 }
 
-// TestSpecificEvalStringInheritsTheBlockScopeGap records a divergence this change
-// does NOT close, so that nobody reads the tests above as a claim that it did.
+// TestSpecificEvalStringSeesTheBlockScope was TestSpecificEvalStringInheritsTheBlockScopeGap
+// until wave F closed the gap it recorded. It is kept, converted rather than
+// deleted, because it is the join between two changes: #727 put instance_eval's
+// String form onto Kernel#eval's mechanism, and this asserts that the mechanism
+// then carried BOTH of them across the same fix.
 //
-// rbgo's frameBinding (internal/vm/vm.go) builds a Binding from the frame's own
-// iseq.Locals and does not walk the enclosing Env chain, so a binding captured
-// inside a BLOCK cannot see the locals of the method or top level around it. MRI
-// does: `y = 5; [1].map { eval("y * 2") }` is [10] on ruby 4.0.5.
+// The gap it used to pin was frameBinding building a Binding from the frame's own
+// iseq.Locals without walking the enclosing Env chain. It now walks it, the way
+// rb_f_local_variables steps back through the control frames (vm_eval.c
+// ruby_4_0:2755-2787), and the eval body's operands are retargeted onto that
+// chain because pm_eval_make_iseq declares one compile scope per parent_iseq
+// (:1702-1732).
 //
-// That gap is Kernel#eval's already — it predates this change and behaves
-// identically there — and instance_eval now shares it precisely BECAUSE the two
-// were joined onto one mechanism. Pinning it keeps the two in step: when
-// frameBinding learns to walk the parent env, this test fails and both want
-// is [10].
-func TestSpecificEvalStringInheritsTheBlockScopeGap(t *testing.T) {
-	const evalSrc = `y = 5; p([1].map { eval("y * 2") })`
-	const ievalSrc = `y = 5; p([1].map { Object.new.instance_eval("y * 2") })`
-	// A NESTED string-eval is the same gap wearing a different hat: the outer
-	// eval's own frame resolves `y` up-scope rather than owning a slot for it, so
-	// the inner callerBinding cannot see it either. ruby 4.0.5 answers 2.
-	const nestedSrc = `y = 5; p Object.new.instance_eval("Object.new.instance_eval('y * 2')")`
-	const want = "undefined method 'y' for "
-	for _, src := range []string{evalSrc, ievalSrc, nestedSrc} {
-		class, msg := evalErr(t, src)
-		if class != "NoMethodError" || len(msg) < len(want) || msg[:len(want)] != want {
-			t.Errorf("src=%q: got %s:%q; expected the shared block-scope gap (%s%s…). "+
-				"If frameBinding now walks the enclosing env, both of these answer [10] on "+
-				"ruby 4.0.5 and this test should become that assertion.", src, class, msg, "NoMethodError:", want)
-		}
+// Each source is measured SEPARATELY against ruby 4.0.5 rather than sharing one
+// expectation, and the third is why: the old test's failure message predicted
+// "[10]" for all of them, and its comment predicted 2 for the nested case. Both
+// were wrong. The nested eval is not inside a map, so it answers the bare 10 —
+// measured, not deduced.
+func TestSpecificEvalStringSeesTheBlockScope(t *testing.T) {
+	for _, c := range []struct{ name, src, want string }{
+		// Kernel#eval in a block: the gap's original shape.
+		{"eval_in_block", `y = 5; p([1].map { eval("y * 2") })`, "[10]"},
+		// instance_eval(String) in a block: it reaches the same frameBinding since
+		// #727, so it had to flip with the one above and not separately.
+		{"instance_eval_in_block", `y = 5; p([1].map { Object.new.instance_eval("y * 2") })`, "[10]"},
+		// A NESTED string-eval, which #727 grouped here as the same cause: the outer
+		// eval's frame resolves y UP-SCOPE instead of owning a slot, so the inner
+		// callerBinding could not see it. It is the same cause, and it is NOT the
+		// same answer — no array here.
+		{"nested_string_eval", `y = 5; p Object.new.instance_eval("Object.new.instance_eval('y * 2')")`, "10"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if got := eval(t, c.src); got != c.want+"\n" {
+				t.Errorf("src=%q got=%q want=%q (ruby 4.0.5)", c.src, got, c.want+"\n")
+			}
+		})
+	}
+}
+
+// TestNestedStringEvalWritesReachTheOuterLocal is the write direction of the
+// nested case above, which the gap test never covered: reading up-scope through
+// two evals and writing up-scope through two evals are different operands
+// (getlocal vs setlocal) and the retargeting has to move both. ruby 4.0.5 answers
+// 99.
+func TestNestedStringEvalWritesReachTheOuterLocal(t *testing.T) {
+	const src = `y = 5; Object.new.instance_eval("Object.new.instance_eval('y = 99')"); p y`
+	if got, want := eval(t, src), "99\n"; got != want {
+		t.Errorf("got %q, want %q (ruby 4.0.5)", got, want)
 	}
 }
