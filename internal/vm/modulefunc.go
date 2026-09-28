@@ -119,6 +119,19 @@ func (vm *VM) registerModuleExtras() {
 			native: func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
 				return vm.send(vm.cObject, "define_method", args, blk)
 			}}
+		// Top-level `ruby2_keywords :foo` marks a method on Object, main's default
+		// definee. MRI registers it exactly like top_public/top_private — as a
+		// PRIVATE singleton method of main (vm_method.c:3560 at tag ruby_4_0),
+		// whose body is rb_mod_ruby2_keywords applied to rb_top_main_class, i.e.
+		// Object. It has to be a singleton method and not merely Module's private
+		// instance method, because main is not a Module: without this entry
+		// `main.private_methods(false)` does not list it and a top-level
+		// `ruby2_keywords :foo` finds no receiver that answers.
+		sc.methods["ruby2_keywords"] = &Method{name: "ruby2_keywords", owner: sc, vis: visPrivate,
+			native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+				return vm.send(vm.cObject, "ruby2_keywords", args, nil)
+			}}
+
 		// Bare `include M` at the top level mixes M into Object, so its constants
 		// and methods become globally visible. MRI defines this as a PRIVATE
 		// singleton method on main that forwards to Module#include on Object —
@@ -173,15 +186,11 @@ func (vm *VM) registerModuleExtras() {
 	// warning shows at $VERBOSE == false and is silenced only by nil. It returns
 	// nil whatever happened.
 	//
-	// The flag itself is not carried yet: MRI writes
-	// ISEQ_BODY(...)->param.flags.ruby2_keywords, which rbgo's bytecode.ISeq has
-	// no field for, and honouring it belongs to the splat binding. So a markable
-	// method is accepted silently and behaves as it did before — the same
-	// partial contract Proc#ruby2_keywords already ships in this VM. What IS
-	// decided here is every observable that does not depend on the flag: the
-	// method exists (a program guarded by `respond_to?(:ruby2_keywords, true)`
-	// no longer dies on NoMethodError), the arity/TypeError/NameError contract,
-	// and the four warnings.
+	// A markable name sets bytecode.ISeq.Ruby2Keywords, MRI's
+	// ISEQ_BODY(...)->param.flags.ruby2_keywords. Honouring it is the splat
+	// binding's job, in wave_c_ruby2_keywords.go: the callee side flags the
+	// trailing keyword Hash bound into the *rest, and the call site re-splats a
+	// flagged Hash as keywords.
 	vm.cModule.define("ruby2_keywords", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		mod := self.(*RClass)
 		if len(args) == 0 {
@@ -218,6 +227,13 @@ func (vm *VM) registerModuleExtras() {
 				// no post-splat positional either, which is also why 4.0 names post
 				// arguments in the text where 3.4 did not.
 				skip(name, "method accepts keywords or post arguments or method does not accept argument splat")
+			default:
+				// ISEQ_BODY(me->def->body.iseq.iseqptr)->param.flags.ruby2_keywords = 1
+				// (vm_method.c rb_mod_ruby2_keywords:3114 at tag ruby_4_0). The write
+				// lands on the ISeq, which an alias shares whichever order the two
+				// were written in — the spec's "applies to the underlying method and
+				// applies across aliasing".
+				markRuby2KeywordsISeq(methodISeq(own))
 			}
 		}
 		return object.NilV

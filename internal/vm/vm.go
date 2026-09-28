@@ -1364,6 +1364,13 @@ func iseqPostCount(is *bytecode.ISeq) int {
 // FlagSendNoKW.
 func applyKWSplat(elems []object.Value, flags int) ([]object.Value, bool) {
 	if flags&bytecode.FlagSendKWSplat == 0 {
+		// A ruby2_keywords-flagged Hash arriving last in a splatted argument list
+		// turns this call into a keyword call, whatever the compiler concluded
+		// about the written syntax (vm_caller_setup_arg_splat sets
+		// VM_CALL_KW_SPLAT). See wave_c_ruby2_keywords.go.
+		if out, isKW := ruby2KeywordsResplat(elems); isKW {
+			return out, false
+		}
 		return elems, flags&bytecode.FlagSendNoKW != 0
 	}
 	if n := len(elems); n > 0 {
@@ -1582,6 +1589,10 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 			rest = append(rest, args[si:avail]...)
 		}
 		env.slots[si] = object.NewArrayFromSlice(rest)
+		// ruby2_keywords: a trailing keyword Hash bound into this *rest is
+		// replaced by a FLAGGED copy, so a later `f(*rest)` re-splats it as
+		// keywords. See wave_c_ruby2_keywords.go.
+		ruby2KeywordsBindRest(iseq, env.slots[si], noKW)
 		for j := 0; j < npost; j++ {
 			if srcIdx := len(args) - npost + j; srcIdx >= 0 && srcIdx < len(args) {
 				env.slots[si+1+j] = args[srcIdx]

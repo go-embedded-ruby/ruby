@@ -69,15 +69,22 @@ func (vm *VM) registerProcMethods() {
 	// *rest as a flagged hash. Only a proc that accepts an argument splat and
 	// neither keywords, a keyword-splat nor post-splat positionals is markable;
 	// any other shape prints a warning and is left unchanged. Either way it returns
-	// self. (Full flag propagation needs Hash keyword-flagging, so this installs the
-	// MRI-visible warning + self-return contract.)
+	// self.
+	//
+	// The flag is written on the ISeq, which is MRI's
+	// ISEQ_BODY(proc->block.as.captured.code.iseq)->param.flags.ruby2_keywords = 1
+	// (proc.c proc_ruby2_keywords:4133 at tag ruby_4_0). Putting it there rather
+	// than on the Proc is what makes it survive #dup and #clone, which share the
+	// ISeq — core/proc/ruby2_keywords_spec.rb's "applies across duplication".
 	vm.cProc.define("ruby2_keywords", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		p := self.(*Proc)
 		if !procRuby2KeywordsMarkable(p.iseq) {
 			vm.send(vm.main, "warn", []object.Value{
 				object.NewString("Skipping set of ruby2_keywords flag for proc (proc accepts keywords or proc does not accept argument splat)"),
 			}, nil)
+			return self
 		}
+		markRuby2KeywordsISeq(p.iseq)
 		return self
 	})
 

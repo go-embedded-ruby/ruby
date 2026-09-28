@@ -350,6 +350,20 @@ type ISeq struct {
 	// was defined rather than line 0.
 	FirstLine int
 
+	// Ruby2Keywords is MRI's ISEQ_BODY(iseq)->param.flags.ruby2_keywords, set by
+	// Module#ruby2_keywords / Proc#ruby2_keywords (vm_method.c
+	// rb_mod_ruby2_keywords:3114, proc.c proc_ruby2_keywords:4133 at tag
+	// ruby_4_0). It can only be set on an ISeq that has a *rest and neither
+	// keyword parameters nor post positionals, which is what makes it
+	// unambiguous: a trailing keyword Hash bound into that *rest is FLAGGED
+	// (RHASH_PASS_AS_KEYWORDS) so a later `f(*rest)` re-splats it as keywords.
+	//
+	// It lives on the ISeq, not the Method, because MRI marks the instruction
+	// sequence: an alias created either before or after the call shares it, which
+	// is the "applies across aliasing" contract, and a Proc duplicated with #dup
+	// or #clone shares it too.
+	Ruby2Keywords bool
+
 	// Caches backs the per-call-site inline method caches, one slot per
 	// instruction (only OpSend slots are ever used). It is opaque to this package
 	// — the vm package allocates it and gives it meaning — so the field is typed
