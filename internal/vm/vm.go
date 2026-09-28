@@ -2222,7 +2222,14 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				if c := cvarOwner(definee, name); c != nil {
 					push(c.cvars[name])
 				} else {
-					raise("NameError", "uninitialized class variable %s in %s", name, definee.name)
+					// MRI raises this through rb_name_err_raise (variable.c
+					// r4:4166, rb_cvar_get), whose first argument IS the
+					// exception's receiver — so #receiver answers the class the
+					// lookup started from and #name the @@variable. rbgo built the
+					// same message and left both nil.
+					vm.raiseWithIvars("NameError",
+						fmt.Sprintf("uninitialized class variable %s in %s", name, definee.name),
+						map[string]object.Value{"@name": object.SymVal(name), "@receiver": definee})
 				}
 			case bytecode.OpGetCVarQuiet:
 				// The read side of @@name ||= …: an undefined class variable is

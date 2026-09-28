@@ -248,3 +248,23 @@ func TestConstBaseOfTheTopLevelIsObject(t *testing.T) {
 		t.Errorf("constBase(CB_M) => %v, want CB_M", got)
 	}
 }
+
+// TestUninitializedClassVariableNameErrorIsPopulated: the message was already
+// MRI's, but #name and #receiver were nil. MRI raises through
+// rb_name_err_raise, whose first argument is the receiver, so the class the
+// lookup started from is reported — the SUBCLASS, not the owner it would have
+// searched up to.
+func TestUninitializedClassVariableNameErrorIsPopulated(t *testing.T) {
+	src := `class CV1
+  def go; @@nope; end
+end
+begin; CV1.new.go; rescue NameError => e; p e.message, e.name, e.receiver; end
+class CV2; class Sub < CV2; def go; @@nope3; end; end; end
+begin; CV2::Sub.new.go; rescue NameError => e; p e.message, e.name, e.receiver; end
+`
+	want := "\"uninitialized class variable @@nope in CV1\"\n:@@nope\nCV1\n" +
+		"\"uninitialized class variable @@nope3 in CV2::Sub\"\n:@@nope3\nCV2::Sub\n"
+	if got := eval(t, src); got != want {
+		t.Errorf("got %q want %q", got, want)
+	}
+}
