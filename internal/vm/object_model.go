@@ -2260,11 +2260,18 @@ func (vm *VM) callNative(m *Method, self object.Value, args []object.Value, blk 
 
 // isBuiltinValueMethod reports whether m is one of the wrapped value's own
 // value-class methods (defined on its class or an included module such as
-// Comparable/Enumerable), as opposed to a generic Object/BasicObject method
-// (object_id, freeze, ==, ivar accessors, class) that must keep operating on the
-// wrapper so identity and instance variables behave.
+// Comparable/Enumerable), as opposed to a generic Kernel/Object/BasicObject
+// method (object_id, freeze, ==, ivar accessors, class) that must keep operating
+// on the wrapper so identity and instance variables behave.
+//
+// Kernel is listed beside Object and BasicObject because rehomeKernelMethods
+// gives Kernel's methods their MRI owner, and every value class includes Kernel
+// through Object — so without this line classIsA would answer true for all of
+// them and `class KindaClass < String; end; KindaClass.new.is_a?(KindaClass)`
+// would run is_a? on the unwrapped String and answer false. It is the generic
+// half of the receiver that a Kernel method is about, exactly as for Object.
 func (vm *VM) isBuiltinValueMethod(m *Method, builtin object.Value) bool {
-	if m.owner == vm.cObject || m.owner == vm.cBasicObject {
+	if m.owner == vm.cObject || m.owner == vm.cBasicObject || m.owner == vm.cKernel {
 		return false
 	}
 	return classIsA(vm.classOf(builtin), m.owner)

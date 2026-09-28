@@ -1129,7 +1129,7 @@ func (vm *VM) bootstrap() {
 	// Kernel#fail is a genuine alias of Kernel#raise in MRI: the two names share one
 	// method record, so Kernel.instance_method(:fail) == …(:raise) and
 	// Kernel.method(:fail) == …(:raise). The shared record is mirrored onto the
-	// Kernel module by registerKernelModuleFunctions ("fail" listed beside "raise").
+	// Kernel module by rehomeKernelMethods ("fail" listed beside "raise").
 	// Reference: ruby/ruby v3_4_0 eval.c (rb_f_raise registered under both names).
 	aliasBuiltin(vm.cObject, "fail", "raise")
 	vm.cObject.define("Integer", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
@@ -6496,119 +6496,143 @@ func (vm *VM) bootstrap() {
 	// range-specific definitions win over any inherited Enumerable ones.
 	vm.registerRangeEdges()
 	// The Kernel global functions whose body forwards to ARGF / IO / Process:
-	// those objects must already exist, so this runs after them and before the
-	// module-function split that reflects their visibility.
+	// those objects must already exist, so this runs after them.
 	vm.registerKernelDelegates()
-	// Split the Kernel module functions into a private instance method + a public
-	// Kernel-module method, as MRI does — runs last, once every listed method is
-	// defined above.
-	vm.registerKernelModuleFunctions()
-	// Re-home the plain (non-module-function) public Kernel instance methods onto
-	// the Kernel module, as MRI places them. Runs after the module-function split.
-	vm.registerKernelPublicMethods()
+	// Move Kernel's methods off Object and onto the Kernel module, where MRI
+	// defines them — runs last, once every one of them is defined above.
+	vm.rehomeKernelMethods()
 }
 
-// registerKernelPublicMethods reflects the placement CRuby gives these Kernel
-// instance methods: they live on the Kernel module — Object merely includes it —
-// so Kernel.public_instance_methods(false) lists them, Kernel.instance_method(:m)
-// resolves them, and (for the two the specs check) Kernel.method(:m).owner reports
-// Kernel. The bodies stay defined on Object with their Object owner UNCHANGED:
-// callNative unwraps a built-in value subclass's receiver for any method whose
-// owner is not Object/BasicObject (isBuiltinValueMethod), so re-owning is_a? to
-// Kernel would make `KindaClass.new.is_a?(KindaClass)` run on the unwrapped String
-// and answer false. Instead each Object record is COPIED onto cKernel with a
-// Kernel owner — exactly as registerKernelModuleFunctions does for the
-// module-function set. yield_self is a genuine alias of then (they share ONE
-// Object record), so it must share ONE Kernel copy too, or the mirrored
-// UnboundMethods would compare unequal; the mirrored map reuses the first copy
-// made for each source record. respond_to_missing? carries visPrivate on its
-// record, so it lists under Kernel.private_instance_methods.
-func (vm *VM) registerKernelPublicMethods() {
-	// The instance-method mirror: powers Kernel.public/private_instance_methods,
-	// Kernel.instance_method and the alias equalities.
-	mirrored := map[*Method]*Method{}
-	for _, name := range []string{
-		"respond_to?", "respond_to_missing?", "eql?", "remove_instance_variable",
-		"then", "yield_self",
-	} {
+// The three sets below are the name → owner/visibility map CRuby gives Kernel.
+// They are derived from the MRI 4.0.5 C source (see rehomeKernelMethods) and
+// reconciled against the running 4.0.5 binary, which wins wherever the two
+// disagree; wave_d_kernel_homing_test.go pins every entry.
+//
+// kernelPublicNames: rb_define_method(rb_mKernel, …) — public instance methods
+// of Kernel (r4-object.c Init_Object, r4-proc.c Init_Proc, r4-vm_method.c).
+var kernelPublicNames = []string{
+	"!~", "<=>", "===", "class", "clone", "define_singleton_method",
+	"display", "dup", "enum_for", "eql?", "extend", "freeze", "frozen?",
+	"inspect", "instance_of?", "instance_variable_defined?",
+	"instance_variable_get", "instance_variable_set", "instance_variables",
+	"is_a?", "itself", "kind_of?", "method", "methods", "nil?",
+	"object_id", "private_methods", "protected_methods", "public_method",
+	"public_methods", "public_send", "remove_instance_variable",
+	"respond_to?", "send", "singleton_class", "singleton_method",
+	"singleton_methods", "tap", "then", "to_enum", "to_s", "yield_self",
+}
+
+// kernelPrivateNames: private instance methods of Kernel that are NOT module
+// functions — no public method appears on the Kernel module itself. The
+// initialize_* hooks and respond_to_missing? are rb_define_method (public) in
+// the C source shipped here, yet ruby 4.0.5 reports them private; the ORACLE
+// wins, and that disagreement is recorded in the PR.
+var kernelPrivateNames = []string{
+	"gem", "gem_original_require", "initialize_clone", "initialize_copy",
+	"initialize_dup", "instance_variables_to_inspect", "pp",
+	"respond_to_missing?",
+}
+
+// kernelModuleFunctionNames: rb_define_global_function(…) and
+// rb_define_module_function(rb_mKernel, …) — each is BOTH a private instance
+// method of Kernel and a public method on the Kernel module object, which is
+// exactly Kernel.singleton_methods(false) on the oracle (62 names).
+var kernelModuleFunctionNames = []string{
+	"Array", "Complex", "Float", "Hash", "Integer", "Pathname", "Rational",
+	"String", "__callee__", "__dir__", "__method__", "`", "abort",
+	"at_exit", "autoload", "autoload?", "binding", "block_given?",
+	"caller", "caller_locations", "catch", "eval", "exec", "exit", "exit!",
+	"fail", "fork", "format", "gets", "global_variables", "iterator?",
+	"lambda", "load", "local_variables", "loop", "open", "p", "print",
+	"printf", "proc", "putc", "puts", "raise", "rand", "readline",
+	"readlines", "require", "require_relative", "select", "set_trace_func",
+	"sleep", "spawn", "sprintf", "srand", "syscall", "system", "test",
+	"throw", "trace_var", "trap", "untrace_var", "warn",
+}
+
+// kernelNamesHeldBack are Kernel methods this pass deliberately does NOT move,
+// each because a site OUTSIDE this change's file cluster decides something by
+// comparing a method's owner against cObject, and would change behaviour the
+// moment the owner becomes cKernel. They are listed here rather than omitted
+// silently, and wave_d_kernel_homing_test.go asserts the set EXACTLY, so the
+// list cannot grow unnoticed and must be emptied as each site is fixed.
+//
+//	hash — internal/vm/vm.go hasCustomHash reports "this key has a custom
+//	  #hash" as `m.owner != vm.cObject && m.owner != vm.cBasicObject`. Re-homing
+//	  Kernel#hash makes that true for EVERY key, so object.CustomKeyHook engages
+//	  for plain objects and each probe costs a Ruby-level send(:hash) plus
+//	  send(:eql?). Measured: 60k plain Object keys inserted and read back go from
+//	  0.027s to 50s — ~1800x — with no test or spec failing, because correctness
+//	  is preserved and only the cost explodes. The fix is to add
+//	  `&& m.owner != vm.cKernel` there, exactly as isBuiltinValueMethod does
+//	  here; then "hash" moves back into kernelPublicNames.
+var kernelNamesHeldBack = []string{"hash"}
+
+// rehomeKernelMethods moves Kernel's methods onto the Kernel module, where MRI
+// defines them. rbgo builds them on Object because that is where dispatch finds
+// them anyway (Object includes Kernel), but MRI's Object defines NOTHING of its
+// own: grepping the 4.0.5 C sources for rb_define_method(rb_cObject, …),
+// rb_define_private_method(rb_cObject, …) and rb_define_protected_method(rb_cObject, …)
+// returns zero hits, while rb_define_method(rb_mKernel, …) /
+// rb_define_global_function(…) account for the whole set (r4-object.c
+// Init_Object, r4-proc.c Init_Proc, r4-eval.c Init_eval, r4-io.c Init_IO,
+// process.c Init_process, ruby.c). Everything that asks WHERE a method lives —
+// #owner, Module#instance_method, the (false) instance-method listings — was
+// therefore wrong for all of them, even though dispatch was not.
+//
+// The record is MOVED, not copied: one *Method now owned by cKernel, reachable
+// from cKernel.methods and removed from cObject.methods. That is what makes the
+// hand-maintained mirror this replaces unnecessary — there is no second copy to
+// fall out of step, which is how Kernel#binding came to be missing from the old
+// list (#727) while `send(:binding)` worked. A genuine built-in alias (then /
+// yield_self, format / sprintf) shares ONE record, so moving in place keeps the
+// two names equal automatically; only the module-function singleton copies need
+// the explicit sharing map.
+//
+// Runs last in setupBuiltins, after every Kernel method is defined.
+func (vm *VM) rehomeKernelMethods() {
+	// One singleton copy per SOURCE record, so format/sprintf keep comparing equal.
+	smirror := map[*Method]*Method{}
+	rehome := func(name string, vis visibility, modfunc bool) {
 		m := vm.cObject.methods[name]
-		if cp, ok := mirrored[m]; ok {
-			vm.cKernel.methods[name] = cp
-			continue
+		if m == nil {
+			// Already on Kernel (the initialize_* hooks, !~), or not built for this
+			// target (fork/exec/syscall are absent under wasm): nothing to move.
+			m = vm.cKernel.methods[name]
+			if m == nil {
+				return
+			}
+		}
+		m.owner, m.vis = vm.cKernel, vis
+		vm.cKernel.methods[name] = m
+		delete(vm.cObject.methods, name)
+		// A visibility override recorded on Object for a name Object no longer
+		// defines would keep the name in Object's (false) listings.
+		delete(vm.cObject.visOverrides, name)
+		if !modfunc {
+			delete(vm.cKernel.smethods, name)
+			return
+		}
+		if cp, ok := smirror[m]; ok {
+			vm.cKernel.smethods[name] = cp
+			return
 		}
 		cp := *m
-		cp.owner = vm.cKernel
-		vm.cKernel.methods[name] = &cp
-		mirrored[m] = &cp
+		cp.vis = visPublic
+		vm.cKernel.smethods[name] = &cp
+		smirror[m] = &cp
 	}
-	// A class-method copy for the two whose spec reads Kernel.method(:m).owner:
-	// resolveMethod tries a receiver's singleton/class methods before its instance
-	// methods, so Kernel.method(:respond_to?) resolves to this Kernel-owned copy
-	// rather than the Object record the ancestor walk would find first.
-	for _, name := range []string{"respond_to?", "respond_to_missing?"} {
-		sm := *vm.cObject.methods[name]
-		sm.owner = vm.cKernel
-		vm.cKernel.smethods[name] = &sm
+	for _, n := range kernelPublicNames {
+		rehome(n, visPublic, false)
 	}
-}
-
-// registerKernelModuleFunctions applies MRI's module_function split to the Kernel
-// methods that carry it: each becomes a PRIVATE instance method (so `Integer(x)`
-// works but `obj.Integer(x)` does not) and a PUBLIC method on the Kernel module
-// itself (so `Kernel.Integer(x)` works and it appears in Kernel.public_methods).
-// The bodies live on Object; this only reflects the visibility split MRI reports
-// through Kernel.private_instance_methods / Kernel.public_methods, mirroring the
-// records onto cKernel exactly as __method__/__callee__ already do. The set is
-// Kernel.private_instance_methods(false) from ruby 4.0.6 intersected with what
-// rbgo defines; a name absent on this build (e.g. fork/exec/system under wasm) is
-// simply skipped. Runs after every listed method is registered.
-//
-// "binding" is on the list for the same reason every other name is, and it was
-// MISSING: rb_define_global_function("binding", rb_f_binding, 0) (proc.c
-// ruby_4_0:4726) is the module-function form, registerBinding already marks the
-// Object-side record private, but nothing mirrored it onto Kernel — so
-// Kernel.private_instance_methods(false).include?(:binding) answered false while
-// self.send(:binding) worked. A hand-kept list drifts one name at a time; the
-// symmetric difference against ruby 4.0.5 is now four genuinely-undefined names
-// (iterator?, local_variables, set_trace_func, instance_variables_to_inspect),
-// one that is an intrinsic and not yet a method (block_given?), and the rubygems
-// /pp additions MRI preloads (gem, gem_original_require, pp, Pathname) — none of
-// which this mirror can reach, since it only reflects records that exist.
-func (vm *VM) registerKernelModuleFunctions() {
-	names := []string{
-		"Array", "Complex", "Float", "Hash", "Integer", "Rational", "String",
-		"__dir__", "`", "abort", "at_exit", "autoload", "autoload?", "binding",
-		"caller", "caller_locations",
-		"catch", "eval", "exec", "exit", "exit!", "fail", "fork", "format", "gets",
-		"global_variables", "lambda",
-		"load", "loop", "open", "p", "print", "printf", "proc", "putc", "puts",
-		"raise", "rand", "readline", "readlines", "require", "require_relative",
-		"select", "sleep", "spawn", "sprintf",
-		"srand", "syscall", "system", "test", "throw", "trace_var", "trap",
-		"untrace_var", "warn",
+	for _, n := range kernelPrivateNames {
+		rehome(n, visPrivate, false)
 	}
-	// Two names that share ONE underlying Object record (a genuine built-in alias
-	// such as format/sprintf) must keep sharing after the mirror, or their mirrored
-	// UnboundMethods/Methods would compare unequal. Reuse the copies made for the
-	// first name each source record is seen under.
-	mirrored := map[*Method][2]*Method{}
-	for _, name := range names {
-		if m := vm.cObject.methods[name]; m != nil {
-			m.vis = visPrivate
-			if cp, ok := mirrored[m]; ok {
-				vm.cKernel.methods[name] = cp[0]
-				vm.cKernel.smethods[name] = cp[1]
-				continue
-			}
-			priv := *m
-			priv.owner, priv.vis = vm.cKernel, visPrivate
-			vm.cKernel.methods[name] = &priv
-			pub := *m
-			pub.owner, pub.vis = vm.cKernel, visPublic
-			vm.cKernel.smethods[name] = &pub
-			mirrored[m] = [2]*Method{&priv, &pub}
-		}
+	for _, n := range kernelModuleFunctionNames {
+		rehome(n, visPrivate, true)
 	}
+	// Owners and visibilities changed after setup filled the inline caches.
+	bumpMethodSerial()
 }
 
 // defaultObjectInspect renders MRI's Object#inspect for a plain object: the class
