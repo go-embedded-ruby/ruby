@@ -3637,7 +3637,7 @@ func (vm *VM) defineModuleIn(parent *RClass, name string, body *bytecode.ISeq, s
 // With the default #respond_to? the plain method lookup answers, and no Ruby
 // call is made.
 func (vm *VM) respondsToConversion(v object.Value, name string) bool {
-	if m := vm.findMethod(v, "respond_to?"); m != vm.cObject.methods["respond_to?"] {
+	if m := vm.findMethod(v, "respond_to?"); m != vm.cKernel.methods["respond_to?"] {
 		return vm.send(v, "respond_to?", []object.Value{object.SymVal(name)}, nil).Truthy()
 	}
 	return vm.findMethod(v, name) != nil

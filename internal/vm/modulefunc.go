@@ -574,12 +574,18 @@ func (vm *VM) checkTransplantBindable(cls, owner *RClass) {
 	if owner == nil || owner.isModule {
 		return
 	}
-	// rbgo models the Kernel methods (instance_of?, respond_to?, …) as Object
-	// instance methods, so an UnboundMethod pulled from Object reports Object as its
-	// owner where MRI reports Kernel (a Module). Treat the universal roots as
-	// permissive owners so such a method can be re-homed onto any class, including a
-	// BasicObject subclass — matching MRI's module-owner rule.
-	if owner == vm.cObject || owner == vm.cBasicObject {
+	// BasicObject is a permissive owner: its methods (__send__, ==, equal?,
+	// instance_eval, …) can be re-homed onto any class, matching MRI.
+	//
+	// Object used to be listed here too, and the reason is now gone: it read
+	// "rbgo models the Kernel methods as Object instance methods, so an
+	// UnboundMethod pulled from Object reports Object where MRI reports Kernel (a
+	// Module)". rehomeKernelMethods gives them their MRI owner, so they now report
+	// Kernel -- a module, caught by the isModule guard above -- and the Object arm
+	// became unreachable, which coverage reported as 100% -> 88.9%. Removing the
+	// workaround is the point of that change; keeping a dead arm would leave the
+	// shape a later reader would trust.
+	if owner == vm.cBasicObject {
 		return
 	}
 	if classIsA(cls, owner) {
