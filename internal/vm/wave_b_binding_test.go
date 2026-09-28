@@ -104,6 +104,32 @@ func TestSpecificEvalStringSeesCallerLocals(t *testing.T) {
 		// caller's: routing through the caller's scope must not borrow its path.
 		{"explicit filename wins", `p Object.new.instance_eval("__FILE__", "given.rb")`, `"given.rb"`},
 		{"explicit first line wins", `p Object.new.instance_eval("__LINE__", "given.rb", 40)`, "40"},
+		// A second batch of shapes the first cannot reach: the caller local is read
+		// from inside a BLOCK in the eval string, is a block PARAMETER of the
+		// caller, is reported by defined?, is reassigned from its own value, or
+		// belongs to a frame whose receiver is an immediate or a frozen object.
+		// All measured on ruby 4.0.5.
+		{"a block in the eval string closes over it",
+			`m = 3; p Object.new.instance_eval("[1,2].map { |z| z * m }")`, "[3, 6]"},
+		{"the caller local is a block parameter",
+			`p([7].map { |bp| Object.new.instance_eval("bp * 3") })`, "[21]"},
+		{"defined? sees it",
+			`dd = 1; p Object.new.instance_eval("defined?(dd)")`, `"local-variable"`},
+		{"read-modify-write of a caller local",
+			`k = 0; Object.new.instance_eval("k = k + 7"); p k`, "7"},
+		{"a frozen receiver still reads caller locals",
+			`s = "str".freeze; n = 2; p s.instance_eval("size + n")`, "5"},
+		{"module_eval over a Module, not a Class",
+			`w = 9; m = Module.new; p m.module_eval("w")`, "9"},
+		{"value assigned before the eval, not at declaration",
+			`q = nil; q = 4; p Object.new.instance_eval("q")`, "4"},
+		// A `def` inside the eval string does NOT close over the caller local: a
+		// method body opens a fresh scope in MRI too. rbgo reports NoMethodError
+		// where ruby 4.0.5 reports NameError for a bare identifier — an
+		// engine-wide error-class difference, unchanged by this work — so only the
+		// fact that it RAISES is asserted here.
+		{"a def in the eval string does not close over it",
+			`v = 5; c = Class.new; c.class_eval("def g; v; end"); p((c.new.g rescue :raised))`, ":raised"},
 	}
 	for _, c := range cases {
 		if got := eval(t, c.src); got != c.want+"\n" {
@@ -128,8 +154,12 @@ func TestSpecificEvalStringSeesCallerLocals(t *testing.T) {
 func TestSpecificEvalStringInheritsTheBlockScopeGap(t *testing.T) {
 	const evalSrc = `y = 5; p([1].map { eval("y * 2") })`
 	const ievalSrc = `y = 5; p([1].map { Object.new.instance_eval("y * 2") })`
+	// A NESTED string-eval is the same gap wearing a different hat: the outer
+	// eval's own frame resolves `y` up-scope rather than owning a slot for it, so
+	// the inner callerBinding cannot see it either. ruby 4.0.5 answers 2.
+	const nestedSrc = `y = 5; p Object.new.instance_eval("Object.new.instance_eval('y * 2')")`
 	const want = "undefined method 'y' for "
-	for _, src := range []string{evalSrc, ievalSrc} {
+	for _, src := range []string{evalSrc, ievalSrc, nestedSrc} {
 		class, msg := evalErr(t, src)
 		if class != "NoMethodError" || len(msg) < len(want) || msg[:len(want)] != want {
 			t.Errorf("src=%q: got %s:%q; expected the shared block-scope gap (%s%s…). "+
