@@ -209,7 +209,7 @@ func (vm *VM) registerModuleExtras() {
 				m = vm.lookupForModuleOp(vm.cObject, name)
 			}
 			if m == nil || m.undefined {
-				vm.raiseNameError("undefined method '"+name+"' for "+vm.moduleDescription(mod), name)
+				vm.raiseNameError("undefined method '"+name+"' for "+vm.moduleDescription(mod), name, mod)
 			}
 			// An own entry that is an `undef` tombstone never reaches here: the
 			// lookup above finds it first and the UNDEFINED_METHOD_ENTRY_P check

@@ -155,11 +155,22 @@ func (vm *VM) registerExceptionMethods(cException *RClass) {
 		return object.NilV
 	})
 	// NameError#receiver: the object on which the missing name was looked up.
-	// MRI raises an ArgumentError ("no receiver is available") when none was
-	// recorded; rbgo records one at every method-dispatch NameError, so an unset
-	// receiver only happens for a bare NameError.new — return nil there. (Const /
-	// class-variable NameErrors do not yet record a receiver either, so raising
-	// here would regress those cases; see the receiver_spec residuals.)
+	//
+	// MRI raises ArgumentError("no receiver is available") when none was recorded
+	// (error.c name_err_receiver checks for the undef marker, not for nil), and
+	// the distinction is real: NameError.new("m", :n, receiver: nil) ANSWERS nil
+	// while NameError.new("m", :n) RAISES. rbgo returns nil for both, because an
+	// absent ivar reads back as nil.
+	//
+	// It still cannot raise, and the reason is now a COUNT rather than a guess.
+	// 47 sites in internal/vm raise a NameError. Only 11 can carry a receiver --
+	// the 8 through raiseNameError and the 3 through raiseWithIvars, all of which
+	// now record what ruby 4.0.5 was measured to record. The other 36 use the bare
+	// raise("NameError", ...) form, spread over 17 files, and record none. Raising
+	// here today would turn each of those from a wrong nil into a wrong exception,
+	// which is louder and no more correct. Each of the 36 has to be measured
+	// against MRI first -- some legitimately have no receiver, as the
+	// global-variable ones do.
 	cNameError.define("receiver", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return getIvar(self, "@receiver")
 	})

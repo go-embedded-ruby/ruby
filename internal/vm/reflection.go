@@ -126,7 +126,12 @@ func (vm *VM) registerReflection() {
 			m = vm.lookupForModuleOp(mod, name)
 		}
 		if m == nil || m.undefined {
-			vm.raiseNameError("undefined method '"+name+"' for class '"+mod.name+"'", name)
+			// MRI says "module 'M'" for a module and "class 'C'" for a class
+			// (rb_mod_instance_method -> rb_print_undef, vm_method.c r4, which
+			// asks rb_obj_class). moduleDescription is that distinction, and the
+			// visibility paths already use it; this one had "class" hard-coded,
+			// so every module read "for class 'M'".
+			vm.raiseNameError("undefined method '"+name+"' for "+vm.moduleDescription(mod), name, mod)
 		}
 		return &UnboundMethod{name: name, owner: m.owner, m: m, vm: vm, origin: mod}
 	})
@@ -138,7 +143,7 @@ func (vm *VM) registerReflection() {
 		name := vm.coerceNameArg(args[0])
 		m := vm.lookupForModuleOp(mod, name)
 		if m == nil || m.undefined {
-			vm.raiseNameError("undefined method '"+name+"' for class '"+mod.name+"'", name)
+			vm.raiseNameError("undefined method '"+name+"' for "+vm.moduleDescription(mod), name, mod)
 		}
 		if vis := instanceVisibility(mod, name, m); vis != visPublic {
 			kind := "private"
