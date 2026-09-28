@@ -45,15 +45,13 @@ func TestWaveDKernelMethodsAreOwnedByKernel(t *testing.T) {
 func TestWaveDObjectDefinesNothingKernelDefines(t *testing.T) {
 	vm := New(io.Discard)
 	all := append(append(append([]string{}, kernelPublicNames...), kernelPrivateNames...), kernelModuleFunctionNames...)
-	// enum_for / to_enum are the one known exception, and the set is asserted
-	// EXACTLY so it cannot quietly grow: registerEnumerator runs from NewVM AFTER
-	// setupBuiltins (it needs the prelude's Enumerable), so its
-	// vm.cObject.define("enum_for", …) / .define("to_enum", …) re-introduce the
-	// pair on Object after rehomeKernelMethods has run. The fix is two characters
-	// of internal/vm/enumerator.go — define them on vm.cKernel instead of
-	// vm.cObject — which is outside this change's file cluster. When it lands,
-	// this exception must be deleted and this test will say so.
-	const knownResidue = "enum_for to_enum"
+	// There is NO exception left: registerEnumerator still runs from NewVM after
+	// rehomeKernelMethods (it needs the prelude's Enumerable), but it now defines
+	// enum_for / to_enum on vm.cKernel, so nothing re-introduces them on Object.
+	// The empty set is asserted exactly, so a Kernel method built after the
+	// re-homing pass — the shape that produced this residue — fails here instead
+	// of quietly answering Object.
+	const knownResidue = ""
 	var residue []string
 	for _, name := range all {
 		if m := vm.cObject.methods[name]; m != nil {

@@ -284,7 +284,8 @@ func (vm *VM) registerKernelIntrospection() {
 	// exit!(status = false) differs only in its default (EXIT_FAILURE) and in
 	// skipping at_exit handlers; the embedded host has no process to _exit() from,
 	// so it unwinds the same way. Both are also reachable as Kernel.exit /
-	// Kernel.exit! — registerKernelModuleFunctions mirrors the records.
+	// Kernel.exit! — rehomeKernelMethods mirrors the records onto Kernel's
+	// singleton for every name in kernelModuleFunctionNames (builtins.go).
 	vm.cObject.define("exit", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		return vm.raiseSystemExit(vm.exitStatusArg(args, 0), "exit")
 	})
@@ -346,9 +347,9 @@ func (vm *VM) raiseSystemExit(status int64, message string) object.Value {
 // CRuby defines by forwarding to another object. MRI declares each with
 // rb_define_global_function (io.c:15615-15628, process.c), which makes it a
 // private instance method reachable without a receiver AND — through the
-// Kernel module_function split registerKernelModuleFunctions applies — a public
-// method on the Kernel module; the names are listed there so the split covers
-// them.
+// Kernel module_function split rehomeKernelMethods applies — a public method on
+// the Kernel module; the names are listed in kernelModuleFunctionNames
+// (builtins.go) so the split covers them.
 //
 // Every body here forwards through vm.send to the object CRuby forwards to, so
 // a spec that stubs ARGF.gets (core/kernel/gets_spec) or replaces IO.select

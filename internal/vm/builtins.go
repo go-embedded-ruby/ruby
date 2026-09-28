@@ -1076,8 +1076,21 @@ func (vm *VM) bootstrap() {
 		if len(args) > 1 {
 			callArgs = object.NewArrayFromSlice(append([]object.Value(nil), args[1:]...))
 		}
-		vm.raiseWithIvars("NoMethodError",
-			"undefined method '"+string(nameSym)+"' for "+vm.undefinedMethodReceiver(self),
+		// A VCALL — a bare identifier that did not resolve to a local — is the one
+		// thing that changes both the class and the message. raise_method_missing
+		// (vm_eval.c:945) is MRI's single reader of MISSING_VCALL: its branch selects
+		// the format "undefined local variable or method '%1$s' for %3$s%4$s" and
+		// swaps exc to rb_eNameError, which rb_make_no_method_exception
+		// (vm_eval.c:927) then builds with rb_name_err_new rather than
+		// rb_nomethod_err_new. #name and #receiver are set either way; #args is not,
+		// and a VCALL carries no arguments, so callArgs is nil here regardless.
+		cls, undef := "NoMethodError", "undefined method '"
+		if vm.missingVCall && vcallNameShape(string(nameSym)) {
+			cls, undef = "NameError", "undefined local variable or method '"
+		}
+		vm.missingVCall = false
+		vm.raiseWithIvars(cls,
+			undef+string(nameSym)+"' for "+vm.undefinedMethodReceiver(self),
 			map[string]object.Value{"@name": nameSym, "@receiver": self, "@args": callArgs})
 		return object.NilV
 	})
@@ -12452,4 +12465,34 @@ func (vm *VM) cmpIntValue(v object.Value) int {
 		return -1
 	}
 	return 0
+}
+
+// vcallNameShape reports whether name can be MRI's NODE_VCALL at all. Two
+// grammar rules decide it and the VM has to honour both, because
+// bytecode.FlagSendVCall records only the SHAPE of the call site (no receiver,
+// no parentheses, no arguments, no block) and not the shape of the NAME:
+//
+//   - gettable reaches NEW_VCALL only under case ID_LOCAL (parse.y-ruby_4_0:13086),
+//     i.e. for a plain tIDENTIFIER;
+//   - a name ending in '!' or '?' lexes as tFID, and `primary : tFID` builds
+//     NEW_FCALL instead (parse.y-ruby_4_0:4370).
+//
+// So `nope!` and `nope?` are FCALLs and raise NoMethodError. Measured on ruby
+// 4.0.5 under BOTH parsers — `ruby --parser=parse.y` and `ruby --parser=prism`
+// agree here — so this is not one of the places where the two instruments
+// differ. A setter name (`nope=`) is likewise never a bare identifier.
+//
+// The test belongs in the compiler, beside the shape test that sets the flag
+// (internal/compiler/compiler.go); it is here because the compiler is outside
+// this change's file cluster, and it costs nothing on the hot path because it
+// runs only where an error is already being raised.
+func vcallNameShape(name string) bool {
+	if name == "" {
+		return false
+	}
+	switch name[len(name)-1] {
+	case '!', '?', '=':
+		return false
+	}
+	return true
 }

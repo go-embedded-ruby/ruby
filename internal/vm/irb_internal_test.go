@@ -124,11 +124,13 @@ func TestIRBSession(t *testing.T) {
 
 // TestIRBErrorDisplay covers the exception branch: a bare undefined name raises,
 // and the REPL reports it MRI-style ("message (Class)") on $stdout and keeps
-// going.
+// going. A bare name is MRI's NODE_VCALL, so the class is NameError — `irb`
+// itself prints "undefined local variable or method 'nope' for main
+// (NameError)" on ruby 4.0.5, under both --parser=parse.y and --parser=prism.
 func TestIRBErrorDisplay(t *testing.T) {
 	got := runFS(t, `$stdin = StringIO.new("nope\nexit\n"); IRB.conf[:PROMPT_MODE] = :SIMPLE; IRB.start`)
-	if !strings.Contains(got, "(NoMethodError)") {
-		t.Errorf("expected a NoMethodError report, got %q", got)
+	if !strings.Contains(got, "(NameError)") {
+		t.Errorf("expected a NameError report, got %q", got)
 	}
 	if !strings.HasPrefix(got, ">> ") || !strings.HasSuffix(got, ">> ") {
 		t.Errorf("expected the loop to survive the error, got %q", got)

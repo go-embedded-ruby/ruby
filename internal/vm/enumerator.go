@@ -428,8 +428,18 @@ func (vm *VM) registerEnumerator() {
 		}
 		return &Enumerator{recv: self, meth: meth, args: rest, sizeBlock: blk}
 	}
-	vm.cObject.define("enum_for", enumForFn)
-	vm.cObject.define("to_enum", enumForFn)
+	// On Kernel, not Object: MRI defines nothing on rb_cObject, and
+	// Object.instance_method(:enum_for).owner answers Kernel on ruby 4.0.5 (the
+	// pair is documented under Kernel's "Other" section, r4-object.c:4372; the
+	// definition itself lives in enumerator.c, which this C corpus does not
+	// carry, so the oracle here is the running 4.0.5, not a grep). registerEnumerator
+	// runs from NewVM AFTER rehomeKernelMethods, so defining them on vm.cObject
+	// re-introduced two names Object must not introduce (#731). Dispatch is
+	// unchanged either way -- Object includes Kernel -- but #owner,
+	// Object.public_instance_methods(false) and Kernel.instance_methods(false)
+	// all reported the wrong module.
+	vm.cKernel.define("enum_for", enumForFn)
+	vm.cKernel.define("to_enum", enumForFn)
 
 	// Enumerable#chain — a chain of self followed by the given enumerables. Mixed
 	// into every Enumerable (Array/Range/…) and inherited by Enumerator.
