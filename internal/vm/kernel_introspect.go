@@ -822,7 +822,7 @@ func (vm *VM) registerGvarTracing() {
 			// `$tv = nil; p untrace_var(:$tv)` prints [] on ruby 4.0.5). With a
 			// command to remove, the walk finds nothing and the answer is nil.
 			if _, defined := vm.globals[canonicalGvar(name)]; !defined {
-				vm.raiseNameError("undefined global variable "+name, name)
+				vm.raiseNameError("undefined global variable "+name, name, nil) // MRI records none: #receiver raises ArgumentError
 			}
 			if len(args) == 2 && !object.IsNil(args[1]) {
 				return object.NilV

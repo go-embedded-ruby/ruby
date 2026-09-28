@@ -272,7 +272,7 @@ func (vm *VM) storeGVar(name string, v object.Value) {
 		// assigned THROUGH — MRI's rb_gvar_readonly_setter quotes the id it was
 		// called with, so `require "English"; $ERROR_INFO = nil` reports
 		// "$ERROR_INFO is a read-only variable", not "$!".
-		vm.raiseNameError(name+" is a read-only variable", name)
+		vm.raiseNameError(name+" is a read-only variable", name, nil) // MRI records none: #receiver raises ArgumentError
 	}
 	name = target
 	switch name {

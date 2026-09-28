@@ -96,7 +96,7 @@ func (vm *VM) setInstanceVisibility(mod *RClass, name string, vis visibility) {
 		inherited = vm.lookupForModuleOp(vm.cObject, name)
 	}
 	if inherited == nil {
-		vm.raiseNameError("undefined method '"+name+"' for "+vm.moduleDescription(mod), name)
+		vm.raiseNameError("undefined method '"+name+"' for "+vm.moduleDescription(mod), name, mod)
 	}
 	if !inherited.undefined && instanceVisibility(mod, name, inherited) == vis {
 		return
@@ -128,7 +128,7 @@ func (vm *VM) setClassMethodVisibility(mod *RClass, name string, vis visibility)
 	// `new` and friends are reachable as instance methods of Class rather than as
 	// inherited smethods; resolveClassMethod covers both.
 	if vm.resolveClassMethod(mod, name) == nil {
-		vm.raiseNameError("undefined method '"+name+"' for "+vm.moduleDescription(mod), name)
+		vm.raiseNameError("undefined method '"+name+"' for "+vm.moduleDescription(mod), name, mod)
 	}
 	if mod.svisOverrides == nil {
 		mod.svisOverrides = map[string]visibility{}
