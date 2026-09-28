@@ -2221,6 +2221,11 @@ func (vm *VM) send(recv object.Value, name string, args []object.Value, blk *Pro
 	// consults its singleton (class) methods first, so `def self.method_missing` on
 	// the receiver — or on an ancestor's singleton — handles an unknown class method
 	// before falling back to the generic Class/BasicObject default.
+	// Latch the call site's VCALL verdict so it survives the method_missing
+	// dispatch that reads it, the way MRI latches it in ec->method_missing_reason
+	// before calling the hook (method_missing, vm_eval.c:1001). Taking it clears
+	// sendVCall, so a nested miss inside the hook cannot re-read this one.
+	vm.missingVCall, vm.sendVCall = vm.sendVCall, false
 	mm := vm.resolveSingletonHook(recv, "method_missing")
 	mmArgs := append([]object.Value{object.SymVal(name)}, args...)
 	return vm.invoke(mm, recv, mmArgs, blk)
@@ -2255,6 +2260,11 @@ func (vm *VM) callNative(m *Method, self object.Value, args []object.Value, blk 
 	// Together with exec's consume-and-clear this bounds the field's lifetime to
 	// exactly one dispatch. See VM.sendNoKW.
 	vm.sendNoKW = false
+	// The same bound for the VCALL verdict: a native body that dispatches a send
+	// of its own (Object#send, a coercion protocol, an Enumerable yielding into
+	// user code) must not inherit the CALLER's "this was a bare identifier" and
+	// turn its own miss into a NameError. See VM.sendVCall.
+	vm.sendVCall = false
 	return m.native(vm, self, args, blk)
 }
 
@@ -2315,6 +2325,15 @@ func (vm *VM) invokeInPlace(m *Method, self object.Value, args []object.Value, b
 // it the live operand-stack region.
 func (vm *VM) invokeBody(m *Method, self object.Value, args []object.Value, blk *Proc) object.Value {
 	if m.compiled != nil {
+		// An AOT-compiled body stands in for the ISeq exec would have run, so it
+		// inherits exec's consume-and-clear of the call site's VCALL verdict: the
+		// dispatch that set it has now SUCCEEDED, and a miss raised inside this
+		// body must be judged by its own call site. The level-2 lane restates the
+		// verdict per send in aotSend; the level-1 lane (internal/aot/codegen.go)
+		// lowers to a bare dispatchSend and has no site verdict to state, so
+		// without this line `42.nope` inside a lowered method would inherit the
+		// bare `probe` that called it and answer NameError. Measured.
+		vm.sendVCall = false
 		return m.compiled(vm, self, args, blk)
 	}
 	if m.proc != nil {

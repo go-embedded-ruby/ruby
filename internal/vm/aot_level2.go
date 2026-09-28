@@ -67,6 +67,12 @@ func aotBlockArgs(np int, args []object.Value) []object.Value {
 // back to dispatchSend, after the same explicit-visibility enforcement. self is
 // the caller's self, for the protected-method check.
 func (vm *VM) aotSend(ic *inlineCache, recv object.Value, name string, args []object.Value, flags int, self object.Value, blk *Proc) object.Value {
+	// The VCALL verdict is part of the call site, not of the callee, so a lowered
+	// call has to state it exactly as the interpreter's OpSend handler does —
+	// otherwise an AOT-compiled `nope` would answer NoMethodError where the
+	// interpreted one answers NameError, and the two lanes would disagree
+	// silently. See bytecode.FlagSendVCall and VM.sendVCall.
+	vm.sendVCall = flags&bytecode.FlagSendVCall != 0
 	if blk == nil {
 		if _, isClass := recv.(*RClass); !isClass {
 			if m := vm.lookupCached(ic, recv, name); m != nil {

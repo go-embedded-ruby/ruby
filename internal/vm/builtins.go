@@ -1076,8 +1076,21 @@ func (vm *VM) bootstrap() {
 		if len(args) > 1 {
 			callArgs = object.NewArrayFromSlice(append([]object.Value(nil), args[1:]...))
 		}
-		vm.raiseWithIvars("NoMethodError",
-			"undefined method '"+string(nameSym)+"' for "+vm.undefinedMethodReceiver(self),
+		// A VCALL — a bare identifier that did not resolve to a local — is the one
+		// thing that changes both the class and the message. raise_method_missing
+		// (vm_eval.c:945) is MRI's single reader of MISSING_VCALL: its branch selects
+		// the format "undefined local variable or method '%1$s' for %3$s%4$s" and
+		// swaps exc to rb_eNameError, which rb_make_no_method_exception
+		// (vm_eval.c:927) then builds with rb_name_err_new rather than
+		// rb_nomethod_err_new. #name and #receiver are set either way; #args is not,
+		// and a VCALL carries no arguments, so callArgs is nil here regardless.
+		cls, undef := "NoMethodError", "undefined method '"
+		if vm.missingVCall {
+			cls, undef = "NameError", "undefined local variable or method '"
+		}
+		vm.missingVCall = false
+		vm.raiseWithIvars(cls,
+			undef+string(nameSym)+"' for "+vm.undefinedMethodReceiver(self),
 			map[string]object.Value{"@name": nameSym, "@receiver": self, "@args": callArgs})
 		return object.NilV
 	})

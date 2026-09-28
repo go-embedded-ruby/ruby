@@ -853,6 +853,27 @@ type VM struct {
 	// a define_method body) still gets. GVL-guarded.
 	sendNoKW bool
 
+	// sendVCall carries bytecode.FlagSendVCall — "this call site was a BARE
+	// identifier, not a call" — to the dispatch that is about to miss. MRI keeps
+	// the same fact on the call info (VM_CALL_VCALL), rb_method_call_status turns
+	// it into MISSING_VCALL for an undefined entry (vm_eval.c:854), and exactly one
+	// place reads it: raise_method_missing (vm_eval.c:945), whose MISSING_VCALL
+	// branch swaps the format to "undefined local variable or method '%1$s' for
+	// %3$s%4$s" AND the class to rb_eNameError.
+	//
+	// It rides the VM for the same reason sendNoKW does, and is bounded the same
+	// way: every send site assigns it (so a site WITHOUT the flag clears a previous
+	// site's verdict), exec clears it before running any user code, and callNative
+	// clears it so a call that lands on a native body cannot leave a verdict behind
+	// for a send that body makes of its own. GVL-guarded.
+	sendVCall bool
+
+	// missingVCall is sendVCall latched at the miss, so the verdict survives the
+	// method_missing dispatch that reads it — MRI's ec->method_missing_reason &
+	// MISSING_VCALL, set by method_missing() (vm_eval.c:1001) just before it calls
+	// the hook. Consumed and cleared by BasicObject#method_missing. GVL-guarded.
+	missingVCall bool
+
 	// traceEvents is the union of the event masks of every ENABLED TracePoint,
 	// narrowed to the events rbgo raises. It is the one word the interpreter loop
 	// tests, and it is zero for every program that never builds a TracePoint — so
@@ -1634,6 +1655,10 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 	// run user code and start a nested frame that would read it (see sendNoKW).
 	noKW := vm.sendNoKW
 	vm.sendNoKW = false
+	// The VCALL verdict belongs to the dispatch that just SUCCEEDED, so it is
+	// spent by the time a callee runs: clear it here too, or a miss raised deeper
+	// inside this frame would inherit it. See VM.sendVCall.
+	vm.sendVCall = false
 	var kwargs *object.Hash
 	if len(iseq.KwNames) > 0 || iseq.KwRestSlot >= 0 {
 		kwargs = vm.bindKeywords(iseq, &args, noKW)
@@ -2452,7 +2477,8 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 							if in.Flags&bytecode.FlagSendExplicit != 0 {
 								vm.checkVisibility(recv, name, rm, self)
 							}
-							vm.sendNoKW = in.Flags&bytecode.FlagSendNoKW != 0 // MRI: the call info decides, not the callee
+							vm.sendNoKW = in.Flags&bytecode.FlagSendNoKW != 0   // MRI: the call info decides, not the callee
+							vm.sendVCall = in.Flags&bytecode.FlagSendVCall != 0 // and the VCALL verdict with it; see VM.sendVCall
 							res := vm.invokeInPlace(rm, recv, stack[base:], nil)
 							stack = stack[:base-1]
 							stack = append(stack, res)
@@ -2462,7 +2488,8 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					}
 					if _, isClass := recv.(*RClass); !isClass {
 						if m := vm.lookupCached(&caches[pc], recv, name); m != nil {
-							vm.sendNoKW = in.Flags&bytecode.FlagSendNoKW != 0 // MRI: the call info decides, not the callee
+							vm.sendNoKW = in.Flags&bytecode.FlagSendNoKW != 0   // MRI: the call info decides, not the callee
+							vm.sendVCall = in.Flags&bytecode.FlagSendVCall != 0 // and the VCALL verdict with it; see VM.sendVCall
 							// An explicit-receiver send enforces method visibility
 							// (private/protected); an implicit or `self.` send does not. A
 							// blocked call routes to #method_missing (or raises).
@@ -2494,7 +2521,8 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					// passed directly here — no per-call args copy. The region is read
 					// (and copied into the callee's env by exec, or defensively by
 					// invokeInPlace) before this frame truncates the stack below.
-					vm.sendNoKW = in.Flags&bytecode.FlagSendNoKW != 0 // MRI: the call info decides, not the callee
+					vm.sendNoKW = in.Flags&bytecode.FlagSendNoKW != 0   // MRI: the call info decides, not the callee
+					vm.sendVCall = in.Flags&bytecode.FlagSendVCall != 0 // and the VCALL verdict with it; see VM.sendVCall
 					res, done := vm.enforceSendVisRoute(in.Flags, recv, name, stack[base:], nil, self)
 					if !done {
 						res = vm.send(recv, name, stack[base:], nil)
@@ -2509,7 +2537,8 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					// A literal block: capture this frame's env, self, block.
 					markEnvCaptured(env)
 					blk := &Proc{iseq: iseq.Children[in.C-1], env: env, defLocals: iseq.Locals, self: self, block: block, cref: frameCref(), crefChain: vm.curCref, refDefinee: refDefineeOf(definee, frameCref()), home: homeTarget(), superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs, dmBody: homeDmBody, methodCtx: fm}
-					vm.sendNoKW = in.Flags&bytecode.FlagSendNoKW != 0 // MRI: the call info decides, not the callee
+					vm.sendNoKW = in.Flags&bytecode.FlagSendNoKW != 0   // MRI: the call info decides, not the callee
+					vm.sendVCall = in.Flags&bytecode.FlagSendVCall != 0 // and the VCALL verdict with it; see VM.sendVCall
 					if res, done := vm.enforceSendVisRoute(in.Flags, recv, name, callArgs, blk, self); done {
 						push(res)
 						pc++
@@ -2534,7 +2563,8 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				vm.enforceSendVis(in.Flags, recv, iseq.Names[in.A], self)
 				bname := iseq.Names[in.A]
 				bblk := vm.toBlock(blockVal)
-				vm.sendNoKW = in.Flags&bytecode.FlagSendNoKW != 0 // MRI: the call info decides, not the callee
+				vm.sendNoKW = in.Flags&bytecode.FlagSendNoKW != 0   // MRI: the call info decides, not the callee
+				vm.sendVCall = in.Flags&bytecode.FlagSendVCall != 0 // and the VCALL verdict with it; see VM.sendVCall
 				if vm.anyRefinements {
 					if rm := refinedFor(recv, bname); rm != nil {
 						push(vm.invokeInPlace(rm, recv, callArgs, bblk))
@@ -2737,7 +2767,8 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					isFlags |= bytecode.FlagSendKWSplat
 				}
 				isElems, isNoKW := applyKWSplat(superArgs, isFlags)
-				vm.sendNoKW = isNoKW // MRI: the call info decides, not the callee
+				vm.sendNoKW = isNoKW                                // MRI: the call info decides, not the callee
+				vm.sendVCall = in.Flags&bytecode.FlagSendVCall != 0 // and the VCALL verdict with it; see VM.sendVCall
 				push(vm.invokeSuper(self, homeSuperDefinee, homeSuperName, isElems, superBlk))
 			case bytecode.OpInvokeSuperArray:
 				superBlk := block
@@ -2750,7 +2781,8 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				}
 				argsArr := pop().(*object.Array)
 				suElems, suNoKW := applyKWSplat(argsArr.Elems, in.Flags)
-				vm.sendNoKW = suNoKW // MRI: the call info decides, not the callee
+				vm.sendNoKW = suNoKW                                // MRI: the call info decides, not the callee
+				vm.sendVCall = in.Flags&bytecode.FlagSendVCall != 0 // and the VCALL verdict with it; see VM.sendVCall
 				push(vm.invokeSuper(self, homeSuperDefinee, homeSuperName, suElems, superBlk))
 			case bytecode.OpInvokeBlock:
 				if block == nil {
@@ -2759,14 +2791,16 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				yargs := make([]object.Value, in.A)
 				copy(yargs, stack[len(stack)-in.A:])
 				stack = stack[:len(stack)-in.A]
-				vm.sendNoKW = in.Flags&bytecode.FlagSendNoKW != 0 // MRI: the call info decides, not the callee
+				vm.sendNoKW = in.Flags&bytecode.FlagSendNoKW != 0   // MRI: the call info decides, not the callee
+				vm.sendVCall = in.Flags&bytecode.FlagSendVCall != 0 // and the VCALL verdict with it; see VM.sendVCall
 				push(vm.callBlock(block, yargs))
 			case bytecode.OpInvokeBlockArray:
 				if block == nil {
 					raise("LocalJumpError", "no block given (yield)")
 				}
 				yaargs, yaNoKW := applyKWSplat(pop().(*object.Array).Elems, in.Flags)
-				vm.sendNoKW = yaNoKW // MRI: the call info decides, not the callee
+				vm.sendNoKW = yaNoKW                                // MRI: the call info decides, not the callee
+				vm.sendVCall = in.Flags&bytecode.FlagSendVCall != 0 // and the VCALL verdict with it; see VM.sendVCall
 				push(vm.callBlock(block, yaargs))
 			case bytecode.OpExcMatchAny:
 				classes := pop().(*object.Array)
@@ -3082,7 +3116,8 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					blk = &Proc{iseq: iseq.Children[in.C-1], env: env, defLocals: iseq.Locals, self: self, block: block, cref: frameCref(), crefChain: vm.curCref, refDefinee: refDefineeOf(definee, frameCref()), home: homeTarget(), superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs, dmBody: homeDmBody, methodCtx: fm}
 				}
 				saElems, saNoKW := applyKWSplat(argsArr.Elems, in.Flags)
-				vm.sendNoKW = saNoKW // MRI: the call info decides, not the callee
+				vm.sendNoKW = saNoKW                                // MRI: the call info decides, not the callee
+				vm.sendVCall = in.Flags&bytecode.FlagSendVCall != 0 // and the VCALL verdict with it; see VM.sendVCall
 				push(vm.dispatchSend(recv, iseq.Names[in.A], saElems, blk))
 			case bytecode.OpSendArrayBlockArg:
 				blockVal := pop()
@@ -3093,7 +3128,8 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				// would consume the verdict set below.
 				abblk := vm.toBlock(blockVal)
 				abElems, abNoKW := applyKWSplat(argsArr.Elems, in.Flags)
-				vm.sendNoKW = abNoKW // MRI: the call info decides, not the callee
+				vm.sendNoKW = abNoKW                                // MRI: the call info decides, not the callee
+				vm.sendVCall = in.Flags&bytecode.FlagSendVCall != 0 // and the VCALL verdict with it; see VM.sendVCall
 				push(vm.dispatchSend(recv, iseq.Names[in.A], abElems, abblk))
 			default:
 				raise("VMError", "unknown opcode %s", in.Op)
