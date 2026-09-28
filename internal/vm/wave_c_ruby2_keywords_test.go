@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/go-embedded-ruby/ruby/internal/bytecode"
@@ -145,6 +146,79 @@ func TestRuby2KeywordsMarkAndPropagate(t *testing.T) {
 		`)
 		if got != "true" {
 			t.Fatalf("top-level ruby2_keywords: got %s, want true", got)
+		}
+	})
+}
+
+// TestRuby2KeywordsFourCallShapes separates the four ways a Hash can reach a
+// ruby2_keywords `*rest`, because they must NOT all answer alike. MRI 4.0.5:
+//
+//	mid(k: 1)    => marked    (VM_CALL_KWARG at the call site)
+//	mid({k: 1})  => NOT marked (a positional Hash, no keyword flag)
+//	mid(**h)     => marked    (VM_CALL_KW_SPLAT)
+//	mid(*arr)    => NOT marked (the splat is positional; MRI only re-flags when
+//	                            arr's last element is ALREADY a marked Hash)
+//
+// What decides is the CALL SITE's keyword flag, never the runtime type of the
+// last argument: a rule keyed off "is the last element a Hash" would mark
+// shapes 2 and 4 too. rbgo's stand-in for the flag pair is
+// bytecode.FlagSendNoKW / FlagSendKWSplat, which is what ruby2KeywordsBindRest
+// reads as noKW — shape 4 answers correctly only because of it.
+//
+// Shape 2 is rbgo's ONE divergence here, and it is not this feature's: the
+// compiler cannot see braces, because go-ruby-parser v0.8.0 parses `f({k: 1})`
+// and `f(k: 1)` into the same *ast.HashLit with no record of the braces and no
+// position to re-read the source at (ast.Call carries only Args []Node). So the
+// sub-test below pins the INVARIANT rather than the wrong value: a
+// ruby2_keywords delegator must read a braced literal exactly as an ordinary
+// `**kwargs` method does — this feature must not be MORE wrong than the rest of
+// the VM. On origin/main `f({x: 1})` with `def f(*a, **k)` already answers
+// [[], {x: 1}] where MRI answers [[{x: 1}], {}]. When the parser grows a
+// `Braced` bit both sides move together and this test keeps passing.
+func TestRuby2KeywordsFourCallShapes(t *testing.T) {
+	const prelude = `
+		def target(*a, **kw) = [a, kw]
+		ruby2_keywords def mid(*a) = target(*a)
+		ruby2_keywords def keep(*a) = a
+		h = {k: 1}
+		arr = [{k: 1}]
+	`
+	// Shapes 1, 3 and 4 are asserted at MRI 4.0.5's answers, verified by running
+	// the same program under `ruby 4.0.5 (2026-05-20 revision 64336ffd0e)`.
+	for _, tc := range []struct{ name, call, delegated, marked string }{
+		{"keyword list is marked", "mid(k: 1)", "[[], {k: 1}]", "true"},
+		{"double splat is marked", "mid(**h)", "[[], {k: 1}]", "true"},
+		{"a splatted Array stays positional", "mid(*arr)", "[[{k: 1}], {}]", "false"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := runSrc(t, prelude+"\np "+tc.call)
+			if got != tc.delegated {
+				t.Fatalf("%s delegated = %s, want %s (MRI 4.0.5)", tc.call, got, tc.delegated)
+			}
+			mark := strings.Replace(tc.call, "mid(", "keep(", 1)
+			got = runSrc(t, prelude+"\np Hash.ruby2_keywords_hash?("+mark+".last)")
+			if got != tc.marked {
+				t.Fatalf("%s marked = %s, want %s (MRI 4.0.5)", mark, got, tc.marked)
+			}
+		})
+	}
+
+	t.Run("a braced literal reads the same as it does without ruby2_keywords", func(t *testing.T) {
+		// The control is the SUBJECT's own sibling: an ordinary **kwargs method,
+		// which has nothing to do with ruby2_keywords and whose reading of
+		// `f({k: 1})` predates this change. The two must agree. If they ever
+		// disagree, this feature has invented a divergence of its own, which is
+		// the thing worth failing on — not the shared parser gap.
+		plain := runSrc(t, "def f(*a, **k) = [a, k]\np f({k: 1})")
+		viaR2K := runSrc(t, prelude+"\np mid({k: 1})")
+		if plain != viaR2K {
+			t.Fatalf("braced literal read differently through ruby2_keywords: plain=%s r2k=%s", plain, viaR2K)
+		}
+		// And it is still the compiler's verdict doing the deciding, not the
+		// argument's type: the same Hash reaching the same delegator through a
+		// SPLAT is left positional and unmarked (shape 4 above).
+		if plain == "[[{k: 1}], {}]" {
+			t.Skip("the parser grew a Braced bit — MRI parity reached; drop this control and assert MRI directly")
 		}
 	})
 }
