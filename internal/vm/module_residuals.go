@@ -105,19 +105,19 @@ func (vm *VM) registerModuleResiduals() {
 		return vm.constLocation(mod, last, !recur, recur)
 	})
 
-	// Module#const_missing(sym): the default hook, raising a NameError naming the
-	// missing constant. The toplevel (Object) form omits the "Object::" qualifier,
-	// matching MRI. The NameError carries the name so NameError#name returns it.
+	// Module#const_missing(sym): the default hook. MRI's rb_mod_const_missing
+	// funnels into uninitialized_constant (variable.c r4:2342/2282), which is the
+	// same renderer the bytecode paths use -- so this shares constErrPath rather
+	// than building the message a second way. Two things were wrong with the
+	// second way: it dropped the qualifier for an ANONYMOUS module, whose .name is
+	// empty but whose rb_class_path is "#<Module:0x...>", so
+	// `Module.new.const_get(:Nope)` said "uninitialized constant Nope" where MRI
+	// says "uninitialized constant #<Module:0x...>::Nope"; and it recorded no
+	// receiver, where rb_name_err_raise's first argument IS the receiver.
 	vm.cModule.define("const_missing", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		mod := self.(*RClass)
 		name := nameArg(args[0])
-		var msg string
-		if mod == vm.cObject || mod.name == "" {
-			msg = "uninitialized constant " + name
-		} else {
-			msg = "uninitialized constant " + mod.name + "::" + name
-		}
-		return vm.raiseNameError(msg, name)
+		return vm.raiseNameError("uninitialized constant "+vm.constErrPath(mod, name), name, mod)
 	})
 
 	// Module#included_modules: the modules (not classes) in the receiver's ancestor
@@ -402,11 +402,23 @@ func (vm *VM) constMissing(mod *RClass, name string) object.Value {
 	return vm.send(mod, "const_missing", []object.Value{object.Symbol(name)}, nil)
 }
 
-// raiseNameError raises a NameError whose exception object carries name in its
-// @name ivar, so NameError#name reports the offending constant/name (MRI).
-func (vm *VM) raiseNameError(msg, name string) object.Value {
+// raiseNameError raises a NameError carrying name in @name, so NameError#name
+// reports the offending constant/name (MRI).
+//
+// recv is the object the name was looked up on, and a nil recv means MRI records
+// NONE -- which is not the same as recording nil, since #receiver raises
+// ArgumentError for the first and answers nil for the second (see the
+// NameError#receiver reader). MRI decides this per call site, through
+// rb_name_err_raise (which takes a receiver) versus rb_name_error (which does
+// not), so each caller here passes what ruby 4.0.5 was measured to answer:
+// the module for the four module-method paths, and none for the global-variable
+// ones.
+func (vm *VM) raiseNameError(msg, name string, recv object.Value) object.Value {
 	obj := vm.buildException("NameError", msg)
 	setIvar(obj, "@name", object.Symbol(name))
+	if recv != nil {
+		setIvar(obj, "@receiver", recv)
+	}
 	panic(RubyError{Class: "NameError", Message: msg, Obj: obj})
 }
 
