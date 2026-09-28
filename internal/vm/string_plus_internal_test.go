@@ -35,9 +35,17 @@ func TestStringPlus(t *testing.T) {
 			t.Errorf("%s: got=%q want %s", c.src, got, c.cls)
 		}
 	}
-	// A NoMethodError raised inside #to_str propagates.
-	if got := eval(t, `o = Object.new; def o.to_str; nope; end
+	// A NoMethodError raised inside #to_str propagates. The probe carries an
+	// EXPLICIT receiver: a bare `nope` is MRI's NODE_VCALL and raises NameError,
+	// not NoMethodError (ruby 4.0.5 under both --parser=parse.y and
+	// --parser=prism), which would make this assertion about the wrong class.
+	if got := eval(t, `o = Object.new; def o.to_str; 42.nope; end
 	                   p (("a" + o; :no) rescue $!.class)`); got != "NoMethodError\n" {
 		t.Errorf("to_str NoMethodError: got=%q", got)
+	}
+	// And the bare form beside it, which propagates just the same as a NameError.
+	if got := eval(t, `o = Object.new; def o.to_str; nope; end
+	                   p (("a" + o; :no) rescue $!.class)`); got != "NameError\n" {
+		t.Errorf("to_str NameError: got=%q", got)
 	}
 }

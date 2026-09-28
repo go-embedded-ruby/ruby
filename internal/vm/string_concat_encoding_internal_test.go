@@ -53,8 +53,10 @@ func TestStringConcatEncoding(t *testing.T) {
 		}
 	}
 	// A NoMethodError raised inside #to_str propagates (it is not swallowed as a
-	// TypeError).
-	if got := eval(t, `o = Object.new; def o.to_str; nope; end
+	// TypeError). The probe carries an EXPLICIT receiver: a bare `nope` is MRI's
+	// NODE_VCALL and raises NameError (ruby 4.0.5, both parsers), so it would
+	// make this assertion about the wrong class.
+	if got := eval(t, `o = Object.new; def o.to_str; 42.nope; end
 	                   p (("x".dup << o; :no) rescue $!.class)`); got != "NoMethodError\n" {
 		t.Errorf("to_str NoMethodError: got=%q", got)
 	}
