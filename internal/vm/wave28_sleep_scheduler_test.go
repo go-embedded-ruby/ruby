@@ -72,8 +72,29 @@ Fiber.set_scheduler(S.new)
 		{`begin; sleep(-(2**70)); rescue => e; p [e.class, e.message]; end`, "[RangeError, \"bignum too big to convert into 'long'\"]\n"},
 
 		// rb_time_interval, the #divmod(1) fallback: [whole seconds, fraction].
-		{`p sleep(Rational(1, 999))`, "0\n"},
-		{`o = Object.new; def o.divmod(*); [0, 0.001]; end; p sleep(o)`, "0\n"},
+		//
+		// These two assert rb_f_sleep's CONTRACT rather than a literal 0. The
+		// return value is the number of whole-second boundaries crossed (time(0)
+		// brackets the wait), so a ~1 ms sleep answers 1 whenever it happens to
+		// straddle a tick -- about 0.1% of runs, measured identical on MRI 4.0.5
+		// and rbgo by sweeping the starting offset across a second (40 offsets x
+		// 50 ms gave {0=>38, 1=>2} on both). A literal 0 therefore failed on a
+		// draw, and took `arch amd64` down on PR #721, whose diff contains no
+		// sleep code at all. See #723.
+		//
+		// What the rows are for is that a Rational and a #divmod duck are ACCEPTED
+		// as durations and yield a WHOLE number of seconds. The type alone is the
+		// phase-insensitive property: 0 and 1 are both legal answers, while 0.001,
+		// a Rational and a raise all still fail it.
+		//
+		// My own first attempt at this fix asserted `[r.class, r < 1]` == `[Integer,
+		// true]`, which is phase-dependent for the same reason the literal 0 was --
+		// it reads false in exactly the 2-in-40 boundary cases. Measured before
+		// committing, on both engines. The lesson is the one the rows now encode:
+		// when replacing a flaky literal, check that the replacement does not carry
+		// the same dependence in another shape.
+		{`p sleep(Rational(1, 999)).class`, "Integer\n"},
+		{`o = Object.new; def o.divmod(*); [0, 0.001]; end; p sleep(o).class`, "Integer\n"},
 		// NUM2TIMET truncates a Float quotient rather than refusing it.
 		{`o = Object.new; def o.divmod(*); [0.5, 0]; end; p sleep(o)`, "0\n"},
 		// arg_range_check applies to the whole-seconds half only.
