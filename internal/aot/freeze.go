@@ -41,7 +41,9 @@ func FreezeISeq(iseq *bytecode.ISeq, pkg, fn, buildTag string) string {
 
 	b.WriteString("import (\n")
 	b.WriteString("\t\"github.com/go-embedded-ruby/ruby/internal/bytecode\"\n")
-	b.WriteString("\t\"github.com/go-embedded-ruby/ruby/internal/object\"\n")
+	if f.needObject {
+		b.WriteString("\t\"github.com/go-embedded-ruby/ruby/internal/object\"\n")
+	}
 	if f.needBig {
 		b.WriteString("\t\"math/big\"\n")
 	}
@@ -76,6 +78,13 @@ var formatSource = format.Source
 type freezer struct {
 	needBig  bool
 	needMath bool
+	// needObject records that an object.* token actually reached the generated
+	// source. Unlike bytecode, which the signature always names, internal/object
+	// is only mentioned by the constant pool and by the frozenFloat helper -- so
+	// a program whose frozen bytecode holds no constant at all (`p ARGV` is
+	// enough) used to emit the import unused and the nested go build rejected
+	// the file outright. See #717.
+	needObject bool
 }
 
 // writeISeq emits a *bytecode.ISeq composite literal. Every field is written
@@ -150,6 +159,7 @@ func (f *freezer) writeConsts(b *strings.Builder, consts []object.Value) {
 	if consts == nil {
 		return
 	}
+	f.needObject = true
 	b.WriteString("Consts: []object.Value{\n")
 	for _, c := range consts {
 		f.writeConst(b, c)
@@ -175,6 +185,7 @@ func (f *freezer) writeConst(b *strings.Builder, v object.Value) {
 		}
 	case object.Float:
 		f.needMath = true
+		f.needObject = true // frozenFloat's own signature names object.Float
 		fmt.Fprintf(b, "frozenFloat(%#x)", math.Float64bits(float64(c)))
 	case *object.Bignum:
 		f.needBig = true

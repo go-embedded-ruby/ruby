@@ -69,12 +69,14 @@ func TestClosedBuildIntegration(t *testing.T) {
 	// front of them, so "-W0" here is a datum and not a switch, and the exit
 	// status proves the program saw all three.
 	//
-	// The program deliberately carries a string literal. On origin/main
-	// (87e418bc) `rbgo build --closed` fails outright for a program whose frozen
-	// bytecode holds NO object value — `p ARGV` is enough — because
-	// aot.FreezeISeq emits the internal/object import unconditionally and the
-	// nested go build then rejects it as unused. That is a separate defect, in
-	// internal/aot rather than here; this test must not depend on it.
+	// The program carries a string literal, which used to be load-bearing: until
+	// #717 `rbgo build --closed` failed outright for a program whose frozen
+	// bytecode holds NO object value — `p ARGV` was enough — because
+	// aot.FreezeISeq emitted the internal/object import unconditionally and the
+	// nested go build rejected it as unused. That is fixed, and pinned in both
+	// directions by TestFreezeObjectImportIsGated in internal/aot, which is where
+	// the defect lived. The literal stays because this test is about argument
+	// handling; it is no longer a workaround.
 	argvRb := filepath.Join(dir, "argv.rb")
 	argvProg := "puts \"argv=#{ARGV.inspect} zero=#{$0.empty? ? \"(empty)\" : \"(set)\"}\"\n" +
 		"exit ARGV.length\n"
