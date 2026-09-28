@@ -1,6 +1,10 @@
 package vm
 
-import "github.com/go-embedded-ruby/ruby/internal/object"
+import (
+	"fmt"
+
+	"github.com/go-embedded-ruby/ruby/internal/object"
+)
 
 // registerModuleExtras installs the module/class authoring directives that real
 // Ruby code (notably Puppet) leans on: module_function, the visibility setters
@@ -317,7 +321,12 @@ func (vm *VM) registerModuleExtras() {
 				vm.raiseFrozen(mod)
 			}
 			if _, ok := mod.methods[name]; !ok {
-				raise("NameError", "method '%s' not defined in %s", name, mod.ToS())
+				// MRI raises this through rb_name_err_raise (vm_method.c
+				// rb_mod_remove_method -> remove_method), whose FIRST argument is
+				// the exception's receiver -- so #receiver answers the module the
+				// removal was attempted on. rbgo built the same message through
+				// the bare raise() form and left it unrecorded.
+				vm.raiseNameError(fmt.Sprintf("method '%s' not defined in %s", name, mod.ToS()), name, mod)
 			}
 			delete(mod.methods, name)
 			bumpMethodSerial()

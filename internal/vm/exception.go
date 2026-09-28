@@ -42,6 +42,16 @@ func (vm *VM) undefinedMethodReceiver(self object.Value) string {
 		return kind + " " + vm.classDisplayName(c)
 	}
 	if vm.objSingleton(self) != nil {
+		// MRI's one exception inside this branch: the top-level self renders as
+		// "main", not as its identity string. name_err_mesg_to_str (error.c
+		// ruby_4_0:2679-2689) takes the singleton arm, sets the "an instance of"
+		// prefix to empty, and then chooses between rb_any_to_s(obj) and the
+		// literal "main" on `obj == rb_vm_top_self()`. rbgo had the arm and not
+		// the exception, so `self.nope` at the top level said "for
+		// #<Object:0x…>" where MRI says "for main".
+		if self == vm.main {
+			return "main"
+		}
 		return vm.objectIdentityRepr(self)
 	}
 	return "an instance of " + vm.classDisplayName(vm.classOf(self))
