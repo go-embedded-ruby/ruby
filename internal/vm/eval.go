@@ -5,7 +5,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/go-embedded-ruby/ruby/internal/bytecode"
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
 
@@ -23,7 +22,7 @@ import (
 // method, proc or binding the source creates. When no file is given MRI does not
 // borrow the caller's path either: get_eval_default_path (vm_eval.c
 // ruby_4_0:1666) builds the synthetic "(eval at FILE:LINE)" naming where the
-// eval was WRITTEN. evalLocation is that pair, and compileEval stamps it on.
+// eval was WRITTEN. evalLocation is that pair, and bindingEval stamps it on.
 type evalLocation struct {
 	file string
 	line int
@@ -100,25 +99,15 @@ func (vm *VM) evalLineno(v object.Value) int {
 	return 0
 }
 
-// compileEval compiles src at loc and stamps the path onto the ISeq and every one
-// of its children (setISeqFile, so a proc or method the source defines reports
-// the eval's path too, as MRI's whole eval ISeq tree carries one path).
-//
-// The first LINE has to go into the compilation rather than be applied to the
-// finished ISeq: MRI hands it to the parser (pm_options_line_set,
-// rb_parser_compile_string_path), so it reaches not only every insns_info entry
-// and nested first_lineno but also the Integer literal `__LINE__` becomes — and
-// that literal is indistinguishable in the constant pool from any other Integer
-// once compilation is over. compiler.CompileEval takes it for that reason.
-func (vm *VM) compileEval(src string, loc evalLocation) *bytecode.ISeq {
-	iseq, cerr := parseCompileEvalFn(src, loc.line)
-	if cerr != nil {
-		raiseEvalSyntaxError(loc, cerr)
-	}
-	iseq.Name = "(eval)"
-	setISeqFile(iseq, loc.file)
-	return iseq
-}
+// compileEval is GONE. It compiled a string-eval with NO locals and stamped the
+// path on, and its only two callers were instanceEvalString and classEvalString
+// — which now go through bindingEval, because MRI compiles the String form of
+// specific_eval against the caller's scope (see specificEvalString). Every
+// string-eval in the VM therefore reaches the front end through one seam,
+// bindingEval's compiler.CompileEvalWithLocals, and a second no-locals seam
+// would be a path no MRI behaviour asks for. Deleting it rather than leaving it
+// uncalled is the point, exactly as for evalDefinee below: an unreachable
+// compile path is the shape a later wave would trust.
 
 // raiseEvalSyntaxError raises the SyntaxError for a string that would not parse,
 // with the LOCATION in front of the message as MRI reports it: MRI's parser
@@ -158,29 +147,61 @@ func parseErrorLine(msg string) (int, string, bool) {
 	return n, rest[i+2:], true
 }
 
-// instanceEvalString backs the String form of BasicObject#instance_eval: it
-// compiles src and runs it with self as the receiver and the receiver's
-// singleton class as the definee, so a `def` in the source becomes a singleton
-// method and `self`/instance variables resolve to the receiver. An immediate
+// specificEvalString is MRI's specific_eval -> eval_under for the STRING form of
+// instance_eval / module_eval / class_eval (vm_eval.c ruby_4_0:2152-2187). Three
+// things come from three different places, and rbgo used to get only two of them:
+//
+//   - the LOCALS are the CALLER'S. eval_under hands the source to
+//     eval_string_with_cref, which builds its base block from
+//     rb_vm_get_ruby_level_next_cfp(ec, ec->cfp) — the Ruby frame below the CFUNC
+//     — so the eval'd source is compiled as a child scope of the calling frame
+//     and sees, and can ASSIGN to, its local variables (vm_eval.c
+//     ruby_4_0:1882-1911). `x = 41; Object.new.instance_eval("x + 1")` is 42 on
+//     ruby 4.0.5; rbgo ran with a FRESH, EMPTY scope and raised NoMethodError for
+//     `x`. The write direction failed silently, which is worse: `x = 1;
+//     Object.new.instance_eval("x = 99"); x` stayed 1 instead of becoming 99, and
+//     a caller local shadowing a method of the same name lost to the method.
+//   - the SELF is the RECEIVER, not the calling frame's — eval_string_with_cref
+//     overwrites block.as.captured.self with it.
+//   - the CREF is PUSHED, not inherited: vm_cref_push(ec, self, NULL, FALSE,
+//     singleton). singleton is TRUE for instance_eval (the definee is the
+//     receiver's singleton class, so a `def` becomes a singleton method) and
+//     FALSE for module_eval/class_eval (the definee is the module itself, so a
+//     `def` becomes an instance method). That half rbgo already had right, and it
+//     is why this takes a caller Binding and OVERWRITES both fields rather than
+//     using the binding's own: callerBinding returns a fresh Binding each call,
+//     so the caller's frame keeps its self and definee.
+//
+// The three used to be split across two code paths — Kernel#eval already went
+// through callerBinding + bindingEval for exactly this, while the specific_eval
+// family compiled with no locals at all. They are one mechanism in MRI and one
+// here now.
+func (vm *VM) specificEvalString(self object.Value, definee *RClass, src string, loc evalLocation) object.Value {
+	cb := vm.callerBinding()
+	cb.self = self
+	cb.definee = definee
+	return vm.bindingEval(cb, src, loc)
+}
+
+// instanceEvalString backs the String form of BasicObject#instance_eval: the
+// source runs with self as the receiver and the receiver's singleton class as
+// the definee, over the CALLER'S locals (see specificEvalString). An immediate
 // receiver has no singleton class, so its own class stands in as the definee
 // (source that only reads still works).
 func (vm *VM) instanceEvalString(self object.Value, src string, loc evalLocation) object.Value {
-	iseq := vm.compileEval(src, loc)
 	definee, ok := vm.ensureSingleton(self)
 	if !ok {
 		definee = vm.classOf(self)
 	}
-	vm.pendingMethodCtx = vm.currentMethodCtxPtr()
-	return vm.exec(iseq, self, nil, definee, "", nil, nil, nil, nil, nil)
+	return vm.specificEvalString(self, definee, src, loc)
 }
 
 // classEvalString backs the String form of Module#module_eval / #class_eval: the
-// class is both self and the method-definition target, with a fresh local scope,
-// so a top-level `def` in the source becomes an instance method of cls — the
-// mechanism racc's runtime uses to graft do_parse/yyparse.
+// class is both self and the method-definition target — so a top-level `def` in
+// the source becomes an instance method of cls, the mechanism racc's runtime uses
+// to graft do_parse/yyparse — over the CALLER'S locals (see specificEvalString).
 func (vm *VM) classEvalString(cls *RClass, src string, loc evalLocation) object.Value {
-	iseq := vm.compileEval(src, loc)
-	return vm.exec(iseq, cls, nil, cls, "", nil, nil, nil, nil, nil)
+	return vm.specificEvalString(cls, cls, src, loc)
 }
 
 // registerEval installs Kernel#eval — the embedded front-end's reason for being.

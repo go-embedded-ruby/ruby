@@ -381,14 +381,6 @@ func (vm *VM) currentMethodCtx() frameMethod {
 	return vm.frameMethods[len(vm.frameMethods)-1]
 }
 
-// currentMethodCtxPtr returns a heap copy of currentMethodCtx for handing to the
-// next exec frame via pendingMethodCtx (Kernel#eval, so eval'd code inherits the
-// caller's method context).
-func (vm *VM) currentMethodCtxPtr() *frameMethod {
-	ctx := vm.currentMethodCtx()
-	return &ctx
-}
-
 // callerSlice selects the levels Kernel#caller / #caller_locations return from the
 // argument list, applying MRI's semantics over caller(0) — backtraceFrames(0),
 // the current frame stack nearest-first. A Range slices that list exactly like
