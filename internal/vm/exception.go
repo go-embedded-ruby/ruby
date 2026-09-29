@@ -431,12 +431,7 @@ func (vm *VM) registerBacktraceLocation() {
 	// same frame gives "." -- the two read different fields, and only one of them
 	// falls back to the path.
 	loc.define("absolute_path", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		p := getIvar(self, "@path")
-		s, ok := p.(*object.String)
-		if !ok {
-			return p
-		}
-		real, loaded := vm.realFilePath(s.Str())
+		real, loaded := vm.realFilePath(getIvar(self, "@path").ToS())
 		if !loaded {
 			return object.NilV
 		}
