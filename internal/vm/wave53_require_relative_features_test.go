@@ -7,6 +7,7 @@ package vm_test
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 )
 
@@ -32,10 +33,21 @@ func TestRequireRelativeHonoursLoadedFeatures(t *testing.T) {
 	}
 	write(t, filepath.Join(dir, "sub"), "lib.rb", "puts \"body ran\"\n")
 
+	// The pushed path is built HERE, from the directory this test already holds
+	// in forward-slash form, rather than from __dir__ inside the script. The
+	// subject is whether the entry is HONOURED, not how a path is spelled: on
+	// Windows __dir__ answers with backslashes while featurePath -- which is what
+	// $LOADED_FEATURES records -- normalises to forward slashes, so a script-side
+	// File.join(__dir__, ...) compares two spellings of the same file and the
+	// test failed there for a reason that has nothing to do with its subject.
+	// (That __dir__ does not normalise is noted separately; it is not this
+	// test's claim.)
+	pushed := dir + "/sub/lib.rb"
+
 	for _, tc := range []struct{ name, src, want string }{
 		{
 			"a hand-pushed entry suppresses the load",
-			"$LOADED_FEATURES << File.join(__dir__, \"sub\", \"lib.rb\")\np require_relative(\"sub/lib\")\n",
+			"$LOADED_FEATURES << " + strconv.Quote(pushed) + "\np require_relative(\"sub/lib\")\n",
 			"false\n",
 		},
 		{
