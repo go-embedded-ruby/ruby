@@ -2,7 +2,6 @@ package vm
 
 import (
 	"fmt"
-	"path/filepath"
 	"runtime"
 	"sort"
 	"strconv"
@@ -245,14 +244,28 @@ func (vm *VM) registerKernelIntrospection() {
 	vm.cObject.define("__FILE__", func(vm *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(vm.currentFile())
 	})
-	// __dir__: the directory of the file currently executing (File.dirname of the
-	// realpath of __FILE__), as MRI's Kernel#__dir__.
+	// __dir__: the directory of the file currently executing, CANONICALIZED. MRI's
+	// f_current_dirname (r4-eval.c:2148) is rb_file_dirname of
+	// rb_current_realfilepath(), and the documented contract says so in as many
+	// words -- "the canonicalized absolute path of the directory of the file from
+	// which this method is called. It means symlinks in the path is resolved. The
+	// return value equals to File.dirname(File.realpath(__FILE__))".
+	//
+	// That is NOT File.dirname(__FILE__): __FILE__ is the path as the file was
+	// NAMED, and the two differ whenever any component is a symlink -- and one
+	// always is here, since /tmp is a symlink to private/tmp on macOS. rbgo
+	// answered the lexical dirname of __FILE__, so __dir__ and every path built
+	// from it disagreed with MRI for any script reached through a link.
+	//
+	// currentRealDir falls back to the spelled path when the file has no recorded
+	// realpath, which is MRI's answer too: eval("__dir__", nil, "foo/bar.rb") is
+	// "foo" in ruby 4.0.5, the lexical dirname of a name that is on no disk.
 	vm.cObject.define("__dir__", func(vm *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-		f := vm.currentFile()
-		if f == "" {
+		d := vm.currentRealDir()
+		if d == "" {
 			return object.NilV
 		}
-		return object.NewString(filepath.Dir(f))
+		return object.NewString(d)
 	})
 
 	// __LINE__ is deliberately NOT defined here. It is a keyword in MRI, not a

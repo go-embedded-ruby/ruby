@@ -694,6 +694,7 @@ type VM struct {
 	featureHooks  map[string]func() // built-in feature -> body run once on its first require (e.g. shellwords)
 	requireDirs   []string          // stack of directories of the files currently being required
 	fileStack     []string          // stack of source files of the executing ISeq frames (for __FILE__)
+	realpaths     map[string]string // loaded file (as spelled) -> canonical path, MRI's second ISeq path
 	scriptName    string            // $0 / $PROGRAM_NAME: the running program's name
 	defaultRandom *RandomObj        // process-wide generator for Kernel#rand / #srand
 	fakerInst     *fakerState       // Faker instance + its seed source (Faker::Config.random)
@@ -1306,6 +1307,15 @@ func (vm *VM) SetScriptPath(path string) {
 	if path != "" {
 		vm.requireDirs = []string{filepath.Dir(path)}
 		vm.scriptName = path
+		// The main script is the one file MRI keeps UNEXPANDED as its path -- $0 and
+		// __FILE__ answer "main.rb" or "../main.rb" exactly as the command line
+		// spelled it, which core/thread/backtrace/location/path_spec.rb asserts three
+		// times over. Its realpath is still absolute and resolved, so __dir__ and
+		// Location#absolute_path answer an absolute path for a relatively-invoked
+		// script (core/kernel/__dir___spec.rb "returns the expanded path of the
+		// directory when used in the main script"). Recording it under the SPELLED
+		// key is what keeps those two apart.
+		vm.noteRealFilePathAs(path, featurePath(path))
 	}
 }
 

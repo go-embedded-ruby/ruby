@@ -408,9 +408,27 @@ func (vm *VM) registerBacktraceLocation() {
 	loc.define("inspect", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(strconv.Quote(getIvar(self, "@__str").ToS()))
 	})
-	// #absolute_path aliases #path here (rbgo carries no distinct absolute path).
-	loc.define("absolute_path", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return getIvar(self, "@path")
+	// #absolute_path is the RESOLVED path where #path is the one the file was
+	// NAMED with — the only two methods on this class whose whole purpose is to
+	// differ, and rbgo answered @path for both. MRI keeps the pair on the ISeq
+	// (rb_iseq_path beside rb_iseq_realpath) and location_path /
+	// location_absolute_path read one each; ruby/spec pins the difference with one
+	// fixture loaded through a symlink, asserting
+	// [@symlink, @symlink] for #path and [@symlink, realpath] for #absolute_path
+	// (core/thread/backtrace/location/{path,absolute_path}_spec.rb, context
+	// "canonicalization").
+	//
+	// The realpath is read from the registry the VM filled when it LOADED the file,
+	// not resolved here: the second of those two examples deletes the symlink from
+	// inside the file being loaded and still expects the resolved path, which only
+	// a value taken at load time can answer.
+	loc.define("absolute_path", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		p := getIvar(self, "@path")
+		s, ok := p.(*object.String)
+		if !ok {
+			return p
+		}
+		return object.NewString(vm.realFilePath(s.Str()))
 	})
 	// #base_label is the label with NO decoration at all. MRI reads it from a
 	// different field than #label does — location.base_label beside
