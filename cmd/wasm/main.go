@@ -38,7 +38,9 @@ func evalRuby(src string, seed map[string]object.Value) (string, object.Value, s
 	if err != nil {
 		return "", nil, err.Error()
 	}
-	iseq, err := compiler.Compile(prog)
+	// The playground runs user source, so it reads that source's magic comments
+	// like every other user-source entry point.
+	iseq, err := compiler.CompileWithMagic(prog, compiler.MagicComments(src))
 	if err != nil {
 		return "", nil, err.Error()
 	}

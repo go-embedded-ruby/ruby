@@ -64,7 +64,10 @@ func buildCmd(args []string) {
 	if err != nil {
 		fatal("rbgo build: %v", err)
 	}
-	iseq, err := compiler.Compile(prog)
+	// The same reading `rbgo <file>` gives (main.go), so a built binary and the
+	// interpreter agree about the script's own magic comments. They did not
+	// before: `rbgo build` dropped the `# encoding:` comment too.
+	iseq, err := compiler.CompileWithMagic(prog, compiler.MagicComments(string(src)))
 	if err != nil {
 		fatal("rbgo build: %v", err)
 	}

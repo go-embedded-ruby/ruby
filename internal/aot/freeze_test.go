@@ -67,6 +67,14 @@ func TestFreezeAllConstKinds(t *testing.T) {
 			object.Symbol("sym"),
 			object.NewString("hi\n"),
 			object.NewFrozenStringView("frozen"),
+			// A frozen literal carrying a non-default encoding: the emitted call
+			// must round-trip the encoding too, which the old
+			// NewFrozenStringView form silently dropped.
+			func() *object.String {
+				s := object.NewStringBytesEnc([]byte("bin"), "ASCII-8BIT")
+				s.Frozen = true
+				return s
+			}(),
 			object.Float(2.5),
 			&object.Bignum{I: bigVal},
 		},
@@ -89,7 +97,11 @@ func TestFreezeAllConstKinds(t *testing.T) {
 		"object.IntValue(-7)",
 		`object.Symbol("sym")`,
 		`object.NewString("hi\n")`,
-		`object.NewFrozenStringView("frozen")`,
+		// A frozen constant is emitted through the frozen-string TABLE, so the
+		// loaded unit's literal is the same object the interpreter would have
+		// compiled -- see writeConst.
+		`object.FString("frozen", "")`,
+		`object.FString("bin", "ASCII-8BIT")`,
 		"frozenFloat(0x4004000000000000)", // 2.5
 		`&object.Bignum{I: frozenBig("123456789012345678901234567890")}`,
 		`frozenBig(s string) *big.Int`,

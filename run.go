@@ -22,7 +22,10 @@ func Run(src string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	iseq, err := compiler.Compile(prog)
+	// User source, so its magic comments count -- the same reading cmd/rbgo
+	// gives a script file. Compile(prog) would silently ignore both pragmas,
+	// making an embedded program disagree with the CLI about its own file.
+	iseq, err := compiler.CompileWithMagic(prog, compiler.MagicComments(src))
 	if err != nil {
 		return err
 	}

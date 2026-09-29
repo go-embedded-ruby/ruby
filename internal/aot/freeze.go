@@ -178,8 +178,14 @@ func (f *freezer) writeConst(b *strings.Builder, v object.Value) {
 	case *object.String:
 		if c.Frozen {
 			// A frozen literal never mutates, so emit a zero-copy view over the
-			// immutable Go string rather than copying its bytes at load time.
-			fmt.Fprintf(b, "object.NewFrozenStringView(%s)", strconv.Quote(c.Str()))
+			// immutable Go string rather than copying its bytes at load time --
+			// and take it from the frozen-string TABLE, so a frozen literal in a
+			// frozen ISeq is the same object as the one the interpreter would
+			// have compiled. Without that, `"x".equal?("x")` answered true when
+			// the unit was interpreted and false when it was frozen, and
+			// prelude.rb declares `# frozen_string_literal: true` on its first
+			// line, so every one of its literals takes this branch.
+			fmt.Fprintf(b, "object.FString(%s, %s)", strconv.Quote(c.Str()), strconv.Quote(c.Enc))
 		} else {
 			fmt.Fprintf(b, "object.NewString(%s)", strconv.Quote(c.Str()))
 		}
