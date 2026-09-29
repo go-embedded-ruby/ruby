@@ -7,10 +7,25 @@
 #
 # Runs the ruby/spec language + core suites through rbgo under a minimal
 # MSpec-compatible shim (spec_helper.rb, vendored beside this script) and
-# reports the total number of passing examples. It is a shrink-only ratchet:
-# if the pass total drops below the frozen floor (the FLOOR file beside this
-# script) the run FAILS, so language conformance is tracked and can only go up.
-# When rbgo improves, bump FLOOR to the newly measured total to lock in the win.
+# judges the result against a PER-FILE baseline (the BASELINE file beside this
+# script). It is a shrink-only ratchet: if any file passes fewer examples than
+# its recorded count, or stops loading, the run FAILS -- so conformance is
+# tracked and can only go up. When rbgo improves, regenerate the baseline with
+# UPDATE_BASELINE=1 to lock the win in.
+#
+# The judging is a Go program (cmd/ratchet beside this script), not more shell.
+# Reading a sweep and deciding is where a silent failure reads as a clean
+# result, and the tool refuses input it cannot read -- an empty sweep, an
+# unrecognised record, a pass count that is not a number -- with exit 2, which
+# is distinct from exit 1 for a real regression.
+#
+# It replaced a single frozen scalar, which could not be calibrated. A spec file
+# that fails to load carries tens of examples -- one flip was measured moving the
+# total by 43 on a documentation-only commit -- so the floor needed a margin
+# wider than the largest file, and a gate with a 43-example margin is blind to
+# every regression smaller than 43. The total was also unattributable: -43 is one
+# file not loading, or 43 specs regressing, and those need opposite responses.
+# Judged per file, no margin is needed and every move names its file.
 #
 # Each spec file runs in its own rbgo process (the shim prints a
 # `RBGO_RESULT pass=.. fail=.. error=.. skip=..` line at exit); a file that
@@ -23,7 +38,7 @@
 #   CACHE     clone cache dir           (default: /tmp/rubyspec-corpus)
 #   JOBS      parallelism               (default: number of CPUs)
 #   TIMEOUT   per-file timeout seconds  (default: 25)
-#   UPDATE_FLOOR=1  print the measured total as the new floor and exit 0
+#   UPDATE_BASELINE=1  rewrite BASELINE from this sweep and exit 0
 set -u
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -34,11 +49,13 @@ SPECDIR="${SPECDIR:-$CACHE}"
 TIMEOUT="${TIMEOUT:-25}"
 JOBS="${JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)}"
 
-# The ruby/spec commit the floor was measured against. Bump together with FLOOR.
+# The ruby/spec commit the baseline was measured against. Bump together with
+# BASELINE: a corpus bump changes which files exist, and the judge reports files
+# that appear or vanish rather than silently absorbing them.
 SPEC_SHA="87b1631992bd00cf0c4934474766d54dad088191"
 SPEC_URL="https://github.com/ruby/spec"
 
-FLOOR="$(tr -dc '0-9' < "$HERE/FLOOR")"
+BASELINE="$HERE/BASELINE"
 
 echo "== build rbgo =="
 if [ ! -x "$RBGO" ]; then
@@ -89,40 +106,14 @@ echo "== run language + core (${JOBS}-way) =="
 find "$SPECDIR/language" "$SPECDIR/core" -name '*_spec.rb' | sort \
   | xargs -P "$JOBS" -I{} bash -c 'run_one "$@"' _ {} > "$RESULTS"
 
-TOTAL_PASS="$(awk -F'\t' '$1=="OK"{s+=$3} END{print s+0}' "$RESULTS")"
-FILES_OK="$(awk -F'\t' '$1=="OK"' "$RESULTS" | wc -l | tr -d ' ')"
-FILES_FAIL="$(awk -F'\t' '$1=="FILEFAIL"' "$RESULTS" | wc -l | tr -d ' ')"
+# Hand the sweep to the judge. Everything above this line runs processes;
+# everything below it decides, and that half is Go.
+RATCHET="$(mktemp -d)/ratchet"
+trap 'rm -f "$RESULTS" "$RATCHET"' EXIT
+(cd "$REPO_ROOT" && GOWORK=off CGO_ENABLED=0 go build -o "$RATCHET" ./scripts/conformance/rubyspec/cmd/ratchet) || exit 2
 
 echo
-echo "passing examples: $TOTAL_PASS   (files loaded: $FILES_OK, failed to load: $FILES_FAIL)"
-echo "frozen floor:     $FLOOR"
-
-# Name the unloaded files on EVERY run, not only on a regression. A file that
-# fails to load carries tens of examples, so its coming and going is the largest
-# single term in the total -- larger than every per-example flake combined: a
-# documentation-only commit was measured moving the total by 43 because one file
-# flipped from loading to not. Printing the count alone makes that step visible
-# and unattributable, which is the worst of both: the reader sees the number move
-# and cannot tell whether a spec regressed or a file simply did not load. The two
-# need opposite responses, so the names belong in the passing output too.
-if [ "$FILES_FAIL" -gt 0 ]; then
-  echo "-- files that failed to load ($FILES_FAIL) --"
-  awk -F'\t' '$1=="FILEFAIL"{print "   "$2}' "$RESULTS" | head -40
+if [ "${UPDATE_BASELINE:-0}" = "1" ]; then
+  exec "$RATCHET" -baseline "$BASELINE" -results "$RESULTS" -update
 fi
-
-if [ "${UPDATE_FLOOR:-0}" = "1" ]; then
-  echo "$TOTAL_PASS" > "$HERE/FLOOR"
-  echo "FLOOR updated to $TOTAL_PASS"
-  exit 0
-fi
-
-if [ "$TOTAL_PASS" -lt "$FLOOR" ]; then
-  echo "::error::ruby/spec ratchet REGRESSION: $TOTAL_PASS passing < floor $FLOOR"
-  echo "   (the unloaded files, if any, are named above)"
-  exit 1
-fi
-
-if [ "$TOTAL_PASS" -gt "$FLOOR" ]; then
-  echo "note: $((TOTAL_PASS - FLOOR)) more passing than the floor — bump FLOOR to lock this in (UPDATE_FLOOR=1)."
-fi
-echo "ruby/spec ratchet OK"
+exec "$RATCHET" -baseline "$BASELINE" -results "$RESULTS"
