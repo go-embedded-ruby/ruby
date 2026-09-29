@@ -13,11 +13,14 @@
 #     private/tmp on macOS, and run.sh's default CACHE lives there. Same inode,
 #     different spelling, 20 examples. This was swept from a REAL path. The
 #     underlying divergence from MRI is issue #741.
-#  2. PLATFORM. This lane runs on ubuntu. Four files were measured on darwin and
-#     are recorded at CI's own LOWER ubuntu value instead -- file/stat/inspect,
-#     kernel/backtick, marshal/load, process/setrlimit. Under-recording is the
-#     safe direction: a file that passes more is reported as improved, never
-#     failed. The baseline belongs to the lane that enforces it.
+#  2. PLATFORM. This lane runs on ubuntu. FIVE files were measured on darwin and
+#     are recorded at CI's own LOWER ubuntu value instead: file/stat/inspect,
+#     kernel/backtick, marshal/load, process/setrlimit, kernel/require. Each was
+#     found by CI NAMING it, which is what judging per file buys -- a scalar
+#     floor would have reported one number and left the reader to guess which of
+#     2206 files moved. Under-recording is the safe direction: a file that
+#     passes more is reported as improved, never failed. The baseline belongs to
+#     the lane that enforces it.
 #
 # Swept twice; the two sweeps were byte-identical across all 2206 records.
 #
