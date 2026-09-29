@@ -105,7 +105,7 @@ func runProgram(src, name string, fromFile bool, o *options) (*vm.VM, error) {
 	if err != nil {
 		return nil, err
 	}
-	iseq, err := compiler.CompileWithEncoding(prog, compiler.MagicSourceEncoding(src))
+	iseq, err := compiler.CompileWithMagic(prog, compiler.MagicComments(src))
 	if err != nil {
 		return nil, err
 	}

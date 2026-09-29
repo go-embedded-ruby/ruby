@@ -18,7 +18,7 @@ func (vm *VM) bindingEval(b *Binding, src string, loc evalLocation) object.Value
 	if perr != nil {
 		raiseEvalSyntaxError(loc, perr)
 	}
-	iseq, cerr := compiler.CompileEvalWithLocals(prog, b.names, loc.line)
+	iseq, cerr := compiler.CompileEvalWithLocals(prog, compiler.MagicComments(src), b.names, loc.line)
 	if cerr != nil {
 		raiseEvalSyntaxError(loc, cerr)
 	}
@@ -34,7 +34,7 @@ func (vm *VM) bindingEval(b *Binding, src string, loc evalLocation) object.Value
 		}
 		// Re-seeding the same program with additional valid local names cannot
 		// introduce a compile error, so the earlier check already covered it.
-		iseq, _ = compiler.CompileEvalWithLocals(prog, b.names, loc.line)
+		iseq, _ = compiler.CompileEvalWithLocals(prog, compiler.MagicComments(src), b.names, loc.line)
 	}
 	// The front end resolves every binding local at depth 1 against one borrowed
 	// scope; a binding captured inside a BLOCK has its names spread over an env

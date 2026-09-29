@@ -18,7 +18,7 @@ func runSrcEnc(t *testing.T, src string) string {
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	iseq, err := compiler.CompileWithEncoding(prog, compiler.MagicSourceEncoding(src))
+	iseq, err := compiler.CompileWithMagic(prog, compiler.MagicComments(src))
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}

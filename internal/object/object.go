@@ -249,6 +249,60 @@ func NewStringBytesEnc(b []byte, enc string) *String { return &String{b: b, Enc:
 // serves every read without copying — ideal for interned/AOT string literals.
 func NewFrozenStringView(s string) *String { return &String{view: s, isView: true, Frozen: true} }
 
+// fstringTab is the process-wide frozen-string table, MRI's rb_fstring /
+// register_fstring (string.c). ONE table serves both of the things that consult
+// it, which is not a tidying choice but an observable requirement: under
+// `# frozen_string_literal: true`, MRI answers true to `"abc".equal?(-"abc")`,
+// so the literal and String#-@ must land on the same object.
+//
+// It is what makes two `"abc"` literals in two DIFFERENT files the same object
+// — ruby/spec language/string_spec.rb, "produce the same object for literals
+// with the same content in different files". A per-compilation cache cannot do
+// that, because each file is compiled on its own.
+//
+// The key is the encoding AND the bytes, because two strings deduplicate only
+// when both match: ruby/spec's "produce different objects for literals with the
+// same content in different files if they have different encodings". Every
+// value is frozen, hence immutable, which is what makes sharing one across
+// frames, VMs and goroutines safe; the map is mutex-guarded because the VM
+// compiles `require`d files while it runs. It only ever grows, as MRI's does
+// for literals: it is bounded by the program's text.
+var (
+	fstringMu  sync.Mutex
+	fstringTab = map[string]*String{}
+)
+
+// InternFString returns the canonical frozen String for s's content and
+// encoding. An already-frozen argument becomes the canonical one itself when
+// nothing is registered yet, so `input = "foo".freeze; (-input).equal?(input)`
+// holds.
+func InternFString(s *String) *String {
+	key := s.EncName() + "\x00" + s.Str()
+	fstringMu.Lock()
+	defer fstringMu.Unlock()
+	if v, ok := fstringTab[key]; ok {
+		return v
+	}
+	fs := s
+	if !fs.Frozen {
+		fs = NewStringBytesEnc(append([]byte(nil), s.Bytes()...), s.Enc)
+		fs.Frozen = true
+	}
+	fstringTab[key] = fs
+	return fs
+}
+
+// FString is InternFString for a SOURCE LITERAL: the canonical frozen String for
+// content s in encoding enc (enc "" is the UTF-8 default). The candidate is a
+// copy-on-write view over the Go string the compiler already holds, so a literal
+// that wins the table costs no copy of its bytes; one that loses is discarded.
+// This is the constant a literal compiles to under
+// `# frozen_string_literal: true`: frozen, so vm's OpPushConst shares rather
+// than clones it, and interned, so equal literals are the same object.
+func FString(s, enc string) *String {
+	return InternFString(&String{view: s, isView: true, Frozen: true, Enc: enc})
+}
+
 // TakeFrom makes s share o's representation (owned slice or view), used when o
 // is a freshly produced, otherwise-discarded String so the transfer is
 // zero-copy and cannot alias any live value. Enc and Frozen are left untouched.
