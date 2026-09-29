@@ -75,6 +75,12 @@ func realTempDir(t *testing.T) string {
 //   - a require of an absolute path whose LEAF is a symlink keeps the symlink in
 //     __FILE__, in Location#path and in $LOADED_FEATURES, and resolves it in
 //     Location#absolute_path alone;
+//   - the same file required by TWO spellings that differ only through a symlink
+//     loads ONCE: the second require answers false and $LOADED_FEATURES keeps a
+//     single entry, although the spelling it holds is not the one asked for the
+//     second time. That is MRI's loaded_features_realpaths, and it is the only
+//     thing standing between a resolved require_relative base and a file that
+//     silently loads twice;
 //   - an eval frame answers nil for #absolute_path (MRI stores [path, Qnil] and
 //     defines rb_iseq_from_eval_p as NIL_P(rb_iseq_realpath), iseq.c-ruby_4_0
 //     :1480) while __dir__ on that same frame answers the LEXICAL dirname of the
@@ -116,6 +122,8 @@ func TestISeqPathAndRealpathDivide(t *testing.T) {
 		`puts "LF.lib=#{$LOADED_FEATURES.last.sub(ROOT,'')}"`,
 		`require ROOT + "/link/leaflink.rb"`,
 		`puts "LF.leaf=#{$LOADED_FEATURES.last.sub(ROOT,'')}"`,
+		`puts "requeue=#{require(ROOT + "/real/leaflink.rb")}"`,
+		`puts "LF.count=#{$LOADED_FEATURES.count { |f| f.end_with?('leaflink.rb') }}"`,
 		`puts "eval.abs=#{eval('caller_locations(0)[0].absolute_path', nil, 'foo.rb').inspect}"`,
 		`puts "eval.__dir__=#{eval('__dir__', nil, 'foo/bar.rb').inspect}"`,
 		"",
@@ -133,6 +141,12 @@ func TestISeqPathAndRealpathDivide(t *testing.T) {
 		"leaf.path=/link/leaflink.rb",
 		"leaf.abs=/real/leaf.rb", // …and is resolved only here
 		"LF.leaf=/link/leaflink.rb",
+		// The SAME file by a second spelling: already loaded, and $" keeps one entry.
+		// The leaf lines above do not repeat, which is the half of this that says the
+		// body did not run again -- "returns false" and "did not re-run" are two
+		// claims and a bare `false` only makes one of them.
+		"requeue=false",
+		"LF.count=1",
 		"eval.abs=nil",       // no realpath at all for an eval unit
 		`eval.__dir__="foo"`, // …but __dir__ falls back to the path
 		"",
