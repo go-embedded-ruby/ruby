@@ -1264,7 +1264,7 @@ func (c *Compiler) rewriteAnonKwSplat(h *ast.HashLit) (*ast.HashLit, bool) {
 			vals[i] = c.anonLocal("**", fwdKwName)
 		}
 	}
-	return &ast.HashLit{Keys: keys, Values: vals}, true
+	return &ast.HashLit{Keys: keys, Values: vals, Braced: h.Braced}, true
 }
 
 func (c *Compiler) compileCall(v *ast.Call) {
@@ -1369,13 +1369,28 @@ func (c *Compiler) compileCall(v *ast.Call) {
 	// block-pass is pulled out below, because the pull-out is an implementation
 	// detail of how the value is stacked, not a change to what was written.
 	noKW := lastArgIsPositional(callArgs)
-	// vcall marks MRI's NODE_VCALL shape: a receiver-less, argument-less,
-	// block-less name that the local-variable check above did NOT resolve
-	// (gettable's "method call without arguments", parse.y-ruby_4_0:13086). It
-	// travels on the send so a miss can raise NameError rather than NoMethodError
-	// — see bytecode.FlagSendVCall, which also records what this test cannot yet
-	// see (`foo` vs `foo()`).
-	vcall := v.Recv == nil && v.Block == nil && !v.Safe && len(v.Args) == 0
+	// vcall marks MRI's NODE_VCALL shape: a receiver-less, PARENTHESIS-less,
+	// argument-less, block-less plain identifier that the local-variable check
+	// above did NOT resolve (gettable's "method call without arguments",
+	// parse.y-ruby_4_0:13086). It travels on the send so a miss can raise
+	// NameError rather than NoMethodError — see bytecode.FlagSendVCall.
+	//
+	// Every conjunct is one of MRI's productions, and each excludes a shape that
+	// is an FCALL instead:
+	//
+	//   - !v.Paren: `fcall: operation` feeding `method_call: fcall paren_args`
+	//     (parse.y-ruby_4_0:3572-3577 and 5242-5248) builds NEW_FCALL, so
+	//     `nope()` raises NoMethodError where `nope` raises NameError. The bit is
+	//     ast.Call.Paren, go-ruby-parser v0.9.0.
+	//   - vcallName: gettable reaches NEW_VCALL only under case ID_LOCAL, i.e.
+	//     for a plain tIDENTIFIER. A name ending in '!' or '?' lexes as tFID and
+	//     `primary: tFID` builds NEW_FCALL (parse.y-ruby_4_0:4370-4374, 6696-6698).
+	//   - v.Block == nil: `primary: fcall brace_block`
+	//     (parse.y-ruby_4_0:4458-4463) is an FCALL too.
+	//
+	// Measured on ruby 4.0.5 under BOTH `--parser=parse.y` and `--parser=prism`,
+	// which agree on all of it.
+	vcall := v.Recv == nil && v.Block == nil && !v.Safe && !v.Paren && len(v.Args) == 0 && vcallName(v.Name)
 	sendFlags := func(at int) int {
 		if explicit {
 			b.insns[at].Flags |= bytecode.FlagSendExplicit
@@ -1755,7 +1770,7 @@ func (c *Compiler) compileSplatItemsMode(items []ast.Node, keepEmptyKwSplat bool
 			b.emit(bytecode.OpConcatArray, 0, 0)
 			continue
 		}
-		if h, ok := it.(*ast.HashLit); ok && i == len(items)-1 && isKwSplatHash(h) {
+		if h, ok := it.(*ast.HashLit); ok && i == len(items)-1 && !h.Braced && isKwSplatHash(h) {
 			c.appendKwSplat(h, keepEmptyKwSplat)
 			continue
 		}
@@ -1792,6 +1807,24 @@ func (c *Compiler) appendKwSplat(h *ast.HashLit, keepEmpty bool) {
 	b.patch(done, b.here())
 }
 
+// vcallName reports whether name can be MRI's NODE_VCALL at all: gettable
+// reaches NEW_VCALL only under case ID_LOCAL (parse.y-ruby_4_0:13086), i.e. for
+// a plain tIDENTIFIER. A name ending in '!' or '?' lexes as tFID and
+// `primary: tFID` builds NEW_FCALL instead (parse.y-ruby_4_0:4370-4374), so
+// `nope!` and `nope?` raise NoMethodError; a setter name (`nope=`) is likewise
+// never a bare identifier. A capitalised bare name is ID_CONST and never reaches
+// a send at all, so it needs no test here.
+func vcallName(name string) bool {
+	if name == "" {
+		return false
+	}
+	switch name[len(name)-1] {
+	case '!', '?', '=':
+		return false
+	}
+	return true
+}
+
 // lastArgIsPositional reports whether the LAST argument of a call is
 // syntactically a positional value — so a Hash arriving there must stay a
 // positional argument and must not be re-read as keyword arguments.
@@ -1808,18 +1841,28 @@ func (c *Compiler) appendKwSplat(h *ast.HashLit, keepEmpty bool) {
 // anywhere in the list), so it is skipped. An empty list has no last argument
 // and answers false: there is nothing to protect.
 //
-// It answers false for an *ast.HashLit because go-ruby-parser v0.3.0 gives
-// `f(k: 1)` and `f({k: 1})` the SAME node with no record of the braces. Both are
-// therefore left to the older behaviour — keywords — which is what `f(k: 1)`
-// needs and what `f({k: 1})` got before. Fixing that shape needs a `Braced` bit
-// on ast.HashLit upstream; see FlagSendNoKW.
+// A trailing *ast.HashLit answers from ast.HashLit.Braced (go-ruby-parser
+// v0.9.0), which records the WRITTEN FORM exactly as MRI's own parser does:
+// `primary: tLBRACE assoc_list '}'` sets RNODE_HASH(...)->nd_brace = TRUE
+// (parse.y-ruby_4_0:4415-4419) while rb_node_hash_new leaves it 0 for every hash
+// the grammar assembles from bare `k: v` pairs (parse.y-ruby_4_0:11784-11791).
+// The braced spelling is a POSITIONAL Hash and the bare one is KEYWORDS — MRI
+// reads the same bit back for exactly that question in aryset_check
+// (parse.y-ruby_4_0:13669). Measured on ruby 4.0.5 under both parsers:
+//
+//	def f(*a, **k) = [a, k]
+//	f({x: 1})   # [[{x: 1}], {}]   positional
+//	f(x: 1)     # [[], {x: 1}]     keywords
+//	f({})       # [[{}], {}]       an empty POSITIONAL hash, unlike f()
 func lastArgIsPositional(args []ast.Node) bool {
 	for i := len(args) - 1; i >= 0; i-- {
 		if _, isBP := args[i].(*ast.BlockPass); isBP {
 			continue
 		}
-		_, isHash := args[i].(*ast.HashLit)
-		return !isHash
+		if h, isHash := args[i].(*ast.HashLit); isHash {
+			return h.Braced
+		}
+		return true
 	}
 	return false
 }
@@ -1827,12 +1870,17 @@ func lastArgIsPositional(args []ast.Node) bool {
 // hasTrailingKwSplat reports whether the last argument is a keyword-splat hash
 // (a HashLit carrying at least one `**` entry, key == nil), which the call path
 // must build dynamically so an empty splat is dropped.
+//
+// A BRACED hash is never that, whatever it contains: `f({**h})` writes a
+// positional Hash whose contents happen to come from a splat, and MRI passes it
+// as one — `f({**h})` gives [[{y: 2}], {}] where `f(**h)` gives [[], {y: 2}]
+// (ruby 4.0.5, both parsers). See ast.HashLit.Braced.
 func hasTrailingKwSplat(items []ast.Node) bool {
 	if len(items) == 0 {
 		return false
 	}
 	h, ok := items[len(items)-1].(*ast.HashLit)
-	return ok && isKwSplatHash(h)
+	return ok && !h.Braced && isKwSplatHash(h)
 }
 
 // isKwSplatHash reports whether a HashLit contains a `**splat` entry (a nil key).

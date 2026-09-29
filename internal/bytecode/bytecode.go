@@ -249,11 +249,12 @@ const (
 	// a call site whose last argument is a Hash LITERAL — see below) keeps the
 	// older "peel a trailing hash" behaviour rather than silently losing keywords.
 	//
-	// The one shape it cannot yet decide is a braced hash literal: go-ruby-parser
-	// v0.3.0 parses `foo(1, 2, 3, {key: 42})` and `foo(1, 2, 3, key: 42)` into the
-	// SAME *ast.HashLit, with no record of the braces, so the compiler cannot tell
-	// them apart. Those sites are left unflagged (keywords), which is what rbgo
-	// did before. Distinguishing them needs a `Braced` bit on ast.HashLit upstream.
+	// A braced hash literal IS decided, since go-ruby-parser v0.9.0 carries
+	// ast.HashLit.Braced — MRI's own nd_brace bit (parse.y-ruby_4_0:4415-4419),
+	// which rb_node_hash_new leaves 0 for a hash the grammar assembled from bare
+	// `k: v` pairs (parse.y-ruby_4_0:11784-11791). So `foo(1, 2, 3, {key: 42})` is
+	// flagged positional and `foo(1, 2, 3, key: 42)` is not, exactly as MRI reads
+	// the same bit in aryset_check (parse.y-ruby_4_0:13669).
 	FlagSendNoKW
 
 	// FlagSendKWSplat marks an array-dispatch send (OpSendArray, OpSendArrayBlockArg,
@@ -292,14 +293,15 @@ const (
 	// (vm_eval.c:927) then builds with rb_name_err_new instead of
 	// rb_nomethod_err_new. #name and #receiver are set either way.
 	//
-	// KNOWN GAP, measured on go-ruby-parser v0.8.0: `foo` and `foo()` parse to the
-	// IDENTICAL *ast.Call (Recv nil, Args empty, Block nil), so the compiler cannot
-	// tell a bare name from an empty argument list and this flag is set for both.
-	// Distinguishing them needs a `Paren` bit on ast.Call upstream — the same shape
-	// of gap as the `Braced` bit ast.HashLit needs for FlagSendNoKW above. The flag
-	// is therefore set on the shape the parser CAN prove is receiver-less,
-	// argument-less and block-less, and `nope()` reports NameError where MRI
-	// reports NoMethodError.
+	// Since go-ruby-parser v0.9.0 the compiler decides this EXACTLY, and the flag
+	// is the whole rule rather than an approximation of it. ast.Call.Paren
+	// separates `foo` from `foo()` — MRI's `fcall: operation` feeding
+	// `method_call: fcall paren_args` (parse.y-ruby_4_0:3572-3577 and 5242-5248)
+	// builds NEW_FCALL where a bare name reaching gettable builds NEW_VCALL — and
+	// the compiler also tests the shape of the NAME, because `operation` admits
+	// tFID: `foo!` and `foo?` are parenthesis-less FCALLs
+	// (parse.y-ruby_4_0:4370-4374 and 6696-6698). See compiler.vcallName. The VM
+	// therefore reads this flag alone; it holds no second copy of the rule.
 	FlagSendVCall
 )
 
