@@ -48,6 +48,11 @@ func (vm *VM) bindingEval(b *Binding, src string, loc evalLocation) object.Value
 	// line) — stamp the compiled ISeq, and the binding's own source location is
 	// left untouched (bind_location reads the binding, not the eval).
 	setISeqFile(iseq, loc.file)
+	// An eval unit has a path and NO realpath in MRI -- pathobj is [path, Qnil] --
+	// so Location#absolute_path on this frame is nil while __dir__ still answers
+	// the lexical dirname of loc.file. Recording it is what keeps the two apart;
+	// see noteEvalFile.
+	vm.noteEvalFile(loc.file)
 	// eval is transparent to Kernel#__method__ / #__callee__, and through a BINDING
 	// the answer is the binding's own frame, not the frame doing the eval: MRI reads
 	// the method entry of the cfp the binding pins, so a Binding captured inside `q`

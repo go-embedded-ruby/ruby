@@ -177,6 +177,13 @@ func (vm *VM) doLoad(name string) object.Value {
 			continue // not found / unreadable — try the next candidate
 		}
 		abs := featurePath(cand)
+		// Record the file's canonical path beside the spelling it was loaded under,
+		// as MRI stamps an ISeq's realpath beside its path. Kernel#load is where
+		// ruby/spec pins the pair apart: loading a symlink must leave __FILE__ and
+		// Location#path on the symlink and put only Location#absolute_path on the
+		// target (core/thread/backtrace/location/{path,absolute_path}_spec.rb,
+		// context "canonicalization").
+		vm.noteRealFilePath(abs)
 		iseq, cerr := parseCompileFn(string(src))
 		if cerr != nil {
 			return raise("SyntaxError", "%s", cerr.Error())
@@ -303,6 +310,18 @@ func (vm *VM) doRequire(name string, relative bool) object.Value {
 			continue // not found / unreadable — try the next candidate
 		}
 		abs := featurePath(cand)
+		// MRI keeps a SECOND index beside $LOADED_FEATURES, from a loaded file's
+		// canonical path to the name it was recorded under (load.c's
+		// loaded_features_realpaths), and require consults it -- so one file
+		// required by two spellings that differ only through a symlink loads ONCE.
+		// Measured on ruby 4.0.5: after require of ".../link/x.rb", a require of
+		// ".../real/x.rb" answers false although $LOADED_FEATURES holds nothing but
+		// the first spelling. Answering about that first spelling is what makes a
+		// self-require through a RESOLVED base (require_relative's) come back as the
+		// circular require it is, instead of running the file a second time.
+		if prev := vm.featureSpelling(abs); prev != "" {
+			abs = prev
+		}
 		// $LOADED_FEATURES is the authority on what has been required (MRI's
 		// rb_feature_provided reads that list), so a program that removes an entry
 		// — ruby/spec saves and restores $" around every example — makes the next
@@ -349,6 +368,13 @@ func (vm *VM) doRequire(name string, relative bool) object.Value {
 		// reports the file the method was defined in, regardless of where it is
 		// called from.
 		setISeqFile(iseq, abs)
+		// …and beside it the file's canonical path, which is the OTHER path MRI
+		// keeps: $LOADED_FEATURES and __FILE__ carry abs as spelled (ruby/spec
+		// core/kernel/shared/require.rb "does not canonicalize the path and stores a
+		// path with symlinks"), while __dir__ and Location#absolute_path are built
+		// from the resolved one.
+		vm.noteRealFilePath(abs)
+		vm.noteFeatureRealpath(abs)
 		vm.loaded[abs] = true
 		loadingKey := vm.requireLoadingKey(abs)
 		vm.loaded[loadingKey] = true
@@ -376,6 +402,34 @@ func (vm *VM) doRequire(name string, relative bool) object.Value {
 	// exactly like the bare name" check this path used to carry), so the require
 	// genuinely failed.
 	return vm.raiseLoadError(errName)
+}
+
+// featureSpelling answers the name a still-loaded feature was recorded under,
+// when abs is a DIFFERENT spelling of the same file, and "" otherwise -- so the
+// caller can ask about the recording that exists rather than about the name it
+// happens to hold. It is MRI's loaded_features_realpaths lookup.
+//
+// A feature the program has dropped from $LOADED_FEATURES answers "" as well:
+// ruby/spec saves and restores $" around every example, and a dropped entry must
+// let the next require run the file again, under whichever spelling it then uses.
+func (vm *VM) featureSpelling(abs string) string {
+	prev, ok := vm.featureRealpaths[canonicalPath(abs)]
+	if !ok || prev == abs || !vm.loaded[prev] || vm.featureDropped(prev) {
+		return ""
+	}
+	return prev
+}
+
+// noteFeatureRealpath records the spelling abs was required under against its
+// canonical path, which is the index featureSpelling reads. It is not rolled
+// back when a load unwinds: featureSpelling already refuses an entry whose
+// feature is no longer loaded, so a stale row answers "" and is overwritten by
+// the next successful require of that file.
+func (vm *VM) noteFeatureRealpath(abs string) {
+	if vm.featureRealpaths == nil {
+		vm.featureRealpaths = map[string]string{}
+	}
+	vm.featureRealpaths[canonicalPath(abs)] = abs
 }
 
 // requireLoadingKey names the vm.loaded entry marking a feature whose load is
@@ -419,14 +473,17 @@ func setISeqFile(iseq *bytecode.ISeq, path string) {
 // requireRelativeBase expands name the way rb_f_require_relative does --
 // rb_file_absolute_path(fname, dirname(rb_current_realfilepath())) -- leaving an
 // already-absolute name alone and cleaning the result, which is what MRI names in
-// the LoadError of a require_relative that finds nothing.
+// the LoadError of a require_relative that finds nothing. The base is
+// rb_current_realfilepath, the RESOLVED path of the calling file, so a script
+// reached through a symlinked directory expands against the directory the file
+// really lives in; see currentRealDir.
 func (vm *VM) requireRelativeBase(name string) string {
 	if filepath.IsAbs(name) {
 		return featurePath(name)
 	}
 	dir := vm.currentDir()
-	if f := vm.currentFile(); f != "" {
-		dir = filepath.Dir(f)
+	if d := vm.currentRealDir(); d != "" {
+		dir = d
 	}
 	return featurePath(filepath.Join(dir, name))
 }
@@ -450,8 +507,15 @@ func (vm *VM) requireCandidates(file string, relative bool) []string {
 		// written — the executing ISeq's file — so a require_relative inside a
 		// method works even when that method is called from another file. Fall back
 		// to the require stack's directory when no file is stamped (e.g. a -e script).
-		if f := vm.currentFile(); f != "" {
-			return []string{filepath.Join(filepath.Dir(f), file)}
+		//
+		// The directory is taken from that file's REALPATH, not from its spelling:
+		// rb_f_require_relative bases the expansion on
+		// dirname(rb_current_realfilepath()). Only the base is canonical — the name
+		// joined onto it is not, which is why require_relative through a symlinked
+		// directory name still records the symlink (ruby/spec
+		// core/kernel/require_relative_spec.rb, "with symlinks").
+		if d := vm.currentRealDir(); d != "" {
+			return []string{filepath.Join(d, file)}
 		}
 		return []string{filepath.Join(vm.currentDir(), file)}
 	case strings.HasPrefix(file, "~"):
@@ -468,7 +532,15 @@ func (vm *VM) requireCandidates(file string, relative bool) []string {
 		return []string{file}
 	default:
 		cands := []string{filepath.Join(vm.currentDir(), file), file}
-		for _, dir := range vm.loadPathDirs() {
+		// The $LOAD_PATH walk uses the EXPANDED load path -- each entry absolute and
+		// canonical -- which is the list MRI keeps beside $LOAD_PATH itself rather
+		// than the entries as written. ruby/spec names the asymmetry in the example
+		// title: "canonicalizes the entry in $LOAD_PATH but not the filename passed
+		// to #require" (core/kernel/shared/require.rb). With a symlinked directory on
+		// the load path, the feature recorded is <realdir>/<name as written>, and
+		// $LOAD_PATH[0] is still the symlink -- the canonical form is the search
+		// list's, not the array's.
+		for _, dir := range vm.expandedLoadPath() {
 			cands = append(cands, filepath.Join(dir, file))
 		}
 		return cands
@@ -702,12 +774,30 @@ func loadedFeaturePath(entry, stem, ext string, loadPath []string) int {
 }
 
 // expandedLoadPath is MRI's get_expanded_load_path: each $LOAD_PATH entry as an
-// absolute, cleaned path, which is the form the loaded-features entries carry.
+// absolute, cleaned and CANONICAL path, which is the form the loaded-features
+// entries carry.
+//
+// Canonical, not merely absolute: rb_construct_expanded_load_path resolves each
+// entry (falling back to a plain expansion for one that cannot be resolved), so a
+// symlinked directory on the load path yields features under the directory it
+// points at. ruby/spec asserts exactly that, and asserts the other half in the
+// same example -- the NAME required is not canonicalized, and $LOAD_PATH itself
+// is left untouched:
+//
+//	$LOAD_PATH.unshift(@symlink_to_dir)
+//	@object.require("symfile").should == true    # symfile.rb -> realfile.rb
+//	$".last.should == "#{@dir}/symfile.rb"       # dir resolved, name not
+//	$LOAD_PATH[0].should == @symlink_to_dir      # the array is unchanged
+//
+// (core/kernel/shared/require.rb, "canonicalizes the entry in $LOAD_PATH but not
+// the filename passed to #require".) load.c is absent from the local MRI source
+// corpus, so this is cited from ruby/spec and from the running 4.0.5 oracle
+// rather than from the C.
 func (vm *VM) expandedLoadPath() []string {
 	dirs := vm.loadPathDirs()
 	out := make([]string, len(dirs))
 	for i, d := range dirs {
-		out[i] = featurePath(d)
+		out[i] = canonicalPath(featurePath(d))
 	}
 	return out
 }

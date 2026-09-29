@@ -24,6 +24,17 @@
 #
 # Swept twice; the two sweeps were byte-identical across all 2206 records.
 #
+# 2026-09-29, #741 (ISeq path vs realpath): THREE files raised by applying the
+# darwin-measured DELTA to the recorded value, not by overwriting with a darwin
+# sweep -- core/kernel/require_spec.rb is one of the five held at CI's lower
+# ubuntu number, and an overwrite would have lost that. The deltas, from two
+# sweeps of the same real-path corpus before and after the change:
+#   core/thread/backtrace/location/absolute_path_spec.rb  +3  (2 -> 5)
+#   core/kernel/require_relative_spec.rb                  +1  (54 -> 55)
+#   core/kernel/require_spec.rb                           +1  (68 -> 69, from 69 -> 70)
+# core/random/bytes_spec.rb read 9 in both post-change sweeps and is deliberately
+# left at 8: it is the known flake named below, not a mover.
+#
 # One file is recorded at its OBSERVED MINIMUM rather than its usual value:
 # core/random/bytes_spec.rb answers 8 or 9 on the same binary, on both engines,
 # and every wave measuring conformance today named it. Recorded at 8, so a run
@@ -1148,8 +1159,8 @@ OK	core/kernel/rand_spec.rb	24
 OK	core/kernel/readline_spec.rb	2
 OK	core/kernel/readlines_spec.rb	2
 OK	core/kernel/remove_instance_variable_spec.rb	11
-OK	core/kernel/require_relative_spec.rb	54
-OK	core/kernel/require_spec.rb	68
+OK	core/kernel/require_relative_spec.rb	55
+OK	core/kernel/require_spec.rb	69
 OK	core/kernel/respond_to_missing_spec.rb	17
 OK	core/kernel/respond_to_spec.rb	18
 OK	core/kernel/select_spec.rb	3
@@ -1985,7 +1996,7 @@ OK	core/thread/add_trace_func_spec.rb	0
 OK	core/thread/alive_spec.rb	10
 OK	core/thread/allocate_spec.rb	1
 OK	core/thread/backtrace/limit_spec.rb	0
-OK	core/thread/backtrace/location/absolute_path_spec.rb	2
+OK	core/thread/backtrace/location/absolute_path_spec.rb	5
 OK	core/thread/backtrace/location/base_label_spec.rb	4
 OK	core/thread/backtrace/location/inspect_spec.rb	1
 OK	core/thread/backtrace/location/label_spec.rb	32

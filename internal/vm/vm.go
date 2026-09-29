@@ -690,15 +690,18 @@ type VM struct {
 	curExc                 object.Value   // most recently rescued exception (for bare `raise`)
 	catchTags              []object.Value // active Kernel#catch tags, innermost last (for Kernel#throw)
 
-	loaded        map[string]bool   // require/require_relative: features loaded once
-	featureHooks  map[string]func() // built-in feature -> body run once on its first require (e.g. shellwords)
-	requireDirs   []string          // stack of directories of the files currently being required
-	fileStack     []string          // stack of source files of the executing ISeq frames (for __FILE__)
-	scriptName    string            // $0 / $PROGRAM_NAME: the running program's name
-	defaultRandom *RandomObj        // process-wide generator for Kernel#rand / #srand
-	fakerInst     *fakerState       // Faker instance + its seed source (Faker::Config.random)
-	webmockActive bool              // true once require "webmock" ran: gates the Net::HTTP interception hook
-	currentFiber  *Fiber            // the fiber currently running (a thread's root fiber at the top level); never nil
+	loaded           map[string]bool   // require/require_relative: features loaded once
+	featureHooks     map[string]func() // built-in feature -> body run once on its first require (e.g. shellwords)
+	requireDirs      []string          // stack of directories of the files currently being required
+	fileStack        []string          // stack of source files of the executing ISeq frames (for __FILE__)
+	realpaths        map[string]string // loaded file (as spelled) -> canonical path, MRI's second ISeq path
+	evalFiles        map[string]bool   // filenames given to eval: compiled units with NO realpath at all
+	featureRealpaths map[string]string // canonical path -> the $LOADED_FEATURES spelling it was required under
+	scriptName       string            // $0 / $PROGRAM_NAME: the running program's name
+	defaultRandom    *RandomObj        // process-wide generator for Kernel#rand / #srand
+	fakerInst        *fakerState       // Faker instance + its seed source (Faker::Config.random)
+	webmockActive    bool              // true once require "webmock" ran: gates the Net::HTTP interception hook
+	currentFiber     *Fiber            // the fiber currently running (a thread's root fiber at the top level); never nil
 
 	// Concurrency: an emulated GVL (one Ruby thread executes VM code at a time).
 	// The running goroutine holds gvl; it is released only inside blocking native
@@ -1306,6 +1309,15 @@ func (vm *VM) SetScriptPath(path string) {
 	if path != "" {
 		vm.requireDirs = []string{filepath.Dir(path)}
 		vm.scriptName = path
+		// The main script is the one file MRI keeps UNEXPANDED as its path -- $0 and
+		// __FILE__ answer "main.rb" or "../main.rb" exactly as the command line
+		// spelled it, which core/thread/backtrace/location/path_spec.rb asserts three
+		// times over. Its realpath is still absolute and resolved, so __dir__ and
+		// Location#absolute_path answer an absolute path for a relatively-invoked
+		// script (core/kernel/__dir___spec.rb "returns the expanded path of the
+		// directory when used in the main script"). Recording it under the SPELLED
+		// key is what keeps those two apart.
+		vm.noteRealFilePathAs(path, featurePath(path))
 	}
 }
 
