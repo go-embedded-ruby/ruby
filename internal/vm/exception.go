@@ -422,13 +422,25 @@ func (vm *VM) registerBacktraceLocation() {
 	// not resolved here: the second of those two examples deletes the symlink from
 	// inside the file being loaded and still expects the resolved path, which only
 	// a value taken at load time can answer.
+	//
+	// A frame whose file was never loaded from disk answers NIL, not its path.
+	// That is MRI's eval case exactly -- pathobj holds [path, Qnil] there, so
+	// rb_iseq_realpath is Qnil and rb_iseq_from_eval_p is defined as
+	// NIL_P(rb_iseq_realpath(iseq)) (iseq.c-ruby_4_0:1480). ruby/spec asserts it:
+	// eval(code, nil, "foo.rb") gives nil for #absolute_path, while __dir__ on the
+	// same frame gives "." -- the two read different fields, and only one of them
+	// falls back to the path.
 	loc.define("absolute_path", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		p := getIvar(self, "@path")
 		s, ok := p.(*object.String)
 		if !ok {
 			return p
 		}
-		return object.NewString(vm.realFilePath(s.Str()))
+		real, loaded := vm.realFilePath(s.Str())
+		if !loaded {
+			return object.NilV
+		}
+		return object.NewString(real)
 	})
 	// #base_label is the label with NO decoration at all. MRI reads it from a
 	// different field than #label does — location.base_label beside

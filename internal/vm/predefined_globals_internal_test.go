@@ -322,13 +322,30 @@ func TestFeatureProvided(t *testing.T) {
 	// wrong reason, never reaching the rule they name. A real temporary directory
 	// keeps all eight exercising the matching on every platform, which a
 	// runtime.GOOS skip would not.
+	//
+	// It must also be CANONICAL. expandedLoadPath resolves each entry's symlinks
+	// as MRI's rb_construct_expanded_load_path does (ruby/spec: "canonicalizes the
+	// entry in $LOAD_PATH but not the filename passed to #require"), and
+	// t.TempDir() sits under /var/folders on macOS, where /var is a symlink to
+	// private/var -- so the raw temp dir is NOT a fixed point of the expansion
+	// there, and the three matching cases below would silently stop matching.
+	// Resolving it here is what keeps all eight exercising the rule they name.
 	dir := filepath.ToSlash(t.TempDir())
+	if real, err := realpathResolve(featurePath(dir), true, false); err == nil {
+		dir = real
+	}
 	// The fixture's whole premise: expandedLoadPath must leave this directory
-	// alone, or the prefixed cases below are testing nothing. Asserted here so a
-	// platform where it does not hold says so in one line, instead of surfacing as
-	// eight confusing mismatches further down.
-	if got := featurePath(dir); got != dir {
-		t.Fatalf("temp dir is not a fixed point of featurePath: %q -> %q", dir, got)
+	// alone, or the prefixed cases below are testing nothing. Asserted against
+	// expandedLoadPath ITSELF rather than against featurePath, which is the
+	// function the cases actually depend on: the guard used to name featurePath,
+	// and when the two parted company it stayed quiet while three cases broke --
+	// a precondition check is only worth its line if it watches the precondition.
+	// Kept so a platform where it does not hold says so in one line, instead of
+	// surfacing as eight confusing mismatches further down.
+	probe := New(&bytes.Buffer{})
+	probe.globals["$LOAD_PATH"] = object.NewArray(object.NewString(dir))
+	if got := probe.expandedLoadPath(); len(got) != 1 || got[0] != dir {
+		t.Fatalf("temp dir is not a fixed point of expandedLoadPath: %q -> %q", dir, got)
 	}
 	cases := []struct {
 		name     string
