@@ -310,6 +310,26 @@ func (vm *VM) doRequire(name string, relative bool) object.Value {
 		if vm.featureDropped(abs) {
 			delete(vm.loaded, abs)
 		}
+		// And the converse, which require_relative was missing: an entry the
+		// PROGRAM put in $LOADED_FEATURES counts as loaded even though this VM
+		// never loaded it. MRI's rb_f_require_relative expands the name against
+		// the requiring file's directory and hands it to require_internal, which
+		// asks rb_feature_p like any other require -- there is no relative
+		// exemption. rbgo gated its own $LOADED_FEATURES pre-check on `!relative`
+		// (above) and then consulted only vm.loaded here, so:
+		//
+		//   $LOADED_FEATURES << File.join(__dir__, "sub", "lib.rb")
+		//   require_relative "sub/lib"
+		//     ruby 4.0.5  false, body not run
+		//     rbgo        true,  body run
+		//
+		// `require` with the same absolute path was already right, which is what
+		// said the gap was require_relative's and not the bookkeeping's.
+		if !vm.loaded[abs] {
+			if arr, ok := vm.globals["$LOADED_FEATURES"].(*object.Array); ok && featureListed(arr, abs) {
+				return object.Bool(false)
+			}
+		}
 		if vm.loaded[abs] {
 			// A require of a feature whose own load has not finished yet is MRI's
 			// circular require: load_lock (load.c v3_4_0) finds the feature in the
