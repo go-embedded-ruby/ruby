@@ -1530,6 +1530,14 @@ func applyKWSplat(elems []object.Value, flags int) ([]object.Value, bool) {
 // counterpart states through bytecode.FlagSendNoKW.
 func (vm *VM) setSendNoKW(v bool) { vm.sendNoKW = v }
 
+// setSendVCall is the same seam for the VCALL verdict, and exists for the same
+// reason: generated code has no OpSend handler to set it. Without it a bare
+// miss inside a level-1-lowered method answers NoMethodError where the
+// interpreter and MRI answer NameError -- so the SAME program changed meaning
+// depending on whether it had been through `rbgo build`. Measured on
+// `def probe_bare; nope_xyz; end`. See VM.sendVCall and internal/aot/codegen.go.
+func (vm *VM) setSendVCall(v bool) { vm.sendVCall = v }
+
 // alwaysPrivateMethodName reports whether a method name is one MRI defines with
 // private visibility unconditionally (the object-initialization and
 // respond-to-missing hooks), independent of the surrounding default visibility.

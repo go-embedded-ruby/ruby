@@ -161,10 +161,19 @@ func (g *gen) emit(pc int) (string, bool) {
 			argList[i] = fmt.Sprintf("s%d", recvSlot+1+i)
 		}
 		argsExpr := "[]object.Value{" + strings.Join(argList, ", ") + "}"
-		// State the call site's keyword/positional verdict, exactly as the
-		// interpreter's OpSend handler does, so a lowered call binds a trailing
-		// Hash the same way the interpreted one would. See bytecode.FlagSendNoKW.
-		noKW := fmt.Sprintf("\tvm.setSendNoKW(%t)\n", in.Flags&bytecode.FlagSendNoKW != 0)
+		// State the call site's verdicts, exactly as the interpreter's OpSend
+		// handler does, so a lowered call binds a trailing Hash the same way the
+		// interpreted one would (FlagSendNoKW) and a miss is judged by the shape
+		// of its own site (FlagSendVCall).
+		//
+		// The second one is not cosmetic: without it a bare identifier that misses
+		// inside a lowered method answers NoMethodError where the interpreter and
+		// MRI answer NameError, so the SAME source changed meaning depending on
+		// whether it had been through `rbgo build`. The level-2 lane states it per
+		// send in aotSend; this is the level-1 lane, which lowers whole bodies and
+		// has no handler to inherit it from.
+		noKW := fmt.Sprintf("\tvm.setSendNoKW(%t)\n\tvm.setSendVCall(%t)\n",
+			in.Flags&bytecode.FlagSendNoKW != 0, in.Flags&bytecode.FlagSendVCall != 0)
 		if g.isSelf[recvSlot] && name == g.rubyName {
 			// Self-send to the method being compiled → direct recursive call (a
 			// plain send carries no block).
