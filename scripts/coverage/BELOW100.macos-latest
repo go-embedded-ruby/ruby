@@ -1,0 +1,21 @@
+# Functions below 100% coverage on the macos-latest lane, recorded.
+# The SET is the gate and may not grow; the percentages are reported, not gated
+# (coverage is measured under -race, where a percentage jitters and a set does not).
+# Regenerate with UPDATE_COVERAGE=1 on a green run of this lane.
+# Recorded 2026-09-28 from run 36424534618, main @ 1a79138b, CI's own measurement.
+internal/object/object.go	repr	90.9%
+internal/vm/arith.go	binary	96.6%
+internal/vm/arith.go	rubyEql	83.3%
+internal/vm/arith.go	valueEqlRec	98.1%
+internal/vm/bigdecimal_bind.go	Inspect	0.0%
+internal/vm/builtins.go	bootstrap	99.7%
+internal/vm/builtins.go	cloneSingleton	79.2%
+internal/vm/complex.go	registerNumericGeneric	98.9%
+internal/vm/converter_codec.go	encodeCharTo	95.0%
+internal/vm/converter_codec.go	xtextRuneStep	92.9%
+internal/vm/date_bind.go	Inspect	0.0%
+internal/vm/io.go	inspectStr	83.3%
+internal/vm/nethttp.go	registerNetHTTP	96.0%
+internal/vm/object_model.go	classOf	99.5%
+internal/vm/object_model.go	defaultNegation	88.9%
+internal/vm/object_model.go	objSingleton	80.0%

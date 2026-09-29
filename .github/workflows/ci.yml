@@ -45,22 +45,42 @@ jobs:
           # binary hit the 50m alarm at 3007s with the running test at 0s — the
           # budget ran out, nothing hung — and each conformance wave adds to it.
           go test -timeout=90m -race -coverpkg="$COVERPKG" -coverprofile=cover.out ./...
-          echo "--- functions below 100% (empty = all covered) ---"
-          go tool cover -func=cover.out | grep -vE '100\.0%$' || true
-          echo "---------------------------------------------------"
-          cov=$(go tool cover -func=cover.out | tail -1 | awk '{print $3}' | tr -d '%')
-          echo "coverage: ${cov}%"
-          # The 100% gate is enforced on the POSIX lanes (ubuntu, macOS) only.
-          # Windows cannot execute a handful of POSIX-only code paths — e.g. opening
-          # "/dev/null" as a character device — so its measured coverage is
-          # structurally below 100%. The suite still RUNS in full under -race on
-          # windows to catch real, platform-specific failures (only coverage is not
-          # gated there).
+          go tool cover -func=cover.out > cover.txt
+          echo "coverage: $(tail -1 cover.txt | awk '{print $3}')  (reported, NOT gated -- see below)"
+
+          # The gate is the SET of functions below 100%, recorded per lane in
+          # scripts/coverage/BELOW100.<lane>, and it may not grow.
+          #
+          # It used to be the ROUNDED total, which could not be calibrated. On
+          # main both POSIX lanes printed "coverage: 100.0%" and passed while
+          # listing 19 (ubuntu) and 16 (macOS) functions below 100%, the lowest
+          # at 75.0%. The tolerance was whatever %.1f absorbs at the current
+          # repository size: nobody chose it, nothing stated it, and it SHRINKS
+          # as the codebase grows -- so a function falling to 75% was free until
+          # it was suddenly fatal, and the commit that tripped the gate was not
+          # the one that created the debt.
+          #
+          # Which lane you believed was arbitrary too. On PR #727 the same commit
+          # read 99.9% on ubuntu (FAIL) and 100.0% on macOS (pass): ubuntu carries
+          # three filesystem-dependent functions macOS does not, so one further
+          # dead function tipped only one lane over the rounding edge. Recording
+          # per lane makes each answerable for its own measurement.
+          #
+          # Percentages are reported but not gated: coverage is measured under
+          # -race, where a percentage jitters and a set does not, and a gate that
+          # flakes is a gate people learn to rerun. See issue #733.
+          #
+          # Windows is not gated at all: it cannot execute a hundred POSIX-only
+          # code paths -- opening "/dev/null" as a character device, and so on --
+          # so its set is structurally different. The suite still RUNS in full
+          # under -race there, to catch real platform-specific failures.
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            echo "coverage gate not enforced on windows (POSIX-only paths unreachable)"
+            echo "coverage ratchet not enforced on windows (POSIX-only paths unreachable)"
+            go tool cover -func=cover.out | grep -vE '100\.0%$' | head -20 || true
           else
-            awk -v t="$cov" 'BEGIN { exit !(t+0 >= 100.0) }' || {
-              echo "::error::coverage ${cov}% < 100%"; exit 1; }
+            go build -o /tmp/covratchet ./scripts/coverage/cmd/covratchet
+            /tmp/covratchet -record "scripts/coverage/BELOW100.${{ matrix.os }}" \
+                            -lane "${{ matrix.os }}" -profile cover.txt
           fi
 
   # Per-PR arch gate: the two GitHub-hosted NATIVE targets only. amd64 and arm64
