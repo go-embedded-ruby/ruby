@@ -88,7 +88,10 @@ func TestWaveECPathProductionsAreThreeShapes(t *testing.T) {
 // (parse.y-ruby_4_0:13086, gettable's "method call without arguments").
 //
 // The false rows are the known-bad control: a probe that set the flag on every
-// send would pass every true row and fail all four false ones.
+// send would pass every true row and fail all five false ones. `nope_xyz()` is
+// what ast.Call.Paren buys (go-ruby-parser v0.9.0): before it, the compiler
+// could not see the parentheses and flagged that row true. The tFID names
+// `nope_xyz!` / `nope_xyz?` are pinned in TestWaveIVCallFlagIsNotSetForATFID.
 func TestWaveEVCallFlag(t *testing.T) {
 	tests := []struct {
 		name string
@@ -97,6 +100,7 @@ func TestWaveEVCallFlag(t *testing.T) {
 	}{
 		{"bare_name", "nope_xyz", true},
 		{"bare_name_in_method", "def m; nope_xyz; end", true},
+		{"empty_parens", "nope_xyz()", false}, // `fcall paren_args` is an FCALL
 		{"with_argument", "nope_xyz 1", false},
 		{"with_paren_argument", "nope_xyz(1)", false},
 		{"with_block", "nope_xyz {}", false},

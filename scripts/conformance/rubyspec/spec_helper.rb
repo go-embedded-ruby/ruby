@@ -210,7 +210,19 @@ class ComplainMatcher
     "expected a warning#{@pat ? " matching #{@pat.inspect}" : ''}, got #{@out.inspect}"
   end
 end
-def complain(pat = nil, verbose: nil); ComplainMatcher.new(pat, verbose); end
+# Upstream mspec is `complain(complaint = nil, options = {})` -- a POSITIONAL
+# options Hash, not a keyword. The shim used `verbose:` instead, which worked
+# only because the compiler could not tell `complain(re, {verbose: true})` from
+# `complain(re, verbose: true)` and read both as keywords. With
+# ast.HashLit.Braced (go-ruby-parser v0.9.0) the braced form is correctly
+# positional, and a keyword-only signature then rejects it -- which is how
+# core/regexp/shared/new.rb:148 started raising ArgumentError.
+#
+# One signature covers every call site in the corpus, both the 18 written with
+# bare `verbose: true` and the 2 written with braces: Ruby converts keyword
+# arguments to a positional Hash when the callee declares no keyword parameters,
+# and rbgo does the same (measured against ruby 4.0.5).
+def complain(pat = nil, options = {}); ComplainMatcher.new(pat, options[:verbose]); end
 
 # output: capture $stdout (and, with a second argument, $stderr) around the block
 # and match each against a String (exact) or Regexp. Mirrors mspec's

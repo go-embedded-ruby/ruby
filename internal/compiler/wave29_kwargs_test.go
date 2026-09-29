@@ -46,9 +46,10 @@ func sendFlagsOf(t *testing.T, src string) int {
 
 // TestSendNoKWFlagAtTheCallSite pins the compile-time half of MRI's
 // keyword/positional decision: FlagSendNoKW is set exactly when the last written
-// argument is something other than a hash literal, which is the only case
-// go-ruby-parser v0.3.0 lets the compiler decide (setup_parameters_complex reads
-// VM_CALL_KWARG / VM_CALL_KW_SPLAT, vm_args.c v3_4_0:591).
+// argument is something other than a BARE `k: v` hash — a braced `{k: v}` is a
+// positional Hash and is flagged (ast.HashLit.Braced, go-ruby-parser v0.9.0;
+// setup_parameters_complex reads VM_CALL_KWARG / VM_CALL_KW_SPLAT,
+// vm_args.c v3_4_0:591).
 func TestSendNoKWFlagAtTheCallSite(t *testing.T) {
 	for _, tc := range []struct {
 		src   string
@@ -57,7 +58,7 @@ func TestSendNoKWFlagAtTheCallSite(t *testing.T) {
 	}{
 		{src: "f(1, 2, h)", noKW: true},                       // a local/method value: positional
 		{src: "f(1, 2, k: 42)", noKW: false},                  // literal keywords
-		{src: "f(1, 2, {k: 42})", noKW: false},                // SAME AST as the line above (parser gap)
+		{src: "f(1, 2, {k: 42})", noKW: true},                 // BRACED: a positional Hash, not keywords
 		{src: "f(1, 2, **h)", noKW: false, kwspl: true},       // a keyword splat
 		{src: "f(*a)", noKW: true},                            // a splat is not keywords
 		{src: "f(*a, h)", noKW: true},                         // splat + positional tail
@@ -112,7 +113,10 @@ func TestLastArgIsPositional(t *testing.T) {
 		t.Error("an integer literal: want true")
 	}
 	if lastArgIsPositional([]ast.Node{&ast.HashLit{}}) {
-		t.Error("a hash literal: want false (the parser cannot say whether it was braced)")
+		t.Error("a BARE hash literal (Braced false): want false — those are keywords")
+	}
+	if !lastArgIsPositional([]ast.Node{&ast.HashLit{Braced: true}}) {
+		t.Error("a BRACED hash literal: want true — `f({})` passes a positional Hash")
 	}
 }
 
