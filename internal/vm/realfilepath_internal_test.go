@@ -147,15 +147,31 @@ func TestISeqPathAndRealpathDivide(t *testing.T) {
 func TestRealFilePathFallbacks(t *testing.T) {
 	machine := New(&bytes.Buffer{})
 
-	// Never loaded: not a canonical path, an absence. Location#absolute_path reads
-	// that absence as nil, which is what makes an eval frame answer nil.
-	if got, ok := machine.realFilePath("/nowhere/x.rb"); ok {
-		t.Fatalf("unloaded path reported as loaded: %q", got)
+	// Never loaded, and not an eval filename: its own canonical path, because
+	// that is what MRI's single-String pathobj means. A Location a program builds
+	// itself -- set_backtrace(["a:1:in 'm'"]) -- lands here, and #absolute_path
+	// answers "a" rather than nil.
+	if got, ok := machine.realFilePath("a"); !ok || got != "a" {
+		t.Fatalf(`realFilePath("a") = (%q, %v), want ("a", true)`, got, ok)
+	}
+
+	// An eval filename is the one thing with NO realpath: MRI compiles it with
+	// pathobj [path, Qnil], and #absolute_path reads that Qnil.
+	machine.noteEvalFile("foo.rb")
+	if got, ok := machine.realFilePath("foo.rb"); ok {
+		t.Fatalf(`realFilePath("foo.rb") after noteEvalFile = (%q, true), want not-loaded`, got)
+	}
+	// …unless a real file of that name is loaded, whose realpath wins: this
+	// registry is keyed by path string where MRI keys it per ISeq.
+	machine.noteRealFilePathAs("bar.rb", "/real/bar.rb")
+	machine.noteEvalFile("bar.rb")
+	if got, ok := machine.realFilePath("bar.rb"); !ok || got != "/real/bar.rb" {
+		t.Fatalf(`realFilePath("bar.rb") = (%q, %v), want ("/real/bar.rb", true)`, got, ok)
 	}
 
 	// Loaded but unresolvable -- the file went away between the read and the
 	// resolve -- keeps its absolute spelling rather than dropping the record. MRI
-	// does the same when rb_realpath_internal fails: the ISeq still has a path.
+	// does the same when rb_check_realpath fails: the ISeq still has a path.
 	missing := filepath.ToSlash(filepath.Join(realTempDir(t), "gone", "x.rb"))
 	machine.noteRealFilePathAs(missing, missing)
 	got, ok := machine.realFilePath(missing)

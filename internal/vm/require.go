@@ -310,6 +310,18 @@ func (vm *VM) doRequire(name string, relative bool) object.Value {
 			continue // not found / unreadable — try the next candidate
 		}
 		abs := featurePath(cand)
+		// MRI keeps a SECOND index beside $LOADED_FEATURES, from a loaded file's
+		// canonical path to the name it was recorded under (load.c's
+		// loaded_features_realpaths), and require consults it -- so one file
+		// required by two spellings that differ only through a symlink loads ONCE.
+		// Measured on ruby 4.0.5: after require of ".../link/x.rb", a require of
+		// ".../real/x.rb" answers false although $LOADED_FEATURES holds nothing but
+		// the first spelling. Answering about that first spelling is what makes a
+		// self-require through a RESOLVED base (require_relative's) come back as the
+		// circular require it is, instead of running the file a second time.
+		if prev := vm.featureSpelling(abs); prev != "" {
+			abs = prev
+		}
 		// $LOADED_FEATURES is the authority on what has been required (MRI's
 		// rb_feature_provided reads that list), so a program that removes an entry
 		// — ruby/spec saves and restores $" around every example — makes the next
@@ -342,6 +354,7 @@ func (vm *VM) doRequire(name string, relative bool) object.Value {
 		// path with symlinks"), while __dir__ and Location#absolute_path are built
 		// from the resolved one.
 		vm.noteRealFilePath(abs)
+		vm.noteFeatureRealpath(abs)
 		vm.loaded[abs] = true
 		loadingKey := vm.requireLoadingKey(abs)
 		vm.loaded[loadingKey] = true
@@ -369,6 +382,34 @@ func (vm *VM) doRequire(name string, relative bool) object.Value {
 	// exactly like the bare name" check this path used to carry), so the require
 	// genuinely failed.
 	return vm.raiseLoadError(errName)
+}
+
+// featureSpelling answers the name a still-loaded feature was recorded under,
+// when abs is a DIFFERENT spelling of the same file, and "" otherwise -- so the
+// caller can ask about the recording that exists rather than about the name it
+// happens to hold. It is MRI's loaded_features_realpaths lookup.
+//
+// A feature the program has dropped from $LOADED_FEATURES answers "" as well:
+// ruby/spec saves and restores $" around every example, and a dropped entry must
+// let the next require run the file again, under whichever spelling it then uses.
+func (vm *VM) featureSpelling(abs string) string {
+	prev, ok := vm.featureRealpaths[canonicalPath(abs)]
+	if !ok || prev == abs || !vm.loaded[prev] || vm.featureDropped(prev) {
+		return ""
+	}
+	return prev
+}
+
+// noteFeatureRealpath records the spelling abs was required under against its
+// canonical path, which is the index featureSpelling reads. It is not rolled
+// back when a load unwinds: featureSpelling already refuses an entry whose
+// feature is no longer loaded, so a stale row answers "" and is overwritten by
+// the next successful require of that file.
+func (vm *VM) noteFeatureRealpath(abs string) {
+	if vm.featureRealpaths == nil {
+		vm.featureRealpaths = map[string]string{}
+	}
+	vm.featureRealpaths[canonicalPath(abs)] = abs
 }
 
 // requireLoadingKey names the vm.loaded entry marking a feature whose load is
@@ -736,11 +777,7 @@ func (vm *VM) expandedLoadPath() []string {
 	dirs := vm.loadPathDirs()
 	out := make([]string, len(dirs))
 	for i, d := range dirs {
-		abs := featurePath(d)
-		if real, err := realpathResolve(abs, true, false); err == nil {
-			abs = real
-		}
-		out[i] = abs
+		out[i] = canonicalPath(featurePath(d))
 	}
 	return out
 }

@@ -35,10 +35,10 @@ import "path/filepath"
 // resolve has nothing left to walk by then; a value taken when the file was read
 // survives.
 //
-// It also records files whose canonical name is unchanged, and the absence of an
-// entry means something: a unit that was never loaded from disk is MRI's eval
-// case, where realpath is Qnil and rb_iseq_from_eval_p is literally
-// NIL_P(rb_iseq_realpath(iseq)) (iseq.c-ruby_4_0:1480).
+// A path with no entry defaults to being its OWN canonical path, which is MRI's
+// single-String pathobj: path and realpath are the same object there. The one
+// thing that genuinely has no realpath is an eval unit, and eval is recorded
+// separately for exactly that reason -- see noteEvalFile.
 //
 // MRI's C for the loading half (load.c) is absent from the local source corpus,
 // so the require/load side is established from the running ruby 4.0.5 oracle and
@@ -59,26 +59,61 @@ func (vm *VM) noteRealFilePath(spelled string) { vm.noteRealFilePathAs(spelled, 
 // realpath from it -- so the key a reader holds and the name on disk are not the
 // same string there.
 func (vm *VM) noteRealFilePathAs(spelled, abs string) {
-	real, err := realpathResolve(abs, true, false)
-	if err != nil {
-		// Unresolvable -- a component became unreadable between the read and here --
-		// leaves the absolute form standing, which is what MRI reports when
-		// rb_realpath_internal fails: the ISeq keeps a path and answers it.
-		real = abs
-	}
 	if vm.realpaths == nil {
 		vm.realpaths = map[string]string{}
 	}
-	vm.realpaths[spelled] = real
+	vm.realpaths[spelled] = canonicalPath(abs)
+}
+
+// canonicalPath is rb_check_realpath with MRI's own fallback: the resolved path,
+// or the argument unchanged when it cannot be resolved -- a component became
+// unreadable, or the name is one no filesystem answers for. MRI falls back the
+// same way (to rb_file_expand_path_fast) rather than dropping the path.
+func canonicalPath(p string) string {
+	if real, err := realpathResolve(p, true, false); err == nil {
+		return real
+	}
+	return p
+}
+
+// noteEvalFile records a filename that names NO file on disk -- the third
+// argument of eval(str, binding, file, line), and the "(eval at …)" MRI
+// synthesises when none is given. MRI compiles those with realpath Qnil, which
+// is the whole of rb_iseq_from_eval_p (iseq.c-ruby_4_0:1480), so
+// Location#absolute_path on such a frame is nil.
+//
+// It is deliberately NOT the default for an unknown path. A Location the program
+// built itself -- Exception#set_backtrace(["a:1:in 'm'"]) -- is a dummy frame,
+// and MRI gives a dummy frame a plain String pathobj
+// (rb_iseq_alloc_with_dummy_path, iseq.c-ruby_4_0:589), where pathobj_realpath
+// returns the string: #absolute_path answers "a", not nil. Only eval gets the
+// [path, Qnil] pair, so only eval is recorded here.
+func (vm *VM) noteEvalFile(name string) {
+	if _, loaded := vm.realpaths[name]; loaded {
+		// A real file of that name is already loaded; its realpath wins. rbgo keys
+		// this registry by path string where MRI keys it per ISeq, and this is the
+		// one place the two can disagree.
+		return
+	}
+	if vm.evalFiles == nil {
+		vm.evalFiles = map[string]bool{}
+	}
+	vm.evalFiles[name] = true
 }
 
 // realFilePath answers the canonical path of the file loaded under spelled. The
-// second result is false when nothing was ever loaded under that name, which is
-// MRI's realpath-is-nil case: a unit compiled by eval rather than read from
-// disk.
+// second result is false only for MRI's realpath-is-nil case: a unit compiled by
+// eval. Anything else answers TRUE, defaulting to spelled itself -- that is
+// MRI's single-String pathobj, where path and realpath are the same object and
+// pathobj_realpath hands back the path (vm_core.h-ruby_4_0:358).
 func (vm *VM) realFilePath(spelled string) (string, bool) {
-	real, ok := vm.realpaths[spelled]
-	return real, ok
+	if real, ok := vm.realpaths[spelled]; ok {
+		return real, true
+	}
+	if vm.evalFiles[spelled] {
+		return "", false
+	}
+	return spelled, true
 }
 
 // currentRealDir is MRI's dirname(rb_current_realfilepath()): the directory of
