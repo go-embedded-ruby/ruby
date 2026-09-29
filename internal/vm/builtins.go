@@ -1084,8 +1084,15 @@ func (vm *VM) bootstrap() {
 		// (vm_eval.c:927) then builds with rb_name_err_new rather than
 		// rb_nomethod_err_new. #name and #receiver are set either way; #args is not,
 		// and a VCALL carries no arguments, so callArgs is nil here regardless.
+		//
+		// bytecode.FlagSendVCall is now the WHOLE rule and this reads it alone. It
+		// used to be re-checked here against the shape of the NAME, because the
+		// compiler could not see the parentheses and set the flag for `nope!` and
+		// `nope?` as well; since go-ruby-parser v0.9.0 gave it ast.Call.Paren the
+		// compiler states the rule exactly (compiler.vcallName), and a second copy
+		// of it here would be two guards for one rule.
 		cls, undef := "NoMethodError", "undefined method '"
-		if vm.missingVCall && vcallNameShape(string(nameSym)) {
+		if vm.missingVCall {
 			cls, undef = "NameError", "undefined local variable or method '"
 		}
 		vm.missingVCall = false
@@ -12465,34 +12472,4 @@ func (vm *VM) cmpIntValue(v object.Value) int {
 		return -1
 	}
 	return 0
-}
-
-// vcallNameShape reports whether name can be MRI's NODE_VCALL at all. Two
-// grammar rules decide it and the VM has to honour both, because
-// bytecode.FlagSendVCall records only the SHAPE of the call site (no receiver,
-// no parentheses, no arguments, no block) and not the shape of the NAME:
-//
-//   - gettable reaches NEW_VCALL only under case ID_LOCAL (parse.y-ruby_4_0:13086),
-//     i.e. for a plain tIDENTIFIER;
-//   - a name ending in '!' or '?' lexes as tFID, and `primary : tFID` builds
-//     NEW_FCALL instead (parse.y-ruby_4_0:4370).
-//
-// So `nope!` and `nope?` are FCALLs and raise NoMethodError. Measured on ruby
-// 4.0.5 under BOTH parsers — `ruby --parser=parse.y` and `ruby --parser=prism`
-// agree here — so this is not one of the places where the two instruments
-// differ. A setter name (`nope=`) is likewise never a bare identifier.
-//
-// The test belongs in the compiler, beside the shape test that sets the flag
-// (internal/compiler/compiler.go); it is here because the compiler is outside
-// this change's file cluster, and it costs nothing on the hot path because it
-// runs only where an error is already being raised.
-func vcallNameShape(name string) bool {
-	if name == "" {
-		return false
-	}
-	switch name[len(name)-1] {
-	case '!', '?', '=':
-		return false
-	}
-	return true
 }

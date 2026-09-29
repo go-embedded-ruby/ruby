@@ -232,12 +232,17 @@ func TestWaveGVCallVerdictIsClearedForACompiledBody(t *testing.T) {
 	}
 }
 
-// TestWaveGVCallNameShape pins the half of MRI's rule that the call-site SHAPE
-// cannot express. `nope!` and `nope?` are written with no receiver, no
-// parentheses, no arguments and no block — so bytecode.FlagSendVCall is set for
-// them — yet they lex as tFID and `primary : tFID` builds NEW_FCALL
-// (parse.y-ruby_4_0:4370), while gettable reaches NEW_VCALL only for a plain
-// tIDENTIFIER (parse.y-ruby_4_0:13086). Both MRI 4.0.5 parsers were run:
+// TestWaveGVCallNameShape pins, end to end, the half of MRI's rule that the
+// call-site SHAPE cannot express. `nope!` and `nope?` are written with no
+// receiver, no parentheses, no arguments and no block, yet they lex as tFID and
+// `primary : tFID` builds NEW_FCALL (parse.y-ruby_4_0:4370), while gettable
+// reaches NEW_VCALL only for a plain tIDENTIFIER (parse.y-ruby_4_0:13086).
+//
+// The rule now lives once, in the compiler (compiler.vcallName), so
+// bytecode.FlagSendVCall is NOT set for these two and the VM reads the flag
+// alone; the predicate that used to re-check the name here is gone. This test
+// keeps the observable half, which is what MRI actually promises. Both MRI
+// 4.0.5 parsers were run:
 //
 //	                       --parser=parse.y   --parser=prism (the default)
 //	nope_xyz               NameError          NameError
@@ -260,15 +265,6 @@ func TestWaveGVCallNameShape(t *testing.T) {
 	} {
 		if got := strings.TrimSpace(eval(t, c.src)); got != c.want {
 			t.Errorf("%s\n got %s\nwant %s", c.src, got, c.want)
-		}
-	}
-	// The predicate itself, on the shapes the Ruby cases above cannot reach.
-	for name, want := range map[string]bool{
-		"nope": true, "_x": true, "nope!": false, "nope?": false,
-		"nope=": false, "": false, "+": true,
-	} {
-		if got := vcallNameShape(name); got != want {
-			t.Errorf("vcallNameShape(%q) = %v, want %v", name, got, want)
 		}
 	}
 }
