@@ -8,11 +8,11 @@ require (
 	github.com/dolthub/go-mysql-server v0.20.0
 	github.com/glauth/ldap v0.0.0-20260718202943-34c5f9b3cbf1
 	github.com/go-commonmark/commonmark v0.1.0
-	github.com/go-composites/bag v0.0.0-20260923203350-0140c174beaf
-	github.com/go-composites/result v0.0.0-20260920235032-53e0a08ef62b
-	github.com/go-composites/time v0.0.0-20260923000420-0a04dcfd543c
-	github.com/go-fft/fft v0.0.0-20260831114610-598cacbd5c9a
-	github.com/go-images/images v0.0.0-20260923074905-cdcee44e3c7e
+	github.com/go-composites/bag v0.0.0-20260929012332-45e461511b52
+	github.com/go-composites/result v0.0.0-20260927170344-f2c7344faeef
+	github.com/go-composites/time v0.0.0-20260929013028-aa3c57ae1371
+	github.com/go-fft/fft v0.0.0-20260929081328-e5cbdb55e9b0
+	github.com/go-images/images v0.0.0-20260927173152-87444e36aac4
 	github.com/go-kramdown/kramdown v0.1.0
 	github.com/go-liquid/liquid v0.1.0
 	github.com/go-mustache/mustache v0.1.0
@@ -23,9 +23,9 @@ require (
 	github.com/go-ruby-abbrev/abbrev v0.0.0-20260916090008-ac08b8471830
 	github.com/go-ruby-acme/acme v0.0.0-20260910083506-2c4b2786f606
 	github.com/go-ruby-actioncable/actioncable v0.0.0-20260916090125-dc336dcdde77
-	github.com/go-ruby-actionmailer/actionmailer v0.0.0-20260923211205-26d6286e26bf
+	github.com/go-ruby-actionmailer/actionmailer v0.0.0-20260927173231-984b22488078
 	github.com/go-ruby-actionpack/actionpack v0.0.0-20260916090236-b987dbf76b25
-	github.com/go-ruby-actionview/actionview v0.0.0-20260923211214-d926f1a7e0a5
+	github.com/go-ruby-actionview/actionview v0.0.0-20260927173231-1207ea900433
 	github.com/go-ruby-activejob/activejob v0.0.0-20260916090346-271f6f8a2a0f
 	github.com/go-ruby-activeldap/activeldap v0.0.0-20260916090418-6bcd3576fdda
 	github.com/go-ruby-activemodel/activemodel v0.0.0-20260923211229-79f6029378bf
@@ -46,7 +46,7 @@ require (
 	github.com/go-ruby-builder/builder v0.0.0-20260916091257-7850ebb53ff7
 	github.com/go-ruby-bundler/bundler v0.0.0-20260923211304-8585fc1ac0ac
 	github.com/go-ruby-cancancan/cancancan v0.0.0-20260916091405-8fac9e430552
-	github.com/go-ruby-capistrano/capistrano v0.0.0-20260903192711-c466694b6746
+	github.com/go-ruby-capistrano/capistrano v0.0.0-20260927173236-3b90af3c6888
 	github.com/go-ruby-capybara/capybara v0.0.0-20260910084630-0731c9ea8d6d
 	github.com/go-ruby-cgi/cgi v0.0.0-20260916091525-3d328d3ff447
 	github.com/go-ruby-chronic/chronic v0.0.0-20260916091614-bd47d560b6f4
@@ -57,7 +57,7 @@ require (
 	github.com/go-ruby-csv/csv v0.0.0-20260916092014-f49077ac37dd
 	github.com/go-ruby-date/date v0.0.0-20260916092103-cf7111f88dea
 	github.com/go-ruby-deep-merge/deep-merge v0.0.0-20260825131041-0389f358e6cf
-	github.com/go-ruby-devise/devise v0.0.0-20260923211402-b658b97dbfef
+	github.com/go-ruby-devise/devise v0.0.0-20260927173238-e81f837e986c
 	github.com/go-ruby-did-you-mean/did-you-mean v0.0.0-20260916092307-ddd074d76c3c
 	github.com/go-ruby-digest/digest v0.0.0-20260916092355-76988b665a30
 	github.com/go-ruby-dotenv/dotenv v0.0.0-20260916092517-652b01333e00
@@ -88,14 +88,14 @@ require (
 	github.com/go-ruby-http/http v0.0.0-20260916093911-fc825633cf27
 	github.com/go-ruby-httparty/httparty v0.0.0-20260916093943-2584adf002b1
 	github.com/go-ruby-i18n/i18n v0.0.0-20260916094015-15d33383fb6e
-	github.com/go-ruby-images/images v0.0.0-20260923211542-bdb183a4050c
+	github.com/go-ruby-images/images v0.0.0-20260927173248-d1b4499ced38
 	github.com/go-ruby-ipaddr/ipaddr v0.0.0-20260916094116-8c16b4082722
 	github.com/go-ruby-irb/irb v0.0.0-20260916094148-b11dd34a8d63
 	github.com/go-ruby-jbuilder/jbuilder v0.0.0-20260916094222-db456ca7e642
 	github.com/go-ruby-jekyll/jekyll v0.0.0-20260907185853-82fc8b8e7b41
 	github.com/go-ruby-json/json v0.0.0-20260916094324-3ddd0f57b467
-	github.com/go-ruby-jwt/jwt v0.0.0-20260717065943-0bba2f39bf81
-	github.com/go-ruby-kafka/kafka v0.0.0-20260923211608-11947663b174
+	github.com/go-ruby-jwt/jwt v0.0.0-20260928112721-cf468b8ccb75
+	github.com/go-ruby-kafka/kafka v0.0.0-20260929105502-b0b474169d7c
 	github.com/go-ruby-kaminari/kaminari v0.0.0-20260717070041-898c0896ede4
 	github.com/go-ruby-ldap/ldap v0.0.0-20260808195309-d90a141d64f9
 	github.com/go-ruby-logger/logger v0.0.0-20260916094709-0005da481f56
@@ -125,14 +125,14 @@ require (
 	github.com/go-ruby-opentelemetry/opentelemetry v0.0.0-20260826125821-3371d170a93c
 	github.com/go-ruby-opentype/opentype v0.2.0
 	github.com/go-ruby-optparse/optparse v0.0.0-20260917100925-33b18da76c37
-	github.com/go-ruby-ostruct/ostruct v0.0.0-20260820220107-4de11f016237
+	github.com/go-ruby-ostruct/ostruct v0.0.0-20260927145508-48818b0ca96e
 	github.com/go-ruby-pagy/pagy v0.0.0-20260717071719-997d15eee011
 	github.com/go-ruby-paper-trail/paper-trail v0.0.0-20260717071745-42a249656e5a
 	github.com/go-ruby-parquet/parquet v0.0.0-20260923211642-bc75bcb9031e
 	github.com/go-ruby-parser/parser v0.9.0
 	github.com/go-ruby-pathname/pathname v0.0.0-20260916100446-0824484b665f
 	github.com/go-ruby-pg/pg v0.0.0-20260916100523-3831ec811a67
-	github.com/go-ruby-prawn/prawn v0.0.0-20260829111617-4a543d91acca
+	github.com/go-ruby-prawn/prawn v0.0.0-20260927145511-370d5985305c
 	github.com/go-ruby-prettyprint/prettyprint v0.0.0-20260916100624-a502f95c3ad3
 	github.com/go-ruby-prime/prime v0.0.0-20260916100658-bce9183a6c57
 	github.com/go-ruby-protobuf/protobuf v0.0.0-20260820052513-ddc8d1652a89
@@ -144,13 +144,13 @@ require (
 	github.com/go-ruby-puppet/puppet v0.0.0-20260923211650-6955c245474b
 	github.com/go-ruby-racc/racc v0.0.0-20260916101058-25c21ceace36
 	github.com/go-ruby-rack/rack v0.0.0-20260916101131-d86b924dd331
-	github.com/go-ruby-rails/rails v0.0.0-20260923204112-21b35dca661b
-	github.com/go-ruby-railties/railties v0.0.0-20260916101326-3a999a032a06
+	github.com/go-ruby-rails/rails v0.0.0-20260927173418-b7816aebfa00
+	github.com/go-ruby-railties/railties v0.0.0-20260927173301-9af8a2d861f7
 	github.com/go-ruby-rake/rake v0.0.0-20260916101401-3a87d07573fb
 	github.com/go-ruby-ransack/ransack v0.0.0-20260717072959-06ca1d7c6829
 	github.com/go-ruby-rdoc/rdoc v0.0.0-20260916101528-7ed1d61f5088
 	github.com/go-ruby-redis/redis v0.0.0-20260916101628-3b91d134e9dc
-	github.com/go-ruby-regexp/regexp v0.0.0-20260831115702-e14375e92d68
+	github.com/go-ruby-regexp/regexp v0.0.0-20260927145504-6cbb63926eb2
 	github.com/go-ruby-reline/reline v0.0.0-20260916101734-37c7d2c11d74
 	github.com/go-ruby-resolv/resolv v0.0.0-20260916101809-a2b1b027ae6d
 	github.com/go-ruby-resque/resque v0.0.0-20260903192756-dc5f8e3f2e80
@@ -160,7 +160,7 @@ require (
 	github.com/go-ruby-rqrcode/rqrcode v0.0.0-20260916102108-c0062622e02f
 	github.com/go-ruby-rspec/rspec v0.0.0-20260916102141-613d88c1871f
 	github.com/go-ruby-rss/rss v0.0.0-20260923204152-16e2242a2336
-	github.com/go-ruby-rubocop/rubocop v0.0.0-20260907185859-f69aff2b309d
+	github.com/go-ruby-rubocop/rubocop v0.0.0-20260928121834-142611ba8f35
 	github.com/go-ruby-rubygems/rubygems v0.0.0-20260916102314-9bd0bf6a00e5
 	github.com/go-ruby-saml/saml v0.0.0-20260925100912-118142122e06
 	github.com/go-ruby-sass/sass v0.0.0-20260906100410-777830f19847
@@ -186,23 +186,23 @@ require (
 	github.com/go-ruby-unicode-normalize/unicode-normalize v0.0.0-20260916103816-ff4e6b030f1f
 	github.com/go-ruby-uri/uri v0.0.0-20260916103846-a8de1e4e5937
 	github.com/go-ruby-vcr/vcr v0.0.0-20260717075257-3b3a803b4619
-	github.com/go-ruby-warden/warden v0.0.0-20260916103943-d05993fea025
+	github.com/go-ruby-warden/warden v0.0.0-20260927173355-64506bbab3be
 	github.com/go-ruby-webauthn/webauthn v0.0.0-20260921104542-2bb711883889
 	github.com/go-ruby-webmock/webmock v0.0.0-20260717075423-a92c67f51b7f
-	github.com/go-ruby-webrick/webrick v0.0.0-20260917104943-776f07308db4
+	github.com/go-ruby-webrick/webrick v0.0.0-20260927173350-a71c0afa01d4
 	github.com/go-ruby-widgets/mvvm v0.1.0
 	github.com/go-ruby-widgets/tui v0.3.0
 	github.com/go-ruby-widgets/widgets v0.11.0
 	github.com/go-ruby-yaml/yaml v0.0.0-20260916104302-910ced2db1c7
 	github.com/go-ruby-zeitwerk/zeitwerk v0.0.0-20260916104335-29169305e951
-	github.com/go-ruby-zlib/zlib v0.0.0-20260916104412-cebc266933cb
+	github.com/go-ruby-zlib/zlib v0.0.0-20260927173414-e9d862990b6d
 	github.com/go-webauthn/webauthn v0.18.2
 	github.com/go-xslt/xslt v0.1.0
 	github.com/nats-io/nats-server/v2 v2.15.0
 	github.com/redis/go-redis/v9 v9.22.0
 	github.com/russellhaering/goxmldsig v1.6.1
 	github.com/sirupsen/logrus v1.10.2
-	github.com/twmb/franz-go/pkg/kfake v0.0.0-20260925040417-67711bad7b74
+	github.com/twmb/franz-go/pkg/kfake v0.0.0-20260927204940-b5a45ccfdf7e
 	go.etcd.io/etcd/server/v3 v3.7.2
 	golang.org/x/sys v0.48.0
 	golang.org/x/text v0.42.0
@@ -279,26 +279,29 @@ require (
 	github.com/fxamacker/cbor/v2 v2.9.4 // indirect
 	github.com/go-asn1-ber/asn1-ber v1.5.8 // indirect
 	github.com/go-augeas/augeas v0.0.0-20260830115849-a0db83a6594a // indirect
-	github.com/go-composites/array v0.0.0-20260922235702-4fc43dd1da2c // indirect
-	github.com/go-composites/error v0.0.0-20260918235114-2990a9d33571 // indirect
+	github.com/go-composites/array v0.0.0-20260927173101-add77aa5108b // indirect
+	github.com/go-composites/error v0.0.0-20260926002113-8ebf8341ff74 // indirect
 	github.com/go-composites/null v0.0.0-20260903220223-c1d743488d23 // indirect
 	github.com/go-crdt/collab v0.25.0 // indirect
 	github.com/go-crdt/crdt v0.31.0 // indirect
 	github.com/go-datetime/dates v0.1.0 // indirect
 	github.com/go-encryptions/unixcrypt v0.1.0 // indirect
 	github.com/go-facter/facter v0.0.0-20260830120958-454b72e642ab // indirect
-	github.com/go-gfx/gfx v0.26.0 // indirect
+	github.com/go-gfx/gfx v0.34.0 // indirect
 	github.com/go-hiera/hiera v0.0.0-20260830144306-f9304f6bec92 // indirect
 	github.com/go-hocon/hocon v0.0.0-20260831114632-08e716b40e6d // indirect
 	github.com/go-icons/iconoir v0.2.0 // indirect
+	github.com/go-images/gif v0.1.0 // indirect
+	github.com/go-images/jpeg v0.2.0 // indirect
 	github.com/go-images/jpeg2000 v0.1.0 // indirect
+	github.com/go-images/png v0.1.0 // indirect
 	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
 	github.com/go-kit/kit v0.10.0 // indirect
 	github.com/go-ldap/ldap/v3 v3.4.14 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-opentype/fonts v0.8.0 // indirect
-	github.com/go-opentype/opentype v0.12.0 // indirect
+	github.com/go-opentype/opentype v0.13.0 // indirect
 	github.com/go-opentype/shape v0.5.0 // indirect
 	github.com/go-pcore/pcore v0.0.0-20260831114716-f9c3e7f59eaa // indirect
 	github.com/go-puppet/puppet v0.0.0-20260918012035-fc6b0424cdbd // indirect
@@ -306,7 +309,7 @@ require (
 	github.com/go-richdoc/richdoc v0.2.0 // indirect
 	github.com/go-ruby-fast-gettext-locale/fast-gettext-locale v0.0.0-20260825110154-a53e0e3a41a7 // indirect
 	github.com/go-scss/scss v0.0.0-20260905061546-39932e01faa4 // indirect
-	github.com/go-simd/adler32 v0.0.0-20260903215945-099b59e5ad5a // indirect
+	github.com/go-simd/adler32 v0.0.0-20260923204409-4db2a9281622 // indirect
 	github.com/go-simd/base64 v0.0.0-20260903220000-c04f5883bb18 // indirect
 	github.com/go-simd/crc32 v0.0.0-20260903220012-5f164e0e0487 // indirect
 	github.com/go-simd/hex v0.0.0-20260903220024-a8d22a843218 // indirect
@@ -351,7 +354,7 @@ require (
 	github.com/hashicorp/vault/api v1.23.0 // indirect
 	github.com/jonboulle/clockwork v0.5.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
-	github.com/klauspost/compress v1.20.0 // indirect
+	github.com/klauspost/compress v1.20.1 // indirect
 	github.com/klauspost/cpuid/v2 v2.4.0 // indirect
 	github.com/lestrrat-go/strftime v1.0.4 // indirect
 	github.com/mattermost/xml-roundtrip-validator v0.1.0 // indirect
@@ -384,11 +387,11 @@ require (
 	github.com/shopspring/decimal v1.3.1 // indirect
 	github.com/soheilhy/cmux v0.1.5 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
-	github.com/tannevaled/gobig2 v0.1.0 // indirect
+	github.com/tannevaled/gobig2 v0.2.0 // indirect
 	github.com/tetratelabs/wazero v1.8.2 // indirect
 	github.com/tinylib/msgp v1.6.4 // indirect
 	github.com/tmc/grpc-websocket-proxy v0.0.0-20220101234140-673ab2c3ae75 // indirect
-	github.com/twmb/franz-go v1.22.0 // indirect
+	github.com/twmb/franz-go v1.22.1 // indirect
 	github.com/twmb/franz-go/pkg/kadm v1.19.0 // indirect
 	github.com/twmb/franz-go/pkg/kmsg v1.14.0 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
