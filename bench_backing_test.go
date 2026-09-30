@@ -94,15 +94,23 @@ func TestBenchmarkedModulesSayWhereTheirCodeLives(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading %s (regenerate with -update-backing): %v", out, err)
 	}
-	if string(got) != want {
+	// Compared without carriage returns: git hands this file to a Windows
+	// checkout with CRLF endings, and a guard about which module runs where must
+	// not fail over how the working tree was written. It did, on the first run of
+	// CI that saw it.
+	if unixEndings(string(got)) != unixEndings(want) {
 		t.Errorf("%s no longer matches go.mod.\n\nA module has moved between an external\n"+
 			"go-ruby library and this repository. Regenerate with:\n\n"+
 			"    go test -run TestBenchmarkedModulesSayWhereTheirCodeLives -update-backing\n\n"+
 			"and then say so wherever that module's performance is published: the page\n"+
 			"in its own org opens by naming the library rbgo binds for it.\n\n%s",
-			out, firstDifference(string(got), want))
+			out, firstDifference(unixEndings(string(got)), unixEndings(want)))
 	}
 }
+
+// unixEndings drops carriage returns so that the comparison is about the table
+// and not about the checkout.
+func unixEndings(s string) string { return strings.ReplaceAll(s, "\r", "") }
 
 // requiredModules pulls the module paths out of go.mod's require blocks. It is
 // deliberately a parse of the text rather than a call to `go list`: the test has
