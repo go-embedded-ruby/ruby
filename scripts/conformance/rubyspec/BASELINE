@@ -41,6 +41,18 @@
 # that reads 9 reports an improvement and one that reads 8 passes. Recording a
 # flake at its high value would fail the lane on a coin toss -- two sweeps here
 # read 9 and a third, under heavier load, read 8.
+#
+# 2026-09-30, frozen_string_literal magic comment (+ parser v0.10.0's unary
+# plus): FIVE records raised by APPLYING the measured delta, not by overwriting
+# from a darwin sweep -- an overwrite would discard the five values held at CI's
+# lower ubuntu number and the flake note below. The deltas are the difference
+# between two sweeps of the same real-path corpus run back to back, one with
+# origin/main's binary and one with the branch's:
+#   language/magic_comment_spec.rb  +5    core/kernel/eval_spec.rb   +2
+#   core/proc/call_spec.rb          +1    core/string/uplus_spec.rb  +1
+#   language/encoding_spec.rb       +1
+# core/random/bytes_spec.rb read 9 on BOTH binaries and stays at 8: the known
+# flake named below, not a mover.
 OK	core/argf/argf_spec.rb	2
 OK	core/argf/argv_spec.rb	1
 OK	core/argf/binmode_spec.rb	2
@@ -1107,7 +1119,7 @@ OK	core/kernel/dup_spec.rb	17
 OK	core/kernel/enum_for_spec.rb	0
 OK	core/kernel/eql_spec.rb	9
 OK	core/kernel/equal_value_spec.rb	1
-OK	core/kernel/eval_spec.rb	48
+OK	core/kernel/eval_spec.rb	50
 OK	core/kernel/exec_spec.rb	2
 FILEFAIL	core/kernel/exit_spec.rb
 OK	core/kernel/extend_spec.rb	4
@@ -1479,7 +1491,7 @@ OK	core/proc/allocate_spec.rb	0
 OK	core/proc/arity_spec.rb	58
 OK	core/proc/binding_spec.rb	2
 OK	core/proc/block_pass_spec.rb	2
-OK	core/proc/call_spec.rb	15
+OK	core/proc/call_spec.rb	16
 OK	core/proc/case_compare_spec.rb	1
 OK	core/proc/clone_spec.rb	2
 OK	core/proc/compose_spec.rb	17
@@ -1926,7 +1938,7 @@ OK	core/string/unpack/z_spec.rb	15
 OK	core/string/unpack1_spec.rb	8
 OK	core/string/unpack_spec.rb	7
 OK	core/string/upcase_spec.rb	32
-OK	core/string/uplus_spec.rb	2
+OK	core/string/uplus_spec.rb	3
 OK	core/string/upto_spec.rb	17
 OK	core/string/valid_encoding/utf_8_spec.rb	28
 OK	core/string/valid_encoding_spec.rb	7
@@ -2183,7 +2195,7 @@ OK	language/constants_spec.rb	88
 OK	language/def_spec.rb	61
 OK	language/defined_spec.rb	256
 OK	language/delegation_spec.rb	12
-OK	language/encoding_spec.rb	4
+OK	language/encoding_spec.rb	5
 OK	language/ensure_spec.rb	31
 OK	language/execution_spec.rb	2
 OK	language/file_spec.rb	6
@@ -2196,7 +2208,7 @@ OK	language/keyword_arguments_spec.rb	14
 OK	language/lambda_spec.rb	56
 OK	language/line_spec.rb	6
 OK	language/loop_spec.rb	5
-OK	language/magic_comment_spec.rb	22
+OK	language/magic_comment_spec.rb	27
 OK	language/match_spec.rb	8
 OK	language/metaclass_spec.rb	21
 OK	language/method_spec.rb	157

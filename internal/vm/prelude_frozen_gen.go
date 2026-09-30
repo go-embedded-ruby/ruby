@@ -6874,11 +6874,11 @@ func embeddedPrelude() *bytecode.ISeq {
 							},
 							&bytecode.ISeq{
 								Name:  "render_attributes",
-								Insns: []bytecode.Instr{{Op: 7}, {Op: 12, A: 2}, {Op: 9}, {Op: 5}, {Op: 30, C: 1}, {Op: 12, A: 3}, {Op: 9}, {Op: 11}, {Op: 30, A: 1, C: 2, Flags: 1}, {Op: 9}, {Op: 11, A: 1}, {Op: 30, A: 1, C: 3, Flags: 1}, {Op: 9}, {Op: 1}, {Op: 12, A: 4}, {Op: 9}, {Op: 11, A: 2}, {Op: 30, A: 2, Flags: 1}, {Op: 30, A: 3, Flags: 1}, {Op: 30, A: 1, C: 4, Flags: 1}, {Op: 9}, {Op: 11, A: 4}, {Op: 53}},
+								Insns: []bytecode.Instr{{Op: 7}, {Op: 12, A: 2}, {Op: 9}, {Op: 5}, {Op: 30, C: 1}, {Op: 12, A: 3}, {Op: 9}, {Op: 11}, {Op: 30, A: 1, C: 2, Flags: 1}, {Op: 9}, {Op: 11, A: 1}, {Op: 30, A: 1, C: 3, Flags: 1}, {Op: 9}, {Op: 1}, {Op: 30, A: 2}, {Op: 12, A: 4}, {Op: 9}, {Op: 11, A: 2}, {Op: 30, A: 3, Flags: 1}, {Op: 30, A: 4, Flags: 1}, {Op: 30, A: 1, C: 4, Flags: 1}, {Op: 9}, {Op: 11, A: 4}, {Op: 53}},
 								Consts: []object.Value{
 									object.FString("", ""),
 								},
-								Names:       []string{"lambda", "each", "keys", "sort"},
+								Names:       []string{"lambda", "each", "+@", "keys", "sort"},
 								Params:      []string{"base", "splats"},
 								NumRequired: 1,
 								SplatIndex:  1,
@@ -6887,7 +6887,7 @@ func embeddedPrelude() *bytecode.ISeq {
 								BlockSlot:   -1,
 								NumLocals:   5,
 								Locals:      []string{"base", "splats", "merged", "add", "out"},
-								Lines:       []bytecode.LineEntry{{PC: 0, Line: 2234}, {PC: 3, Line: 2235}, {PC: 7, Line: 2247}, {PC: 10, Line: 2248}, {PC: 13, Line: 2250}, {PC: 16, Line: 2251}, {PC: 21, Line: 2254}},
+								Lines:       []bytecode.LineEntry{{PC: 0, Line: 2234}, {PC: 3, Line: 2235}, {PC: 7, Line: 2247}, {PC: 10, Line: 2248}, {PC: 13, Line: 2250}, {PC: 17, Line: 2251}, {PC: 22, Line: 2254}},
 								FirstLine:   2233,
 								Children: []*bytecode.ISeq{
 									&bytecode.ISeq{
@@ -7171,11 +7171,11 @@ func embeddedPrelude() *bytecode.ISeq {
 						Children: []*bytecode.ISeq{
 							&bytecode.ISeq{
 								Name:  "render",
-								Insns: []bytecode.Instr{{Op: 7}, {Op: 12, A: 1}, {Op: 9}, {Op: 11}, {Op: 30, C: 1, Flags: 1}, {Op: 9}, {Op: 1}, {Op: 12, A: 2}, {Op: 9}, {Op: 11, A: 1}, {Op: 30, A: 1, Flags: 1}, {Op: 30, A: 2, Flags: 1}, {Op: 30, C: 2, Flags: 1}, {Op: 9}, {Op: 11, A: 2}, {Op: 53}},
+								Insns: []bytecode.Instr{{Op: 7}, {Op: 12, A: 1}, {Op: 9}, {Op: 11}, {Op: 30, C: 1, Flags: 1}, {Op: 9}, {Op: 1}, {Op: 30, A: 1}, {Op: 12, A: 2}, {Op: 9}, {Op: 11, A: 1}, {Op: 30, A: 2, Flags: 1}, {Op: 30, A: 3, Flags: 1}, {Op: 30, C: 2, Flags: 1}, {Op: 9}, {Op: 11, A: 2}, {Op: 53}},
 								Consts: []object.Value{
 									object.FString("", ""),
 								},
-								Names:       []string{"each", "keys", "sort"},
+								Names:       []string{"each", "+@", "keys", "sort"},
 								Params:      []string{"h"},
 								NumRequired: 1,
 								SplatIndex:  -1,
@@ -7184,7 +7184,7 @@ func embeddedPrelude() *bytecode.ISeq {
 								BlockSlot:   -1,
 								NumLocals:   3,
 								Locals:      []string{"h", "pairs", "out"},
-								Lines:       []bytecode.LineEntry{{PC: 0, Line: 2321}, {PC: 3, Line: 2322}, {PC: 6, Line: 2337}, {PC: 9, Line: 2338}, {PC: 14, Line: 2348}},
+								Lines:       []bytecode.LineEntry{{PC: 0, Line: 2321}, {PC: 3, Line: 2322}, {PC: 6, Line: 2337}, {PC: 10, Line: 2338}, {PC: 15, Line: 2348}},
 								FirstLine:   2320,
 								Children: []*bytecode.ISeq{
 									&bytecode.ISeq{
