@@ -260,6 +260,10 @@ type Compiler struct {
 	// string literal is tagged with it (see newStrLit) so a literal in a
 	// `# encoding: binary` file is BINARY, matching MRI.
 	srcEnc string
+	// frozenStrLit is the file's `# frozen_string_literal: true` setting: every
+	// non-interpolated String literal then compiles to a SHARED FROZEN constant
+	// (see newStrLit) instead of a fresh mutable one.
+	frozenStrLit bool
 	// masgnPre maps a multiple-assignment target to the temporaries its receiver
 	// (and index arguments) were evaluated into before the right-hand side ran.
 	// See preEvalMasgnTarget.
@@ -309,22 +313,22 @@ type masgnPreEval struct {
 // Compile lowers a Program into the top-level ISeq, treating string literals as
 // UTF-8 (the default source encoding).
 func Compile(prog *ast.Program) (iseq *bytecode.ISeq, err error) {
-	return CompileWithEncoding(prog, "")
+	return CompileWithMagic(prog, Magic{})
 }
 
-// CompileWithEncoding lowers a Program whose source declared srcEnc (a canonical
-// encoding name, or "" for UTF-8) via a `# encoding:` magic comment, so string
-// literals carry that encoding.
-func CompileWithEncoding(prog *ast.Program, srcEnc string) (iseq *bytecode.ISeq, err error) {
-	return CompileEval(prog, srcEnc, 1)
+// CompileWithMagic lowers a Program whose source declared the pragmas in m (see
+// MagicComments), so string literals carry the file's encoding and are frozen
+// and interned when it asked for that.
+func CompileWithMagic(prog *ast.Program, m Magic) (iseq *bytecode.ISeq, err error) {
+	return CompileEval(prog, m, 1)
 }
 
 // CompileEval lowers prog as a top-level body whose FIRST LINE is firstLine
 // rather than 1 — the shape an eval given an explicit starting line needs
 // (eval(src, nil, file, line), instance_eval(src, file, line), whose line
 // reaches MRI's parser as pm_options_line_set). firstLine may be negative; MRI
-// does not clamp it. CompileWithEncoding is this function at firstLine 1.
-func CompileEval(prog *ast.Program, srcEnc string, firstLine int) (iseq *bytecode.ISeq, err error) {
+// does not clamp it. CompileWithMagic is this function at firstLine 1.
+func CompileEval(prog *ast.Program, m Magic, firstLine int) (iseq *bytecode.ISeq, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			// Unchecked: a non-compileError is an internal bug and re-panics as a
@@ -332,7 +336,7 @@ func CompileEval(prog *ast.Program, srcEnc string, firstLine int) (iseq *bytecod
 			iseq, err = nil, r.(compileError)
 		}
 	}()
-	c := &Compiler{srcEnc: srcEnc, patCache: -1, lines: prog.Lines, lineDelta: firstLine - 1}
+	c := &Compiler{srcEnc: m.Encoding, frozenStrLit: m.FrozenStringLiteral, patCache: -1, lines: prog.Lines, lineDelta: firstLine - 1}
 	c.push(newBuilder("<main>", nil))
 	// MRI's top-level ISeq has first_lineno 1 (iseq.c v3_4_0 rb_iseq_new_top
 	// passes a location starting at line 1), so an empty or unplaceable <main>
@@ -349,12 +353,31 @@ func CompileEval(prog *ast.Program, srcEnc string, firstLine int) (iseq *bytecod
 // multi-byte UTF-8 is left UTF-8 regardless: such content comes from a `\u` escape
 // (or literal Unicode), which MRI always encodes as UTF-8 even in a non-UTF-8
 // source. Pure-ASCII and byte-oriented (`\x`) content take the source encoding.
+//
+// Under `# frozen_string_literal: true` the constant is instead the INTERNED
+// frozen String for that content and encoding. That single substitution buys
+// both halves of MRI's behaviour, because the rest is already in place:
+// vm's OpPushConst shares a frozen String constant and clones an unfrozen one
+// (MRI's putobject/putstring split), so the literal comes out frozen; and
+// object.FString is the process-wide table MRI calls rb_fstring, so two literals
+// with the same content are the same object even in different files.
+//
+// Only this node is affected, which is why an interpolated literal is never
+// frozen in any Ruby: StrInterp compiles to a fresh mutable "" that each part is
+// concatenated onto, and never reaches here.
 func (c *Compiler) newStrLit(s string) object.Value {
-	if c.srcEnc != "" {
+	enc := c.srcEnc
+	if enc != "" {
 		b := []byte(s)
-		if !(utf8.Valid(b) && !asciiOnlyBytes(b)) {
-			return object.NewStringBytesEnc(b, c.srcEnc)
+		if utf8.Valid(b) && !asciiOnlyBytes(b) {
+			enc = ""
 		}
+	}
+	if c.frozenStrLit {
+		return object.FString(s, enc)
+	}
+	if enc != "" {
+		return object.NewStringBytesEnc([]byte(s), enc)
 	}
 	return object.NewString(s)
 }
@@ -369,12 +392,12 @@ func asciiOnlyBytes(b []byte) bool {
 	return true
 }
 
-// MagicSourceEncoding returns the canonical registry encoding name declared by a
+// magicSourceEncoding returns the canonical registry encoding name declared by a
 // `# encoding:` / `# coding:` magic comment on the first line of src (or the
 // second when the first is a shebang), or "" for UTF-8 or no declaration. Only the
 // encodings the negotiation cares about are recognised by canonical spelling;
 // anything else (including plain UTF-8) yields "" so literals keep the default.
-func MagicSourceEncoding(src string) string {
+func magicSourceEncoding(src string) string {
 	line, rest, _ := strings.Cut(src, "\n")
 	if strings.HasPrefix(strings.TrimSpace(line), "#!") {
 		line, _, _ = strings.Cut(rest, "\n")
@@ -444,19 +467,19 @@ func isEncNameByte(b byte) bool {
 // ISeq is run with that environment as the parent — while any new locals are
 // scratch in the child frame.
 func CompileWithLocals(prog *ast.Program, localNames []string) (iseq *bytecode.ISeq, err error) {
-	return CompileEvalWithLocals(prog, localNames, 1)
+	return CompileEvalWithLocals(prog, Magic{}, localNames, 1)
 }
 
 // CompileEvalWithLocals is CompileWithLocals for a binding eval given an explicit
 // starting line — eval(src, b, file, line) and Binding#eval(src, file, line).
 // CompileWithLocals is this function at firstLine 1.
-func CompileEvalWithLocals(prog *ast.Program, localNames []string, firstLine int) (iseq *bytecode.ISeq, err error) {
+func CompileEvalWithLocals(prog *ast.Program, m Magic, localNames []string, firstLine int) (iseq *bytecode.ISeq, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			iseq, err = nil, r.(compileError)
 		}
 	}()
-	c := &Compiler{patCache: -1, lines: prog.Lines, lineDelta: firstLine - 1}
+	c := &Compiler{srcEnc: m.Encoding, frozenStrLit: m.FrozenStringLiteral, patCache: -1, lines: prog.Lines, lineDelta: firstLine - 1}
 	parent := newBuilder("<binding>", nil)
 	parent.locals = append([]string(nil), localNames...)
 	parent.borrowed = true

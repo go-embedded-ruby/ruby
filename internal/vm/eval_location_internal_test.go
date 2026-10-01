@@ -296,12 +296,12 @@ func TestCompileEvalFirstLine(t *testing.T) {
 		build func() (*bytecode.ISeq, error)
 		want  int
 	}{
-		{"top, default", func() (*bytecode.ISeq, error) { return compiler.CompileEval(prog, "", 1) }, 1},
-		{"top, given", func() (*bytecode.ISeq, error) { return compiler.CompileEval(prog, "", 30) }, 30},
-		{"top, negative", func() (*bytecode.ISeq, error) { return compiler.CompileEval(prog, "", -7) }, -7},
-		{"binding, default", func() (*bytecode.ISeq, error) { return compiler.CompileEvalWithLocals(prog, nil, 1) }, 1},
-		{"binding, given", func() (*bytecode.ISeq, error) { return compiler.CompileEvalWithLocals(prog, nil, 30) }, 30},
-		{"binding, negative", func() (*bytecode.ISeq, error) { return compiler.CompileEvalWithLocals(prog, nil, -7) }, -7},
+		{"top, default", func() (*bytecode.ISeq, error) { return compiler.CompileEval(prog, compiler.Magic{}, 1) }, 1},
+		{"top, given", func() (*bytecode.ISeq, error) { return compiler.CompileEval(prog, compiler.Magic{}, 30) }, 30},
+		{"top, negative", func() (*bytecode.ISeq, error) { return compiler.CompileEval(prog, compiler.Magic{}, -7) }, -7},
+		{"binding, default", func() (*bytecode.ISeq, error) { return compiler.CompileEvalWithLocals(prog, compiler.Magic{}, nil, 1) }, 1},
+		{"binding, given", func() (*bytecode.ISeq, error) { return compiler.CompileEvalWithLocals(prog, compiler.Magic{}, nil, 30) }, 30},
+		{"binding, negative", func() (*bytecode.ISeq, error) { return compiler.CompileEvalWithLocals(prog, compiler.Magic{}, nil, -7) }, -7},
 	} {
 		is, err := c.build()
 		if err != nil {

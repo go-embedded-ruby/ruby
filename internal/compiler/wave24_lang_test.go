@@ -261,7 +261,7 @@ func mustCompile(t *testing.T, src string) *bytecode.ISeq {
 	if err != nil {
 		t.Fatalf("parse %q: %v", src, err)
 	}
-	iseq, err := CompileWithEncoding(prog, "")
+	iseq, err := CompileWithMagic(prog, Magic{})
 	if err != nil {
 		t.Fatalf("compile %q: %v", src, err)
 	}

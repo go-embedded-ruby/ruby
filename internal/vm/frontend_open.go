@@ -25,5 +25,5 @@ func openParseCompileEval(src string, firstLine int) (*bytecode.ISeq, error) {
 	if err != nil {
 		return nil, err
 	}
-	return compiler.CompileEval(prog, compiler.MagicSourceEncoding(src), firstLine)
+	return compiler.CompileEval(prog, compiler.MagicComments(src), firstLine)
 }

@@ -2811,7 +2811,7 @@ func (vm *VM) bootstrap() {
 		// core/string/uminus_spec's "does not deduplicate a frozen string when it
 		// has instance variables" fails — it was passing only because nothing
 		// deduplicated at all.
-		return internFString(self.(*object.String))
+		return object.InternFString(self.(*object.String))
 	})
 	vm.cString.defineArgc("+@", 0, func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		s := self.(*object.String)
@@ -12420,30 +12420,6 @@ func symbolNameString(sym object.Value) *object.String {
 // TestPrawnGenerateRoundTrip calls #rstrip on it — so the guard fires on a
 // string that is only invalid because of that mis-tagging. Install it once
 // render carries the right encoding.
-
-// fstrings is the process-wide deduplication table behind String#-@, MRI's
-// fstring table (string.c v3_4_0 rb_fstring / register_fstring). It is keyed by
-// encoding and bytes together, since two strings only deduplicate when both
-// match; every value in it is frozen, which is what makes sharing one across
-// VMs in a process safe — and MRI's table is equally process-wide.
-var fstrings sync.Map // enc + "\x00" + bytes -> *object.String
-
-// internFString returns the canonical frozen String for s's content. An
-// already-frozen receiver becomes the canonical one itself when nothing is
-// registered yet, so `input = "foo".freeze; (-input).equal?(input)` holds.
-func internFString(s *object.String) *object.String {
-	key := s.EncName() + "\x00" + s.Str()
-	if v, ok := fstrings.Load(key); ok {
-		return v.(*object.String)
-	}
-	fs := s
-	if !fs.Frozen {
-		fs = object.NewStringBytesEnc(append([]byte(nil), s.Bytes()...), s.Enc)
-		fs.Frozen = true
-	}
-	actual, _ := fstrings.LoadOrStore(key, fs)
-	return actual.(*object.String)
-}
 
 // signOfFloat is the sign of a non-zero double as a three-way comparison result.
 func signOfFloat(f float64) int {

@@ -66,7 +66,11 @@ func main() {
 	if err != nil {
 		fatal("parse prelude: %v", err)
 	}
-	iseq, err := compiler.Compile(prog)
+	// prelude.rb carries `# frozen_string_literal: true`, and the interpreter's
+	// own path (vm's parseCompileFn) reads it. Compiling here without it made
+	// the frozen blob disagree with a fresh compile of the same file, which is
+	// exactly what TestEmbeddedPreludeMatchesSource guards.
+	iseq, err := compiler.CompileWithMagic(prog, compiler.MagicComments(string(src)))
 	if err != nil {
 		fatal("compile prelude: %v", err)
 	}

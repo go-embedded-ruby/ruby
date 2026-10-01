@@ -26,8 +26,8 @@ func TestMagicSourceEncoding(t *testing.T) {
 		{"", ""},
 	}
 	for _, tc := range cases {
-		if got := MagicSourceEncoding(tc.src); got != tc.want {
-			t.Errorf("MagicSourceEncoding(%q) = %q, want %q", tc.src, got, tc.want)
+		if got := MagicComments(tc.src).Encoding; got != tc.want {
+			t.Errorf("MagicComments(%q).Encoding = %q, want %q", tc.src, got, tc.want)
 		}
 	}
 }
@@ -40,7 +40,7 @@ func firstStringConst(t *testing.T, src, srcEnc string) string {
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	iseq, err := CompileWithEncoding(prog, srcEnc)
+	iseq, err := CompileWithMagic(prog, Magic{Encoding: srcEnc})
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
