@@ -100,6 +100,123 @@ Native). Reproduce: `AOT=1 RUNS=8 JRUBY=jruby TRUFFLE=<path> bash bench/run.sh 8
   lowering of integer-bound methods (`mandelbrot`'s float kernel is not yet
   AOT-lowered).
 
+## Per-module, re-taken with a clock that can see the rows  (2026-09-30)
+
+The three per-module sections below were measured with `/usr/bin/time -p`, which
+prints **two decimals of a second**. Its resolution is 10 ms, and anything faster
+than one tick reads zero:
+
+```
+$ for i in $(seq 10); do { /usr/bin/time -p /usr/bin/true >/dev/null; } 2>&1 | awk '/real/{printf "%s ",$2}'; done
+0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00
+```
+
+The signature is in the numbers: of the **171** timing cells in those three
+sections, **171 are multiples of 10 ms**; 36 of them are ten ticks or fewer and
+11 are five or fewer. `matrix | 20ms | 50ms | 0.40×` was a **two-tick**
+measurement, and `tsort | 80ms | 90ms | 0.89×` claimed an 11% win from a
+difference of one tick.
+
+`bench/modules/run.sh` now measures with `Time::HiRes`, refuses to publish a time
+for a run that exited non-zero — the old `best()` kept the smallest time of N
+without looking at the exit status, so a command that died immediately won its
+own series — and **interleaves the runtimes**, one run each in rotation with the
+order rotating every round, instead of giving each its own block of wall-clock
+time. (What that last one is worth: go-crdt/crdt#131, where the same defect put a
+published ratio 14% out, and where contention turned out to fall hardest on the
+shortest-running arm rather than on everyone alike.)
+
+### Results (best of 5, interleaved, ms)
+
+| Module | rbgo | MRI | MRI+YJIT | JRuby | TruffleRuby | rbgo/MRI | rbgo/YJIT |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| regexp | 4967.7ms | 831.4ms | 831.1ms | 1671.9ms | 325.6ms | 5.98× | 5.98× |
+| erb | 589.1ms | 334.7ms | 300.2ms | 1834.8ms | 353.0ms | 1.76× | 1.96× |
+| yaml | 192.2ms | 762.3ms | 468.7ms | 2376.1ms | 3336.0ms | **0.25×** | **0.41×** |
+| format | 686.6ms | 324.4ms | 304.9ms | 1535.1ms | 462.1ms | 2.12× | 2.25× |
+| strscan | 261.8ms | 133.8ms | 117.5ms | 1213.5ms | 175.7ms | 1.96× | 2.23× |
+| optparse | 178.5ms | 801.4ms | 616.1ms | 2483.0ms | 1177.5ms | **0.22×** | **0.29×** |
+| json | 701.0ms | 316.6ms | 313.2ms | 2001.8ms | 2631.3ms | 2.21× | 2.24× |
+| bigdecimal | 342.3ms | 168.3ms | 167.2ms | 1780.6ms | 7101.3ms | 2.03× | 2.05× |
+| date | 275.1ms | 415.1ms | 404.2ms | 1432.4ms | 8025.7ms | **0.66×** | **0.68×** |
+| uri | 136.1ms | 379.8ms | 308.4ms | 1610.9ms | 2125.8ms | **0.36×** | **0.44×** |
+| digest | 456.1ms | 337.7ms | 321.3ms | 1320.3ms | 477.2ms | 1.35× | 1.42× |
+| set | 8212.2ms | 214.8ms | 210.3ms | 1288.3ms | 413.5ms | 38.24× | 39.04× |
+| prime | 38.7ms | 41.3ms | 53.7ms | 1283.2ms | 187.2ms | **0.94×** | **0.72×** |
+| matrix | 48.1ms | 55.4ms | 59.8ms | 1284.3ms | 207.0ms | **0.87×** | **0.80×** |
+| complex | 163.6ms | 81.8ms | 71.9ms | 1127.5ms | 91.0ms | 2.00× | 2.28× |
+| rational | 169.6ms | 51.2ms | 46.1ms | 1138.9ms | 95.9ms | 3.31× | 3.68× |
+| cmath | 84.7ms | 70.4ms | 68.8ms | 1262.5ms | 321.8ms | 1.20× | 1.23× |
+| tsort | 125.6ms | 88.4ms | 81.3ms | 1226.3ms | 239.4ms | 1.42× | 1.54× |
+| abbrev | 355.7ms | 225.1ms | 188.0ms | 1354.7ms | 395.5ms | 1.58× | 1.89× |
+| did-you-mean | 68.1ms | 1545.5ms | 403.2ms | 2813.9ms | 494.3ms | **0.04×** | **0.17×** |
+| prettyprint | 144.3ms | 101.8ms | 74.7ms | 1362.8ms | 208.9ms | 1.42× | 1.93× |
+| scanf | 179.8ms | 567.2ms | 545.5ms | 1504.7ms | 633.9ms | **0.32×** | **0.33×** |
+| unicode-normalize | 167.0ms | 371.8ms | 370.5ms | 1383.7ms | 321.3ms | **0.45×** | **0.45×** |
+| cgi | 86.1ms | 65.4ms | 63.7ms | 1144.2ms | 1770.0ms | 1.32× | 1.35× |
+| zlib | 63.3ms | 61.5ms | 61.4ms | 1254.4ms | 325.0ms | 1.03× | 1.03× |
+| ipaddr | 61.6ms | 114.0ms | 90.2ms | 1436.5ms | 297.3ms | **0.54×** | **0.68×** |
+| pathname | 351.9ms | 449.1ms | 430.7ms | 1726.1ms | 652.3ms | **0.78×** | **0.82×** |
+| rexml | 52.4ms | 524.5ms | 317.4ms | 2811.1ms | 1333.1ms | **0.10×** | **0.16×** |
+| base64 | 421.9ms | 172.0ms | 181.8ms | 1685.1ms | 1100.8ms | 2.45× | 2.32× |
+| securerandom | 161.4ms | 329.1ms | 308.9ms | 1253.5ms | 267.6ms | **0.49×** | **0.52×** |
+| ostruct | 771.1ms | 1555.2ms | 1538.4ms | 2126.5ms | 4133.2ms | **0.50×** | **0.50×** |
+| observer | 252.2ms | 113.2ms | 81.9ms | 1330.5ms | 228.7ms | 2.23× | 3.08× |
+| logger | 253.1ms | 98.6ms | 84.3ms | 1413.0ms | 243.1ms | 2.57× | 3.00× |
+| find | 1064.7ms | 1118.4ms | 1094.8ms | 3810.7ms | 1473.0ms | **0.95×** | **0.97×** |
+| benchmark | 346.1ms | 117.1ms | 76.6ms | 1322.2ms | 159.3ms | 2.95× | 4.52× |
+
+> `rbgo/MRI < 1` (bold) means the pure-Go library is **faster than MRI's own
+> stdlib** on this workload. All 35 modules passed the byte-identical-to-MRI gate
+> under every installed runtime; no row was dropped and no run exited non-zero.
+
+### What moved, and how we know it is not the machine
+
+**MRI is the control.** Across the 24 rows that appear in both this run and the
+June ones, MRI reproduces within a few percent — 220→215 ms on `set`, 1450→1546
+on `did-you-mean`, 570→567 on `scanf`, 330→329 on `securerandom`. The machine and
+the workloads are the same, so what moved in the rbgo column is rbgo's.
+
+**Five of those 24 rows change which side of parity they sit on:**
+
+| | June | now | |
+|---|---|---|---|
+| `cmath` | 0.67× | **1.20×** | a win that is a loss |
+| `prettyprint` | 0.89× | **1.42×** | a win that is a loss |
+| `tsort` | 0.89× | **1.42×** | a win that is a loss |
+| `prime` | 1.67× | **0.94×** | a loss that is a win |
+| `ipaddr` | 1.91× | **0.54×** | a loss that is a win |
+
+Three of the eight modules the June text lists as "rbgo beats MRI outright" are
+not beating MRI. All three sat on one or two ticks of the old clock.
+
+**Some rows moved because the code did, and that is the larger part.** `strscan`
+10720 → 262 ms and `json` 1520 → 701 ms are #89 and #88 landing the day after
+those tables were taken. `zlib` 360 → 63 ms and `ipaddr` 210 → 62 ms moved by
+far more than a tick can account for, and `regexp` 1530 → 4968 ms moved that far
+the other way. Three months separate the two runs; this section does not try to
+attribute each row, only to say which comparisons the clock could not support.
+
+### `set` is no longer a go-ruby library, and its row moved with it
+
+`set` reads 8212 ms against MRI's 215 — **38.2×**, where June published 10.09×.
+That is not the clock either. #56 bound Set to `go-ruby-set/set` on 2026-06-29;
+#330 reimplemented Set in this repository on 2026-08-08 for MRI 4.0 conformance,
+with "the bulk of the Ruby-observable Set API […] in the prelude"; #333's
+`go mod tidy` dropped the now-unused require the next day. The benchmark
+exercises exactly that algebra, so it now measures prelude Ruby where it used to
+measure Go. Nothing about the trade was wrong — conformance was the point — but
+nothing recorded that it had happened, and a page in another org went on
+attributing this number to a library rbgo had stopped using.
+
+`bench/modules/BACKING.md` now says, beside the scripts, which modules run on an
+external `go-ruby-<mod>` library and which run on code in this repository. It is
+generated, and `TestBenchmarkedModulesSayWhereTheirCodeLives` fails when it and
+`go.mod` disagree. Three of the benchmarked modules — `complex`, `rational` and
+`set` — are in-tree today.
+
+The three sections that follow are kept as they were taken.
+
 ## Per-module: rbgo vs MRI / YJIT / JRuby / TruffleRuby  (2026-06-29)
 
 The benchmarks above are *language* micro-benchmarks (dispatch, allocation,
