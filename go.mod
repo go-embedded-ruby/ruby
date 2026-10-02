@@ -8,15 +8,15 @@ require (
 	github.com/dolthub/go-mysql-server v0.20.0
 	github.com/glauth/ldap v0.0.0-20260718202943-34c5f9b3cbf1
 	github.com/go-commonmark/commonmark v0.1.0
-	github.com/go-composites/bag v0.0.0-20260929012332-45e461511b52
+	github.com/go-composites/bag v0.0.0-20261001005725-fcf324b93f95
 	github.com/go-composites/result v0.0.0-20260927170344-f2c7344faeef
 	github.com/go-composites/time v0.0.0-20260929013028-aa3c57ae1371
-	github.com/go-fft/fft v0.0.0-20260929081328-e5cbdb55e9b0
+	github.com/go-fft/fft v0.1.1
 	github.com/go-images/images v0.0.0-20260927173152-87444e36aac4
 	github.com/go-kramdown/kramdown v0.1.0
 	github.com/go-liquid/liquid v0.1.0
 	github.com/go-mustache/mustache v0.1.0
-	github.com/go-ndarray/ndarray v0.0.0-20260831064201-1c846000bfd5
+	github.com/go-ndarray/ndarray v0.0.0-20260930182958-73ce783e24f7
 	github.com/go-nokogiri/nokogiri v0.1.0
 	github.com/go-rouge/rouge v0.2.0
 	github.com/go-ruby-aasm/aasm v0.0.0-20260717061120-cec0976ec205
@@ -160,7 +160,7 @@ require (
 	github.com/go-ruby-rqrcode/rqrcode v0.0.0-20260916102108-c0062622e02f
 	github.com/go-ruby-rspec/rspec v0.0.0-20260916102141-613d88c1871f
 	github.com/go-ruby-rss/rss v0.0.0-20260923204152-16e2242a2336
-	github.com/go-ruby-rubocop/rubocop v0.0.0-20260928121834-142611ba8f35
+	github.com/go-ruby-rubocop/rubocop v0.0.0-20261001114457-ff08439ed26a
 	github.com/go-ruby-rubygems/rubygems v0.0.0-20260916102314-9bd0bf6a00e5
 	github.com/go-ruby-saml/saml v0.0.0-20260925100912-118142122e06
 	github.com/go-ruby-sass/sass v0.0.0-20260906100410-777830f19847
@@ -175,7 +175,7 @@ require (
 	github.com/go-ruby-sinatra/sinatra v0.0.0-20260923204248-301a06b96ca0
 	github.com/go-ruby-slim/slim v0.0.0-20260916102940-76e23809c696
 	github.com/go-ruby-sodium/sodium v0.0.0-20260910094952-712708ed6e8d
-	github.com/go-ruby-sqlite3/sqlite3 v0.0.0-20260917103921-b9e613e0720e
+	github.com/go-ruby-sqlite3/sqlite3 v0.0.0-20260930114044-3861a7b679bd
 	github.com/go-ruby-strscan/strscan v0.0.0-20260916103346-94924cbd2f12
 	github.com/go-ruby-thor/thor v0.0.0-20260916103450-ad4daa2c5591
 	github.com/go-ruby-timecop/timecop v0.0.0-20260717074948-f619efc95b6b
@@ -279,7 +279,7 @@ require (
 	github.com/fxamacker/cbor/v2 v2.9.4 // indirect
 	github.com/go-asn1-ber/asn1-ber v1.5.8 // indirect
 	github.com/go-augeas/augeas v0.0.0-20260830115849-a0db83a6594a // indirect
-	github.com/go-composites/array v0.0.0-20260927173101-add77aa5108b // indirect
+	github.com/go-composites/array v0.0.0-20260929012314-b34dd2208c46 // indirect
 	github.com/go-composites/error v0.0.0-20260926002113-8ebf8341ff74 // indirect
 	github.com/go-composites/null v0.0.0-20260903220223-c1d743488d23 // indirect
 	github.com/go-crdt/collab v0.25.0 // indirect
@@ -429,10 +429,10 @@ require (
 	golang.org/x/mod v0.41.0 // indirect
 	golang.org/x/net v0.59.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect
-	golang.org/x/telemetry v0.0.0-20260811182544-a038080d80e5 // indirect
+	golang.org/x/telemetry v0.0.0-20260908163034-4bcc4b2ee518 // indirect
 	golang.org/x/term v0.46.0 // indirect
 	golang.org/x/time v0.16.0 // indirect
-	golang.org/x/tools v0.49.0 // indirect
+	golang.org/x/tools v0.50.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260706201446-f0a921348800 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260706201446-f0a921348800 // indirect
 	google.golang.org/grpc v1.84.0 // indirect
@@ -441,9 +441,9 @@ require (
 	gopkg.in/src-d/go-errors.v1 v1.0.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	k8s.io/utils v0.0.0-20260108192941-914a6e750570 // indirect
-	modernc.org/libc v1.75.7 // indirect
+	modernc.org/libc v1.77.1 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
-	modernc.org/sqlite v1.59.0 // indirect
+	modernc.org/sqlite v1.60.1 // indirect
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )
