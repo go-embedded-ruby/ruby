@@ -2813,6 +2813,13 @@ func (vm *VM) bootstrap() {
 		// deduplicated at all.
 		return object.InternFString(self.(*object.String))
 	})
+	// String#dedup is the 4.0 ALIAS of -@, not a second definition:
+	// rb_define_alias(rb_cString, "dedup", "-@") (string.c ruby_4_0:12618), whose
+	// documentation gives both spellings on one call-seq. The difference is
+	// observable, which is why this aliases rather than re-defines -- on ruby
+	// 4.0.5, String.instance_method(:dedup).original_name is :-@, and a copy
+	// would report :dedup.
+	vm.aliasMethod(vm.cString, "dedup", "-@")
 	vm.cString.defineArgc("+@", 0, func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		s := self.(*object.String)
 		if s.Frozen {
