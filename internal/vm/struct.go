@@ -308,8 +308,8 @@ func setupStruct(vm *VM) {
 	cStruct.define("to_a", toA)
 	// #values and #deconstruct are true aliases of #to_a (shared Method record, so
 	// Struct.instance_method(:deconstruct) == Struct.instance_method(:to_a)).
-	aliasBuiltin(cStruct, "values", "to_a")
-	aliasBuiltin(cStruct, "deconstruct", "to_a")
+	defineBuiltinSecondName(cStruct, "values", "to_a")
+	defineBuiltinSecondName(cStruct, "deconstruct", "to_a")
 
 	cStruct.define("to_h", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		names := structDefOf(self.(*RObject).class).names
@@ -426,7 +426,7 @@ func setupStruct(vm *VM) {
 		return object.IntValue(int64(len(structValues(self))))
 	}
 	cStruct.define("size", sizeFn)
-	aliasBuiltin(cStruct, "length", "size")
+	defineBuiltinSecondName(cStruct, "length", "size")
 
 	cStruct.define("==", func(vm *VM, self object.Value, a []object.Value, _ *Proc) object.Value {
 		return object.Bool(vm.structEqual(self, a[0], false, nil))
@@ -462,7 +462,7 @@ func setupStruct(vm *VM) {
 		return object.NewString(b.String())
 	})
 	// #inspect is an alias of #to_s (shared Method record).
-	aliasBuiltin(cStruct, "inspect", "to_s")
+	defineBuiltinSecondName(cStruct, "inspect", "to_s")
 
 	bumpMethodSerial()
 }

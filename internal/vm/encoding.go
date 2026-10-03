@@ -98,7 +98,7 @@ func (vm *VM) registerEncoding() {
 	})
 	// Encoding#to_s is a true alias of #name (they share one Method record, so
 	// Encoding.instance_method(:to_s) == Encoding.instance_method(:name), as MRI).
-	vm.cEncoding.methods["to_s"] = vm.cEncoding.methods["name"]
+	aliasBuiltin(vm.cEncoding, "to_s", "name")
 	vm.cEncoding.define("inspect", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(self.(*encodingObj).Inspect())
 	})

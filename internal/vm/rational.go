@@ -489,7 +489,7 @@ func (vm *VM) registerRational() {
 
 	// magnitude is a true alias of abs: it shares the identical Method record, so
 	// Rational.instance_method(:magnitude) == Rational.instance_method(:abs).
-	vm.cRational.methods["magnitude"] = vm.cRational.methods["abs"]
+	defineBuiltinSecondName(vm.cRational, "magnitude", "abs")
 
 	vm.cRational.define("zero?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(rval(self).R.Sign() == 0)
@@ -541,7 +541,7 @@ func (vm *VM) registerRational() {
 	vm.cRational.define("/", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return vm.binaryOp(bytecode.OpDiv, self, args[0])
 	})
-	vm.cRational.methods["quo"] = vm.cRational.methods["/"]
+	defineBuiltinSecondName(vm.cRational, "quo", "/")
 
 	// marshal_dump is the private hook Marshal uses to serialise a Rational: the
 	// two-element [numerator, denominator] array (MRI's Rational#marshal_dump).

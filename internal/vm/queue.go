@@ -75,7 +75,7 @@ func (vm *VM) registerQueue() {
 	cQueue.define("size", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(int64(len(self.(*RQueue).items)))
 	})
-	aliasBuiltin(cQueue, "length", "size")
+	defineBuiltinSecondName(cQueue, "length", "size")
 
 	cQueue.define("empty?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(len(self.(*RQueue).items) == 0)

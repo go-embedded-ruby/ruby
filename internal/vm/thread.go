@@ -630,7 +630,7 @@ func (vm *VM) registerThreadClass() {
 		}
 		return spawn(vm, self, args, blk)
 	})
-	cThread.smethods["fork"] = cThread.smethods["start"]
+	defineBuiltinSecondNameS(cThread, "fork", "start")
 	sdef("current", func(vm *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value { return vm.currentThread })
 	sdef("main", func(vm *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value { return vm.mainThread })
 	sdef("list", func(vm *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -759,7 +759,7 @@ func (vm *VM) registerThreadClass() {
 		}
 		return object.NewStringViewEnc(d, "ASCII-8BIT")
 	})
-	cThread.methods["inspect"] = cThread.methods["to_s"]
+	aliasBuiltin(cThread, "inspect", "to_s")
 	// Thread#priority / #priority=. MRI clamps an assignment to [-3, 3] and
 	// requires an Integer; a new thread inherits the creating thread's value.
 	cThread.define("priority", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -985,8 +985,8 @@ func (vm *VM) registerThreadClass() {
 		return t
 	}
 	cThread.define("kill", kill)
-	cThread.methods["exit"] = cThread.methods["kill"]
-	cThread.methods["terminate"] = cThread.methods["kill"]
+	defineBuiltinSecondName(cThread, "exit", "kill")
+	defineBuiltinSecondName(cThread, "terminate", "kill")
 	// Thread.exit / Thread.kill(thread): the class-level forms — Thread.exit ends
 	// the current thread; Thread.kill(t) ends t (MRI's deprecated spelling).
 	sdef("exit", func(vm *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {

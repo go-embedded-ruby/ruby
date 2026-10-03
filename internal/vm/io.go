@@ -346,7 +346,7 @@ func (vm *VM) registerIO() {
 		return object.IntValue(int64(vm.ioFd(o)))
 	}
 	cIO.define("fileno", fileno)
-	cIO.methods["to_i"] = cIO.methods["fileno"] // #to_i is a true alias of #fileno
+	aliasBuiltin(cIO, "to_i", "fileno") // a genuine alias: #original_name is :fileno, measured
 
 	// IO#pid (rb_io_pid): the pid of the child a stream was opened onto — only
 	// IO.popen makes one — and nil for every other stream. A closed stream raises
@@ -375,7 +375,7 @@ func (vm *VM) registerIO() {
 		}
 		return object.NilV
 	})
-	cIO.methods["to_path"] = cIO.methods["path"]
+	defineBuiltinSecondName(cIO, "to_path", "path")
 	// IO#inspect (rb_io_inspect): "#<Class:PATH>" when a path is known — a closed
 	// path stream appends " (closed)" — else "#<Class:fd N>" for an open plain
 	// descriptor and "#<Class:(closed)>" once it is closed. Defining it on IO (not
@@ -1669,7 +1669,7 @@ func defIOWrite(cls *RClass) {
 		return object.Bool(false)
 	})
 	// #isatty is a true alias of #tty?, as in MRI.
-	cls.methods["isatty"] = cls.methods["tty?"]
+	defineBuiltinSecondName(cls, "isatty", "tty?")
 	// IO#binmode marks the stream binary (#binmode? true) and, as MRI's
 	// rb_io_ascii8bit_binmode does, sets the external encoding to ASCII-8BIT and
 	// clears the internal encoding.
@@ -1949,7 +1949,7 @@ func defStringIORead(cls *RClass) {
 		return object.IntValue(int64(len(self.(*IOObj).buf)))
 	})
 	// #size is a true alias of #length (identical UnboundMethod), as in MRI.
-	cls.methods["size"] = cls.methods["length"]
+	defineBuiltinSecondName(cls, "size", "length")
 	cls.define("eof?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
 		ioCheckReadable(o) // MRI: eof? raises on a closed or non-readable stream
@@ -1957,7 +1957,7 @@ func defStringIORead(cls *RClass) {
 		return object.Bool(o.pos >= len(o.buf))
 	})
 	// #eof is a true alias of #eof?, as in MRI.
-	cls.methods["eof"] = cls.methods["eof?"]
+	defineBuiltinSecondName(cls, "eof", "eof?")
 	cls.define("pos", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
 		// A real IO/File raises on a closed stream; StringIO#pos tolerates it (MRI).
@@ -1967,7 +1967,7 @@ func defStringIORead(cls *RClass) {
 		return object.IntValue(int64(o.pos))
 	})
 	// #tell is a true alias of #pos, as in MRI.
-	cls.methods["tell"] = cls.methods["pos"]
+	defineBuiltinSecondName(cls, "tell", "pos")
 	cls.define("pos=", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
 		if o.closed && !ioIsStringIO(o) { // real IO/File raises; StringIO tolerates it
@@ -2264,7 +2264,7 @@ func defStringIORead(cls *RClass) {
 	})
 	// #each is a true alias of #each_line — it must share the method entry so
 	// IO.instance_method(:each) == IO.instance_method(:each_line), as in MRI.
-	cls.methods["each"] = cls.methods["each_line"]
+	defineBuiltinSecondName(cls, "each", "each_line")
 }
 
 // seekWhence resolves a seek / sysseek whence argument to a SEEK_* constant,

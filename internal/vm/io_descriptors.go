@@ -116,7 +116,7 @@ func defIOReadExtra(cls *RClass) {
 	// before defIOReadExtra): they must share the method entry so
 	// IO.instance_method(:each) == IO.instance_method(:each_line), as in MRI, and
 	// #each inherits each_line's separator/limit/$/ handling.
-	cls.methods["each"] = cls.methods["each_line"]
+	defineBuiltinSecondName(cls, "each", "each_line")
 	cls.define("sysread", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
 		ioCheckReadable(o)

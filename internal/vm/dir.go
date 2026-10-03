@@ -31,7 +31,7 @@ func (vm *VM) registerDir() {
 	def("pwd", dirPwd)
 	// getwd is a genuine alias of pwd (one shared Method record), so
 	// Dir.method(:getwd) == Dir.method(:pwd), as MRI's spec checks.
-	cDir.smethods["getwd"] = cDir.smethods["pwd"]
+	defineBuiltinSecondNameS(cDir, "getwd", "pwd")
 	// Dir.home(user=nil): with no argument (or nil) the current user's home,
 	// reading $HOME first and falling back to the passwd database; with a user
 	// name, that user's home from the passwd database, raising ArgumentError when
@@ -126,8 +126,8 @@ func (vm *VM) registerDir() {
 	def("delete", rm)
 	// rmdir and unlink are genuine aliases of delete (shared Method records), so
 	// Dir.method(:rmdir) == Dir.method(:delete), as MRI's specs check.
-	cDir.smethods["rmdir"] = cDir.smethods["delete"]
-	cDir.smethods["unlink"] = cDir.smethods["delete"]
+	defineBuiltinSecondNameS(cDir, "rmdir", "delete")
+	defineBuiltinSecondNameS(cDir, "unlink", "delete")
 	def("chdir", func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
 		var target string
 		if len(args) > 0 {
@@ -375,7 +375,7 @@ func (vm *VM) registerDirInstance(cDir *RClass) {
 		return object.IntValue(int64(dir.pos))
 	})
 	// tell is an alias of pos (same Method identity, as MRI's spec checks).
-	cDir.methods["tell"] = cDir.methods["pos"]
+	defineBuiltinSecondName(cDir, "tell", "pos")
 	d("seek", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		dir := self(v)
 		checkOpen(dir)
@@ -399,7 +399,7 @@ func (vm *VM) registerDirInstance(cDir *RClass) {
 		// trip. Works even on a closed handle.
 		return self(v).pathStr
 	})
-	cDir.methods["path"] = cDir.methods["to_path"] // path is an alias of to_path
+	defineBuiltinSecondName(cDir, "path", "to_path") // #path reports :path, measured
 	// fileno: rbgo's Dir has no underlying file descriptor, so — as MRI does on
 	// platforms without dirfd — it raises NotImplementedError (but IOError first
 	// when the handle is already closed).

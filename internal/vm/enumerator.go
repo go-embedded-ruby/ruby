@@ -631,7 +631,7 @@ func (vm *VM) registerEnumerator() {
 		return memo
 	}
 	d("each_with_object", withObject)
-	vm.cEnumerator.methods["with_object"] = vm.cEnumerator.methods["each_with_object"]
+	defineBuiltinSecondName(vm.cEnumerator, "with_object", "each_with_object")
 	// first/take pull only as many elements as requested, so they terminate even
 	// for unbounded enumerators such as Enumerator.produce or Array#cycle.
 	d("first", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {

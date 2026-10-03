@@ -418,7 +418,7 @@ func (vm *VM) registerLazy() {
 	// Alias the shared Method objects so instance_method identities match MRI
 	// (Enumerator::Lazy#collect == #map, #filter == #select, …) and the Lazy method
 	// whitelist (instance_methods(false)) carries every expected name.
-	alias := func(name, of string) { vm.cLazy.methods[name] = vm.cLazy.methods[of] }
+	alias := func(name, of string) { defineBuiltinSecondName(vm.cLazy, name, of) }
 	alias("collect", "map")
 	alias("filter", "select")
 	alias("find_all", "select")

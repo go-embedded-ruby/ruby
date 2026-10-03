@@ -112,12 +112,12 @@ func (vm *VM) registerWeakMap(mod *RClass) {
 	cls.define("include?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return object.Bool(self.(*WeakMapObj).wmIndex(args[0]) >= 0)
 	})
-	aliasBuiltin(cls, "key?", "include?")
-	aliasBuiltin(cls, "member?", "include?")
+	defineBuiltinSecondName(cls, "key?", "include?")
+	defineBuiltinSecondName(cls, "member?", "include?")
 	cls.define("size", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(int64(len(self.(*WeakMapObj).pairs)))
 	})
-	aliasBuiltin(cls, "length", "size")
+	defineBuiltinSecondName(cls, "length", "size")
 	cls.define("delete", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		m := self.(*WeakMapObj)
 		if i := m.wmIndex(args[0]); i >= 0 {
@@ -165,7 +165,7 @@ func (vm *VM) registerWeakMap(mod *RClass) {
 		}
 	}
 	cls.define("each", eachWith(func(p wmPair) []object.Value { return []object.Value{p.k, p.v} }))
-	aliasBuiltin(cls, "each_pair", "each")
+	defineBuiltinSecondName(cls, "each_pair", "each")
 	cls.define("each_key", eachWith(func(p wmPair) []object.Value { return []object.Value{p.k} }))
 	cls.define("each_value", eachWith(func(p wmPair) []object.Value { return []object.Value{p.v} }))
 	cls.define("inspect", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -180,6 +180,12 @@ func (vm *VM) registerWeakMap(mod *RClass) {
 		}
 		return object.NewString(head + ": " + strings.Join(parts, ", ") + ">")
 	})
+	// MRI defines no #to_s on either weak map -- #owner is Kernel there, and
+	// #to_s == #inspect is false -- so this alias is an over-definition. It is
+	// NOT removed yet, because removing it is gated on a separate defect: rbgo's
+	// Kernel#to_s omits the object address that MRI's rb_any_to_s always prints
+	// (`#<Plain>` where ruby gives `#<Plain:0x...>`, on main too), so dropping
+	// the alias today would fix #owner and lose the address. See issue #756.
 	aliasBuiltin(cls, "to_s", "inspect")
 }
 
@@ -296,5 +302,11 @@ func (vm *VM) registerWeakKeyMap(mod *RClass) {
 		m := self.(*WeakKeyMapObj)
 		return object.NewString(fmt.Sprintf("#<ObjectSpace::WeakKeyMap:0x%016x size=%d>", uint64(vm.refID(self)), len(m.entries)))
 	})
+	// MRI defines no #to_s on either weak map -- #owner is Kernel there, and
+	// #to_s == #inspect is false -- so this alias is an over-definition. It is
+	// NOT removed yet, because removing it is gated on a separate defect: rbgo's
+	// Kernel#to_s omits the object address that MRI's rb_any_to_s always prints
+	// (`#<Plain>` where ruby gives `#<Plain:0x...>`, on main too), so dropping
+	// the alias today would fix #owner and lose the address. See issue #756.
 	aliasBuiltin(cls, "to_s", "inspect")
 }

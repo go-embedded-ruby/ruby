@@ -412,7 +412,7 @@ func (vm *VM) registerARGF() {
 		}
 	}
 	d("each_line", eachLine)
-	aliasBuiltin(cls, "each", "each_line")
+	defineBuiltinSecondName(cls, "each", "each_line")
 
 	// readlines / to_a: every remaining line as an Array.
 	readlines := func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
@@ -427,7 +427,7 @@ func (vm *VM) registerARGF() {
 		}
 	}
 	d("readlines", readlines)
-	aliasBuiltin(cls, "to_a", "readlines")
+	defineBuiltinSecondName(cls, "to_a", "readlines")
 
 	// eof? / eof: io.c argf_eof — the question is about the CURRENT FILE, not the
 	// whole concatenation, so it is true at the end of each file in turn. Once the
@@ -444,7 +444,7 @@ func (vm *VM) registerARGF() {
 		return object.Bool(vm.send(a.cur, "eof?", nil, nil).Truthy())
 	}
 	d("eof?", eof)
-	aliasBuiltin(cls, "eof", "eof?")
+	defineBuiltinSecondName(cls, "eof", "eof?")
 
 	// lineno / lineno=: the cumulative line number ($.).
 	d("lineno", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -464,7 +464,7 @@ func (vm *VM) registerARGF() {
 		return object.NewString(a.curName)
 	}
 	d("filename", filename)
-	aliasBuiltin(cls, "path", "filename")
+	defineBuiltinSecondName(cls, "path", "filename")
 
 	// to_io / file: io.c argf_to_io / argf_file — the current file, open or closed.
 	// Neither looks ahead, so two reads inside one file see the same IO.
@@ -632,11 +632,11 @@ func (vm *VM) registerARGF() {
 		}
 	}
 	d("pos", delegate("pos", "no stream to tell"))
-	aliasBuiltin(cls, "tell", "pos")
+	defineBuiltinSecondName(cls, "tell", "pos")
 	d("pos=", delegate("pos=", "no stream to set position"))
 	d("seek", delegate("seek", "no stream to seek"))
 	d("fileno", delegate("fileno", "no stream"))
-	aliasBuiltin(cls, "to_i", "fileno")
+	defineBuiltinSecondName(cls, "to_i", "fileno")
 	d("set_encoding", delegate("set_encoding", "no stream to set encoding"))
 	d("external_encoding", delegate("external_encoding", "no stream"))
 	d("internal_encoding", delegate("internal_encoding", "no stream"))

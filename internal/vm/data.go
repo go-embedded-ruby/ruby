@@ -281,7 +281,7 @@ func setupData(vm *VM) {
 		return object.NewString(vm.dataInspect(self.(*RObject)))
 	})
 	// #inspect is a true alias of #to_s (shared Method record).
-	aliasBuiltin(cData, "inspect", "to_s")
+	defineBuiltinSecondName(cData, "inspect", "to_s")
 
 	bumpMethodSerial()
 }

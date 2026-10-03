@@ -41,7 +41,10 @@ func (vm *VM) registerENV() {
 	vm.consts["ENV"] = env
 
 	def := func(name string, fn NativeFn) { cls.define(name, fn) }
-	alias := func(newName, oldName string) { aliasBuiltin(cls, newName, oldName) }
+	// All ten of ENV's extra spellings are SECOND DEFINITIONS in MRI, not
+	// aliases: ENV.method(:length).original_name is :length there, not :size
+	// (measured for all ten).
+	alias := func(newName, oldName string) { defineBuiltinSecondName(cls, newName, oldName) }
 
 	// A sized Enumerator whose #size reports the current environment size,
 	// matching MRI's RETURN_SIZED_ENUMERATOR(ehash, 0, 0, rb_env_size).

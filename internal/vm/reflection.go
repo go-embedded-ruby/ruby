@@ -253,7 +253,7 @@ func (vm *VM) registerReflection() {
 	}
 	cUnbound.define("==", unboundEq)
 	// UnboundMethod#eql? is an alias of UnboundMethod#== (shared record).
-	aliasBuiltin(cUnbound, "eql?", "==")
+	defineBuiltinSecondName(cUnbound, "eql?", "==")
 	cUnbound.define("hash", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		u := self.(*UnboundMethod)
 		return object.IntValue(int64(reflect.ValueOf(u.owner).Pointer()) ^ int64(methodDefKey(u.m)))

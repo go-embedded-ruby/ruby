@@ -69,7 +69,7 @@ func (vm *VM) registerMethodReflect() {
 	vm.cMethod.define("==", methodEq)
 	// Method#eql? is an alias of Method#== (they share one record, so
 	// Method.instance_method(:eql?) == Method.instance_method(:==), as in MRI).
-	aliasBuiltin(vm.cMethod, "eql?", "==")
+	defineBuiltinSecondName(vm.cMethod, "eql?", "==")
 	vm.cMethod.define("hash", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		b := self.(*BoundMethod)
 		return object.IntValue(vm.hashValue(b.recv) ^ methodDefHash(b.m))
@@ -137,9 +137,68 @@ func (vm *VM) composeCallable(self, other object.Value, forward bool) object.Val
 // keeps a single shared *Method, which is how MRI models genuine built-in
 // aliases such as Method#eql?/#== and String#size/#length.
 func aliasBuiltin(cls *RClass, newName, oldName string) {
-	if m, ok := cls.methods[oldName]; ok {
-		cls.methods[newName] = m
+	m, ok := cls.methods[oldName]
+	if !ok {
+		// A missing old name used to mean "do nothing", silently -- and that is
+		// how Float#inspect came to be owned by Kernel: cFloat had no own to_s
+		// when numeric_edges.go asked for the alias, so nothing was installed and
+		// nothing said so. A registration path that can fail quietly is not
+		// checkable by any test that only looks at the names which ARE there,
+		// so this panics instead. It runs at VM construction, so a wrong site
+		// cannot reach a user program.
+		panic("aliasBuiltin: " + cls.name + "#" + oldName + " is not defined yet (asked for alias " + newName + ")")
 	}
+	cls.methods[newName] = m
+}
+
+// defineBuiltinSecondName gives an existing built-in a SECOND name that is its
+// own original_name, which is what MRI does for most of the pairs that look like
+// aliases: it calls rb_define_method a second time over the same C function.
+// That yields a distinct method entry -- so #name and #original_name are both
+// the new name -- while rb_method_definition_eq still compares the shared cfunc,
+// so #== answers true. Measured, for the 60 sites in this shape:
+//
+//	Hash.instance_method(:length).original_name   ruby 4.0.5  :length
+//	Proc.instance_method(:yield).original_name    ruby 4.0.5  :yield
+//	Object.instance_method(:fail).original_name   ruby 4.0.5  :fail
+//
+// aliasBuiltin remains for the 20 sites that really are rb_define_alias, where
+// MRI reports the OLD name (Numeric#imag of #imaginary, say). The two helpers
+// differ in exactly one observable, and the choice per site is measured, never
+// guessed -- see the table in issue #754.
+func defineBuiltinSecondName(cls *RClass, newName, oldName string) {
+	secondNameIn(cls.methods, "defineBuiltinSecondName", cls.name+"#", newName, oldName)
+}
+
+// defineBuiltinSecondNameS is defineBuiltinSecondName for a SINGLETON method
+// (Dir.getwd over Dir.pwd, Thread.fork over Thread.start), whose records live in
+// a separate table. MRI's answer is per class AND per table -- Complex#imag is a
+// second definition where Numeric#imag is a real alias, measured -- so neither
+// table can be assumed to follow the other.
+func defineBuiltinSecondNameS(cls *RClass, newName, oldName string) {
+	secondNameIn(cls.smethods, "defineBuiltinSecondNameS", cls.name+".", newName, oldName)
+}
+
+// aliasBuiltinS is aliasBuiltin for a singleton method: a genuine
+// rb_define_alias, where MRI reports the OLD name as #original_name.
+func aliasBuiltinS(cls *RClass, newName, oldName string) {
+	m, ok := cls.smethods[oldName]
+	if !ok {
+		panic("aliasBuiltinS: " + cls.name + "." + oldName + " is not defined yet (asked for alias " + newName + ")")
+	}
+	cls.smethods[newName] = m
+}
+
+func secondNameIn(tbl map[string]*Method, who, qualified, newName, oldName string) {
+	m, ok := tbl[oldName]
+	if !ok {
+		panic(who + ": " + qualified + oldName + " is not defined yet (asked for " + newName + ")")
+	}
+	clone := *m
+	clone.name = newName
+	clone.origName = newName
+	clone.defOf = methodDefRecord(m)
+	tbl[newName] = &clone
 }
 
 // isLambdaCallable reports whether a callable enforces lambda argument
