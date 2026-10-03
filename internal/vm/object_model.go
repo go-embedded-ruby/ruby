@@ -241,6 +241,36 @@ type Method struct {
 	// are one and the same method to MRI even though each is a distinct record, so
 	// equality keys on the name rather than the record pointer.
 	viaMissing bool
+	// defOf names the record holding the DEFINITION this method shares, for a
+	// native body that an `alias` copied. MRI keeps a method entry (owner plus
+	// called_id) separate from its definition and shares the latter, so
+	// rb_method_entry_eq -- which method_eq consults (proc.c r4:2007) -- compares
+	// definitions and answers true for an alias and its original:
+	//
+	//	String.instance_method(:dedup) == String.instance_method(:-@)
+	//	  ruby 4.0.5  true
+	//
+	// An iseq- or proc-backed method needs no such field: the clone shares the
+	// iseq/proc pointer, which already IS the definition's identity. A native has
+	// neither, and keying it on the Go func pointer is not an option: every
+	// closure built from one literal (each attr_reader getter, say) shares a code
+	// pointer, so that key would equate methods MRI holds apart. Hence the
+	// definition is named explicitly, at the one place that copies a record.
+	//
+	// nil means "this record is its own definition". Redefining the original
+	// afterwards installs a NEW record, which this one does not point at, so the
+	// alias stops comparing equal to the name it was made from -- as in MRI
+	// (measured: true before the redefinition, false after).
+	defOf *Method
+}
+
+// methodDefRecord returns the record that holds m's definition: the original a
+// native alias was copied from, or m itself.
+func methodDefRecord(m *Method) *Method {
+	if m.defOf != nil {
+		return m.defOf
+	}
+	return m
 }
 
 // RClass is a class (the live, mutable method table that makes monkey-patching,
@@ -1015,11 +1045,26 @@ func (vm *VM) aliasMethod(definee *RClass, newName, oldName string) {
 		raise("NameError", "undefined method '%s' for class '%s'", oldName, definee.name)
 	}
 	// Copy the method record under the new name, retargeting its name while
-	// keeping the original body, owner and any AOT-compiled form. The original
-	// name is recovered through the alias by methodOriginalName (an iseq-backed
-	// method shares its iseq, whose Name is the original; a transplanted body
-	// pins origName), so Kernel#__method__ reports it through the alias.
+	// keeping the original body, owner and any AOT-compiled form.
+	//
+	// The original name is PINNED here rather than recovered later.
+	// methodOriginalName could recover it for two of the three kinds -- an
+	// iseq-backed method shares its iseq, whose Name is the original, and a
+	// transplanted body already carries origName -- but a NATIVE method has
+	// neither, so the fallback returned the alias's own name:
+	//
+	//	class String; alias my_up upcase; end
+	//	String.instance_method(:my_up).original_name
+	//	  ruby 4.0.5  :upcase
+	//	  before      :my_up
+	//
+	// Pinning covers all three uniformly, and chains correctly: aliasing an alias
+	// asks methodOriginalName again, which now finds the pinned original rather
+	// than the intermediate name (ruby answers :upcase for an alias of an alias
+	// too, measured).
 	clone := *m
+	clone.origName = methodOriginalName(m)
+	clone.defOf = methodDefRecord(m)
 	clone.name = newName
 	clone.undefined = false
 	definee.methods[newName] = &clone
