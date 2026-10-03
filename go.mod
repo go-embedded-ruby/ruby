@@ -122,7 +122,7 @@ require (
 	github.com/go-ruby-omniauth/omniauth v0.0.0-20260923203916-25cee0673a57
 	github.com/go-ruby-openbao/openbao v0.0.0-20260717071447-328a091965dd
 	github.com/go-ruby-openstack/openstack v0.0.0-20260923203924-9000c374d63c
-	github.com/go-ruby-opentelemetry/opentelemetry v0.0.0-20260826125821-3371d170a93c
+	github.com/go-ruby-opentelemetry/opentelemetry v0.0.0-20261003102038-c7cc0d3679e1
 	github.com/go-ruby-opentype/opentype v0.2.0
 	github.com/go-ruby-optparse/optparse v0.0.0-20260917100925-33b18da76c37
 	github.com/go-ruby-ostruct/ostruct v0.0.0-20260927145508-48818b0ca96e
@@ -411,12 +411,13 @@ require (
 	go.mongodb.org/mongo-driver/v2 v2.9.1 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.68.0 // indirect
-	go.opentelemetry.io/otel v1.46.0 // indirect
+	go.opentelemetry.io/otel v1.47.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.43.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.43.0 // indirect
-	go.opentelemetry.io/otel/metric v1.46.0 // indirect
-	go.opentelemetry.io/otel/sdk v1.46.0 // indirect
-	go.opentelemetry.io/otel/trace v1.46.0 // indirect
+	go.opentelemetry.io/otel/log v1.47.0 // indirect
+	go.opentelemetry.io/otel/metric v1.47.0 // indirect
+	go.opentelemetry.io/otel/sdk v1.47.0 // indirect
+	go.opentelemetry.io/otel/trace v1.47.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.10.0 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
