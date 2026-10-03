@@ -16,10 +16,10 @@ import (
 // and a define_method transplanting another method's body both copy the record
 // while keeping the same iseq / proc, so keying on those pointers makes them
 // compare equal — matching MRI's "compare the definition, not the record". A
-// native method is keyed by its own record pointer (two natives are equal only
-// when they literally share the record, e.g. an intentional alias installed via
-// aliasBuiltin), which keeps distinct closures generated from one literal — such
-// as every attr_reader getter — correctly unequal.
+// native method is keyed by the record holding its definition — itself, or the
+// original an `alias` copied it from (Method.defOf) — which keeps distinct
+// closures generated from one literal, such as every attr_reader getter,
+// correctly unequal while still making an alias equal to its original.
 func methodDefKey(m *Method) uintptr {
 	switch {
 	case m.iseq != nil:
@@ -27,7 +27,7 @@ func methodDefKey(m *Method) uintptr {
 	case m.proc != nil:
 		return reflect.ValueOf(m.proc).Pointer()
 	default:
-		return reflect.ValueOf(m).Pointer()
+		return reflect.ValueOf(methodDefRecord(m)).Pointer()
 	}
 }
 
