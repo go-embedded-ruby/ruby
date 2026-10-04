@@ -352,7 +352,10 @@ JRuby**):
   (`getrlimit`/`setrlimit` with the `RLIMIT_*` constants), plus
   `pid`/`ppid`/`uid`/`gid`/`euid`/`egid`. There is **no `Process.fork`**
   (`Process.respond_to?(:fork)` is `false`) — Go's runtime cannot be forked
-  safely; `spawn` is the supported way to start a child.
+  safely; `spawn` is the supported way to start a child. **`Kernel#fork` is a
+  different story**: `fork { ... }` *does* exist and runs the block in the same
+  process — see the table under *Known divergences*, because code that forks to
+  isolate or to drop privileges gets neither here.
 - **Pattern matching (`case`/`in`):** value, variable-binding, class/constant,
   array (incl. splat and nested), hash (`deconstruct_keys`, `**rest`/`**nil`),
   find (`[*pre, x, *post]`), pin (`^x`) and alternative (`a | b`) patterns;
@@ -662,6 +665,7 @@ Otherwise:
 | magic encoding comments | `# encoding: ascii-8bit` is not honoured — a literal still reports `UTF-8`, where MRI reports `ASCII-8BIT` |
 | `pp` | neither `Kernel#pp` nor `require "pp"` exists (`require "prettyprint"` does work) |
 | `Process.fork` | does not exist — Go's runtime cannot be forked safely |
+| `Kernel#fork` | **exists, and does not fork.** `fork { ... }` runs the block **in the same process**, so the “child” mutates the parent's globals, `ENV` and working directory, and returns a synthetic pid (`100001`, counting up) while `Process.pid` is unchanged. Under MRI the block runs in a real child and the parent is untouched. A `SystemExit` raised inside the block unwinds the whole program |
 | `BEGIN { }` / `END { }` | do not parse (`parse error: unexpected "{" after statement`). Everything else the front-end was known to refuse now parses — see [go-ruby-parser](https://github.com/go-ruby-parser/parser) |
 | `Thread#backtrace` for another thread | raises `NotImplementedError`; rbgo keeps one frame stack per VM, not per thread |
 
@@ -788,9 +792,24 @@ The contract, as measured rather than intended:
   returns an error whose message is `ArgumentError: bad`, and writes nothing to
   `out`. A syntax error comes back the same way, with a line number:
   `parse error at line 1: ...`.
-- **Every call is a fresh VM.** A global set in one `Run` is gone in the next, and
-  nothing is shared between calls. There is no exported way to hold a VM open,
-  pre-load code into it, call a Ruby method from Go, or pass Go values in.
+- **Every call is a fresh VM — but the same process.** The Ruby heap is not
+  shared: a global, a constant and a `String` monkey-patch set in one `Run` are
+  all gone in the next. **Process-global state is shared**, with the host and
+  with every other `Run`: `ENV`, the working directory, open files, signal
+  handlers and the filesystem. A script that runs `ENV["PATH"] = "/attacker/bin"`
+  and `Dir.chdir("/tmp")` changes them *for the host Go program*, and they stay
+  changed after `Run` returns — measured: a host whose `PATH` was 860 bytes and
+  whose cwd was its build directory came back with a 13-byte `PATH` and a cwd of
+  `/private/tmp`. Because `require_relative` resolves against that same working
+  directory (next bullet), one `Run` can also write a file that a later `Run`
+  loads. There is no exported way to hold a VM open, pre-load code into it, call
+  a Ruby method from Go, or pass Go values in.
+- **A program that exits is reported as success.** `exit`, `exit!` and `abort`
+  stop the program and `Run` returns **`nil`**, so an embedder cannot tell
+  “finished” from “stopped”: `abort "fatal"` writes `fatal` to `out` and reports
+  no error, and `exit 3` loses the 3. Only a Ruby *exception* becomes a Go error.
+  The `rbgo` CLI recovers the status through `internal/vm`, which is unreachable
+  from outside, so today there is no way for an embedder to obtain it.
 - **`require_relative` resolves against the process working directory**, not
   against a script, because `Run` has no file to anchor to. From a different
   working directory the same program fails with
@@ -798,6 +817,38 @@ The contract, as measured rather than intended:
 
 The VM stays alive after `Run` returns as long as something still references it —
 which is what lets an event-driven embedded program keep running.
+
+### `Run` is not a sandbox
+
+Conformance is the goal, and MRI is not sandboxed either — so neither is this.
+That is the intended behaviour and not a defect, but it is worth stating plainly,
+because MRI is normally a CLI a person invokes on their own code, whereas `Run`
+is a function someone links into a server. **Do not pass untrusted Ruby to it.**
+Measured, through the one public function and nothing else:
+
+- **A shell.** `system`, backticks, `%x{}`, `IO.popen` and `Process.spawn` all
+  spawn real processes as the host's uid, and anything with a shell
+  metacharacter goes to `/bin/sh -c`, so pipes, `;`, `$(...)`, globs and
+  redirection all work.
+- **The whole filesystem**, read and write, wherever the host's uid can reach:
+  `File.read("/etc/passwd")` returns it, `Dir.glob("~/.ssh/*")` lists 34 entries
+  here, and reads and writes outside the working directory are unrestricted.
+  `File.symlink` works, so a readable path can be pointed anywhere.
+- **The network.** A script opened a listening `TCPServer`, connected to it with
+  `TCPSocket` and exchanged bytes, all inside one `Run`.
+- **Any Ruby file on disk**: `require` and `load` take absolute paths.
+- **The host's environment and working directory**, as described above.
+
+Two things it does *not* reach, deliberately: there is **no path from Ruby to the
+host's Go state** (no `RubyVM`, `ObjectSpace` is a stub, `fiddle` does not load,
+a `.so` is refused, and CGO is 0), and the host's standard descriptors are **not**
+exposed — `IO.for_fd(1)` raises `Errno::EBADF` where MRI writes to the real
+descriptor, so a script cannot write outside the `out` you passed.
+
+There is also no call-depth limit yet: runaway recursion overflows the **Go**
+stack, which is a fatal runtime error that `recover()` cannot contain, so it
+takes the host process with it. Tracked in
+[#768](https://github.com/go-embedded-ruby/ruby/issues/768).
 
 ## WebAssembly
 
