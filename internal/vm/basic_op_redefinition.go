@@ -210,24 +210,30 @@ func (vm *VM) resolveBasicOpOverride(op bytecode.Op, recv object.Value, cls *RCl
 		return nil
 	}
 	if m == nil {
-		if _, had := per[op]; had {
-			// The built-in record was REMOVED (remove_method :+ / undef_method).
-			// MRI raises there, because the opcode's specialisation is gone along
-			// with the method:
-			//
-			//	class Integer; remove_method :+; end
-			//	1 + 2    ruby 4.0.5  NoMethodError: undefined method '+' for an
-			//	                     instance of Integer
-			//
-			// Falling back to the inline path would make the removal silently do
-			// nothing -- and installing the records is what makes remove_method
-			// SUCCEED here at all, so without this the new records would have
-			// turned a NameError into a no-op.
-			return basicOpRemoved
-		}
-		// No record before, none now: a pair MRI does not define either
-		// (Hash#+). The inline path already produces MRI's error for it.
-		return nil
+		// per[op] is necessarily non-nil here, so this IS a removal: the compare
+		// above returned for m == per[op], and m is nil, so per[op] cannot be.
+		// The arm that used to test for it with `if _, had := per[op]; had` --
+		// and the `return nil` under it for "no record before, none now" --
+		// could not be reached. The coverage ratchet is what found that: the
+		// function sat at 93.8% with exactly one unreachable block, and the
+		// case the dead arm was written for (Hash#+, which MRI does not define
+		// either) is already answered by the m == per[op] compare, where both
+		// sides are nil. wave57_guard_internals_test.go asserts that Hash#+
+		// resolves to nil, and it still does -- by the earlier return.
+		//
+		// The built-in record was REMOVED (remove_method :+ / undef_method).
+		// MRI raises there, because the opcode's specialisation is gone along
+		// with the method:
+		//
+		//	class Integer; remove_method :+; end
+		//	1 + 2    ruby 4.0.5  NoMethodError: undefined method '+' for an
+		//	                     instance of Integer
+		//
+		// Falling back to the inline path would make the removal silently do
+		// nothing -- and installing the records is what makes remove_method
+		// SUCCEED here at all, so without this the new records would have
+		// turned a NameError into a no-op.
+		return basicOpRemoved
 	}
 	return m
 }
