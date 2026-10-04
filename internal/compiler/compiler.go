@@ -713,13 +713,30 @@ func (c *Compiler) compileNode1(n ast.Node) {
 	case *ast.StringLit:
 		b.emit(bytecode.OpPushConst, b.addConst(c.newStrLit(v.Value)), 0)
 	case *ast.StrInterp:
-		// Concatenate each part coerced with to_s onto a growing string.
-		b.emit(bytecode.OpPushConst, b.addConst(object.NewString("")), 0)
+		// MRI's concatstrings: push each part, then join them in one step. This
+		// used to push "" and fold the parts on with OpAdd, which made an
+		// interpolated literal depend on String#+ -- and, now that the operator
+		// opcodes honour a redefinition, `class String; def +(o); :X; end; end`
+		// broke every "#{}" in the program. MRI never dispatches #+ here, and
+		// neither does this.
+		//
+		// A literal segment is also pushed AS IS. The old shape sent #to_s to
+		// every part including the literal ones, so a redefined String#to_s broke
+		// interpolation too (measured on main, before any of this: ruby answers
+		// "A1B", rbgo raised TypeError). MRI emits its tostring only for the
+		// embedded expressions, which is what the type switch below reproduces.
 		for _, part := range v.Parts {
 			c.compileNode(part)
-			b.emit(bytecode.OpSend, b.addName("to_s"), 0)
-			b.emit(bytecode.OpAdd, 0, 0)
+			if _, literal := part.(*ast.StringLit); !literal {
+				// MRI's `dup; objtostring; anytostring`: the original value is kept
+				// below the #to_s result, because when #to_s does not return a
+				// String the fallback renders the VALUE, not the result.
+				b.emit(bytecode.OpDup, 0, 0)
+				b.emit(bytecode.OpSend, b.addName("to_s"), 0)
+				b.emit(bytecode.OpAnyToString, 0, 0)
+			}
 		}
+		b.emit(bytecode.OpConcatStrings, len(v.Parts), 0)
 	case *ast.SymbolLit:
 		// Intern the box so every `:name` literal across the program shares one
 		// Value: :foo.equal?(:foo) then holds by pointer, and the const pool holds

@@ -609,51 +609,55 @@ type VM struct {
 	// paperTrail holds the model-versioning state (require "paper_trail"): the
 	// shared version store, per-class has_paper_trail config, request whodunnit
 	// and the injectable clock. Created once by registerPaperTrail.
-	paperTrail                         *paperTrailState
-	ajBases                            map[*RClass]*activejob.Base        // ActiveJob: library job class built per `class … < ActiveJob::Base` subclass (class-dispatch seam)
-	ajJobOf                            map[*RObject]*activejob.Job        // ActiveJob: Ruby job instance -> backing library *Job
-	ajInstOf                           map[*activejob.Job]*RObject        // ActiveJob: library *Job -> Ruby job instance
-	ajTestAdapters                     map[*RClass]*activejob.TestAdapter // ActiveJob: per-class :test adapter
-	ajStack                            []*RObject                         // ActiveJob: instance stack the inline #perform seam reads
-	ajLastResult                       object.Value                       // ActiveJob: last #perform return value (perform_now's result)
-	ajArgs                             *activejob.Arguments               // ActiveJob: module-level ActiveJob::Arguments serializer (GlobalID seam wired in registerActiveJob)
-	cActionMailerBase                  *RClass                            // ActionMailer::Base, the superclass every mailer subclasses (require "action_mailer"), backed by go-ruby-actionmailer
-	cActionMailerDelivery              *RClass                            // ActionMailer::MessageDelivery, the lazy proxy a mailer action returns
-	cActionMailerAttachments           *RClass                            // the internal `attachments` proxy class (Mail::AttachmentsList analogue)
-	amDefs                             map[*RClass]*amDef                 // ActionMailer: per-mailer-class default/delivery/hook declarations, merged down the chain at delivery time
-	amDeliveries                       *object.Array                      // ActionMailer: the shared ActionMailer::Base.deliveries Array the :test delivery method appends to
-	sftpClasses                        *sftpClassSet                      // Net::SFTP: the wrapper classes stamped on returned Attributes / Name / File values (require "net/sftp")
-	amMailerOf                         map[*RObject]*actionmailer.Mailer  // ActionMailer: mailer instance -> library *Mailer of its running action (the mail/attachments/headers seam)
-	amRenderer                         object.Value                       // ActionMailer: the Ruby renderer the RenderBody seam sends #render to (Action View wiring / test stub)
-	amEnqueuer                         object.Value                       // ActionMailer: the Ruby enqueuer the deliver_later seam sends #enqueue to (Active Job wiring / test stub)
-	asConfig                           *activestorage.Config              // ActiveStorage process config (require "active_storage"); nil until first use, then a deterministic in-process config (MemStore + DiskService temp dir)
-	cACChannelBase                     *RClass                            // ActionCable::Channel::Base, the superclass a subscription's channel subclass extends, backed by go-ruby-actioncable
-	acServer                           object.Value                       // memoized ActionCable.server singleton (an ActionCable::Server over an in-process async adapter)
-	railtieSeams                       map[any]*railtieSeam               // per-railtie/engine/app deferred initializer blocks, keyed by the library ctx object; run inline by the RunInitializer seam during Application#initialize!
-	railsApp                           *RailsAppVal                       // the Ruby Application registered via Rails.application= (the rails meta-gem's top-level app); nil before boot
-	deviseConfig                       *DeviseConfig                      // the shared Devise.config the DatabaseAuthenticatable Warden strategy authenticates against
-	cHanamiRouter                      *RClass                            // Hanami::Router (require "hanami/router"), backed by go-ruby-hanami; wraps a *hanami.Router
-	cHanamiAction                      *RClass                            // Hanami::Action (require "hanami/action"), the action-lifecycle superclass a user subclasses
-	cHanamiRequest                     *RClass                            // Hanami::Action::Request, the request handed to a Hanami action's #handle
-	cHanamiResponse                    *RClass                            // Hanami::Action::Response, the mutable response a Hanami action's #handle writes into
-	cHanamiFlash                       *RClass                            // Hanami::Action::Flash, the two-generation flash store on the request/response
-	hanamiActionDefs                   map[*RClass]*hanamiActionDef       // per-Hanami::Action-subclass before/after/handle_exception/accept/config declarations
-	cACRouteSet                        *RClass                            // ActionDispatch::Routing::RouteSet (require "action_dispatch"), backed by go-ruby-actionpack/routing
-	cACMapper                          *RClass                            // ActionDispatch::Routing::Mapper, the self the routes DSL (draw) runs against
-	cACRequest                         *RClass                            // ActionDispatch::Request, over a Rack env
-	cACResponse                        *RClass                            // ActionDispatch::Response, the mutable Rack response
-	cACParameters                      *RClass                            // ActionController::Parameters (strong parameters)
-	cACControllerBase                  *RClass                            // ActionController::Base (require "action_controller"), the controller superclass a user subclasses
-	acControllerDefs                   map[*RClass]*acControllerDef       // per-ActionController::Base-subclass before/after/around/rescue_from/view-context declarations
-	cMinitestSpec                      *RClass                            // Minitest::Spec, the spec-DSL subclass of Minitest::Test
-	minitestRunnables                  []*RClass                          // Minitest::Test subclasses registered via the inherited hook, in definition order (the autorun run set)
-	minitestCurInstance                object.Value                       // the test instance currently running (backs bare must_*/wont_* and _)
-	minitestAutorunDone                bool                               // guards the require "minitest/autorun" at_exit hook against a double run
-	factoryBotReg                      *factorybot.Registry               // the per-VM factory_bot registry (require "factory_bot"): FactoryBot.define/build/create map onto it; the Build/Persist/Block seams are wired to this VM's object model
-	facterFacter                       *facter.Facter                     // the per-VM Facter adapter (require "facter"), from go-ruby-facter over go-facter: Facter.value/[]/fact/add/to_hash read it; custom facts (Facter.add … setcode) never leak across interpreters
-	fastGettext                        *fastgettext.Instance              // the per-VM FastGettext instance (require "fast_gettext"), from go-ruby-fast-gettext: text domains, current locale/text_domain and the translation cache never leak across interpreters
-	cOpenSSLDigest                     *RClass
-	cArray, cHash, cRange              *RClass
+	paperTrail               *paperTrailState
+	ajBases                  map[*RClass]*activejob.Base        // ActiveJob: library job class built per `class … < ActiveJob::Base` subclass (class-dispatch seam)
+	ajJobOf                  map[*RObject]*activejob.Job        // ActiveJob: Ruby job instance -> backing library *Job
+	ajInstOf                 map[*activejob.Job]*RObject        // ActiveJob: library *Job -> Ruby job instance
+	ajTestAdapters           map[*RClass]*activejob.TestAdapter // ActiveJob: per-class :test adapter
+	ajStack                  []*RObject                         // ActiveJob: instance stack the inline #perform seam reads
+	ajLastResult             object.Value                       // ActiveJob: last #perform return value (perform_now's result)
+	ajArgs                   *activejob.Arguments               // ActiveJob: module-level ActiveJob::Arguments serializer (GlobalID seam wired in registerActiveJob)
+	cActionMailerBase        *RClass                            // ActionMailer::Base, the superclass every mailer subclasses (require "action_mailer"), backed by go-ruby-actionmailer
+	cActionMailerDelivery    *RClass                            // ActionMailer::MessageDelivery, the lazy proxy a mailer action returns
+	cActionMailerAttachments *RClass                            // the internal `attachments` proxy class (Mail::AttachmentsList analogue)
+	amDefs                   map[*RClass]*amDef                 // ActionMailer: per-mailer-class default/delivery/hook declarations, merged down the chain at delivery time
+	amDeliveries             *object.Array                      // ActionMailer: the shared ActionMailer::Base.deliveries Array the :test delivery method appends to
+	sftpClasses              *sftpClassSet                      // Net::SFTP: the wrapper classes stamped on returned Attributes / Name / File values (require "net/sftp")
+	amMailerOf               map[*RObject]*actionmailer.Mailer  // ActionMailer: mailer instance -> library *Mailer of its running action (the mail/attachments/headers seam)
+	amRenderer               object.Value                       // ActionMailer: the Ruby renderer the RenderBody seam sends #render to (Action View wiring / test stub)
+	amEnqueuer               object.Value                       // ActionMailer: the Ruby enqueuer the deliver_later seam sends #enqueue to (Active Job wiring / test stub)
+	asConfig                 *activestorage.Config              // ActiveStorage process config (require "active_storage"); nil until first use, then a deterministic in-process config (MemStore + DiskService temp dir)
+	cACChannelBase           *RClass                            // ActionCable::Channel::Base, the superclass a subscription's channel subclass extends, backed by go-ruby-actioncable
+	acServer                 object.Value                       // memoized ActionCable.server singleton (an ActionCable::Server over an in-process async adapter)
+	railtieSeams             map[any]*railtieSeam               // per-railtie/engine/app deferred initializer blocks, keyed by the library ctx object; run inline by the RunInitializer seam during Application#initialize!
+	railsApp                 *RailsAppVal                       // the Ruby Application registered via Rails.application= (the rails meta-gem's top-level app); nil before boot
+	deviseConfig             *DeviseConfig                      // the shared Devise.config the DatabaseAuthenticatable Warden strategy authenticates against
+	cHanamiRouter            *RClass                            // Hanami::Router (require "hanami/router"), backed by go-ruby-hanami; wraps a *hanami.Router
+	cHanamiAction            *RClass                            // Hanami::Action (require "hanami/action"), the action-lifecycle superclass a user subclasses
+	cHanamiRequest           *RClass                            // Hanami::Action::Request, the request handed to a Hanami action's #handle
+	cHanamiResponse          *RClass                            // Hanami::Action::Response, the mutable response a Hanami action's #handle writes into
+	cHanamiFlash             *RClass                            // Hanami::Action::Flash, the two-generation flash store on the request/response
+	hanamiActionDefs         map[*RClass]*hanamiActionDef       // per-Hanami::Action-subclass before/after/handle_exception/accept/config declarations
+	cACRouteSet              *RClass                            // ActionDispatch::Routing::RouteSet (require "action_dispatch"), backed by go-ruby-actionpack/routing
+	cACMapper                *RClass                            // ActionDispatch::Routing::Mapper, the self the routes DSL (draw) runs against
+	cACRequest               *RClass                            // ActionDispatch::Request, over a Rack env
+	cACResponse              *RClass                            // ActionDispatch::Response, the mutable Rack response
+	cACParameters            *RClass                            // ActionController::Parameters (strong parameters)
+	cACControllerBase        *RClass                            // ActionController::Base (require "action_controller"), the controller superclass a user subclasses
+	acControllerDefs         map[*RClass]*acControllerDef       // per-ActionController::Base-subclass before/after/around/rescue_from/view-context declarations
+	cMinitestSpec            *RClass                            // Minitest::Spec, the spec-DSL subclass of Minitest::Test
+	minitestRunnables        []*RClass                          // Minitest::Test subclasses registered via the inherited hook, in definition order (the autorun run set)
+	minitestCurInstance      object.Value                       // the test instance currently running (backs bare must_*/wont_* and _)
+	minitestAutorunDone      bool                               // guards the require "minitest/autorun" at_exit hook against a double run
+	factoryBotReg            *factorybot.Registry               // the per-VM factory_bot registry (require "factory_bot"): FactoryBot.define/build/create map onto it; the Build/Persist/Block seams are wired to this VM's object model
+	facterFacter             *facter.Facter                     // the per-VM Facter adapter (require "facter"), from go-ruby-facter over go-facter: Facter.value/[]/fact/add/to_hash read it; custom facts (Facter.add … setcode) never leak across interpreters
+	fastGettext              *fastgettext.Instance              // the per-VM FastGettext instance (require "fast_gettext"), from go-ruby-fast-gettext: text domains, current locale/text_domain and the translation cache never leak across interpreters
+	cOpenSSLDigest           *RClass
+	cArray, cHash, cRange    *RClass
+	// basicOps records what each specialised operator resolved to at the end of
+	// bootstrap, so the operator opcodes can tell a built-in from a
+	// redefinition. See basic_op_redefinition.go.
+	basicOps                           *basicOpSnapshot
 	cProc                              *RClass
 	cMethod                            *RClass
 	cEnumerator                        *RClass
@@ -1295,6 +1299,18 @@ func NewWithStderr(out, errOut io.Writer) *VM {
 	vm.includeStringIOEnumerable() // StringIO mixes in Enumerable; after the prelude so the module exists
 	vm.finishARGF()                // ARGF.class mixes in Enumerable and ARGF.argv binds to ARGV; after the prelude, and after ARGV exists
 	vm.installHashKeyHook()
+	// Record what each specialised operator resolves to while nothing has touched
+	// it, so the operator opcodes can tell a built-in from a redefinition.
+	//
+	// It has to be HERE and not at the end of bootstrap: bootstrap registers the
+	// natives, and the prelude — which supplies Comparable#< and so the ordering
+	// operators of every Comparable class — runs after it. Snapshotting too early
+	// recorded nil for Integer#<, so the guard saw Comparable#< as "a
+	// redefinition", dispatched it, and its body's own `< 0` came straight back:
+	// `1 < 2` recursed until the Go stack was exhausted, with nothing redefined
+	// at all. Measured, on 18 of the 88 (class, operator) pairs. The snapshot and
+	// the guard must therefore ask the same question at the same time.
+	vm.snapshotBasicOperators()
 	// The prelude and built-ins are loaded; arm the level-2 AOT top level so the
 	// next Run (the user program) dispatches to the compiled aotMain, if one was
 	// linked in.
@@ -3126,6 +3142,26 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				elems = append(elems, a2.Elems...)
 				elems = append(elems, b2.Elems...)
 				push(object.NewArrayFromSlice(elems))
+			case bytecode.OpAnyToString:
+				// MRI's anytostring: keep the #to_s result when it is a String,
+				// else render the ORIGINAL value with rb_any_to_s. The value sits
+				// under the result because the compiler dup'd it.
+				res := pop()
+				orig := pop()
+				if _, ok := res.(*object.String); ok {
+					push(res)
+				} else {
+					push(object.NewString(vm.anyToSForConcat(orig)))
+				}
+			case bytecode.OpConcatStrings:
+				// MRI's concatstrings: join A already-pushed parts into one fresh,
+				// unfrozen String. Deliberately NOT String#+ — see the compiler's
+				// StrInterp case and basic_op_redefinition.go.
+				n := in.A
+				parts := stack[len(stack)-n:]
+				joined := vm.concatStringParts(parts)
+				stack = stack[:len(stack)-n]
+				push(joined)
 			case bytecode.OpSendArray:
 				argsArr := pop().(*object.Array)
 				recv := pop()
