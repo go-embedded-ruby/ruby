@@ -1,6 +1,6 @@
 module github.com/go-embedded-ruby/ruby
 
-go 1.26.4
+go 1.26.6
 
 require (
 	github.com/alicebob/miniredis/v2 v2.39.0
@@ -11,14 +11,14 @@ require (
 	github.com/go-composites/bag v0.0.0-20261001005725-fcf324b93f95
 	github.com/go-composites/result v0.0.0-20260927170344-f2c7344faeef
 	github.com/go-composites/time v0.0.0-20260929013028-aa3c57ae1371
-	github.com/go-fft/fft v0.1.1
+	github.com/go-fft/fft v0.1.14
 	github.com/go-images/images v0.0.0-20260927173152-87444e36aac4
-	github.com/go-kramdown/kramdown v0.1.0
-	github.com/go-liquid/liquid v0.1.0
+	github.com/go-kramdown/kramdown v0.2.0
+	github.com/go-liquid/liquid v0.1.1
 	github.com/go-mustache/mustache v0.1.0
-	github.com/go-ndarray/ndarray v0.0.0-20260930182958-73ce783e24f7
+	github.com/go-ndarray/ndarray v0.3.0
 	github.com/go-nokogiri/nokogiri v0.1.0
-	github.com/go-rouge/rouge v0.2.0
+	github.com/go-rouge/rouge v0.3.0
 	github.com/go-ruby-aasm/aasm v0.0.0-20260717061120-cec0976ec205
 	github.com/go-ruby-abbrev/abbrev v0.0.0-20260916090008-ac08b8471830
 	github.com/go-ruby-acme/acme v0.0.0-20260910083506-2c4b2786f606
@@ -123,7 +123,7 @@ require (
 	github.com/go-ruby-openbao/openbao v0.0.0-20260717071447-328a091965dd
 	github.com/go-ruby-openstack/openstack v0.0.0-20260923203924-9000c374d63c
 	github.com/go-ruby-opentelemetry/opentelemetry v0.0.0-20261003102038-c7cc0d3679e1
-	github.com/go-ruby-opentype/opentype v0.2.0
+	github.com/go-ruby-opentype/opentype v0.3.0
 	github.com/go-ruby-optparse/optparse v0.0.0-20260917100925-33b18da76c37
 	github.com/go-ruby-ostruct/ostruct v0.0.0-20260927145508-48818b0ca96e
 	github.com/go-ruby-pagy/pagy v0.0.0-20260717071719-997d15eee011
@@ -190,9 +190,9 @@ require (
 	github.com/go-ruby-webauthn/webauthn v0.0.0-20260921104542-2bb711883889
 	github.com/go-ruby-webmock/webmock v0.0.0-20260717075423-a92c67f51b7f
 	github.com/go-ruby-webrick/webrick v0.0.0-20260927173350-a71c0afa01d4
-	github.com/go-ruby-widgets/mvvm v0.1.0
-	github.com/go-ruby-widgets/tui v0.3.0
-	github.com/go-ruby-widgets/widgets v0.11.0
+	github.com/go-ruby-widgets/mvvm v0.2.0
+	github.com/go-ruby-widgets/tui v0.4.0
+	github.com/go-ruby-widgets/widgets v0.12.0
 	github.com/go-ruby-yaml/yaml v0.0.0-20260916104302-910ced2db1c7
 	github.com/go-ruby-zeitwerk/zeitwerk v0.0.0-20260916104335-29169305e951
 	github.com/go-ruby-zlib/zlib v0.0.0-20260927173414-e9d862990b6d
@@ -217,7 +217,7 @@ require (
 	github.com/RoaringBitmap/roaring/v2 v2.14.5 // indirect
 	github.com/abtreece/confd v0.41.2 // indirect
 	github.com/ajroetker/go-highway v0.0.4 // indirect
-	github.com/andybalholm/brotli v1.2.3 // indirect
+	github.com/andybalholm/brotli v1.2.5 // indirect
 	github.com/antithesishq/antithesis-sdk-go v0.8.0-default-no-op // indirect
 	github.com/apache/arrow-go/v18 v18.8.0 // indirect
 	github.com/apache/thrift v0.24.0 // indirect
@@ -282,8 +282,8 @@ require (
 	github.com/go-composites/array v0.0.0-20260929012314-b34dd2208c46 // indirect
 	github.com/go-composites/error v0.0.0-20260926002113-8ebf8341ff74 // indirect
 	github.com/go-composites/null v0.0.0-20260903220223-c1d743488d23 // indirect
-	github.com/go-crdt/collab v0.25.0 // indirect
-	github.com/go-crdt/crdt v0.31.0 // indirect
+	github.com/go-crdt/collab v0.74.0 // indirect
+	github.com/go-crdt/crdt v0.55.0 // indirect
 	github.com/go-datetime/dates v0.1.0 // indirect
 	github.com/go-encryptions/unixcrypt v0.1.0 // indirect
 	github.com/go-facter/facter v0.0.0-20260830120958-454b72e642ab // indirect
@@ -300,13 +300,13 @@ require (
 	github.com/go-ldap/ldap/v3 v3.4.14 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
-	github.com/go-opentype/fonts v0.8.0 // indirect
+	github.com/go-opentype/fonts v0.10.0 // indirect
 	github.com/go-opentype/opentype v0.13.0 // indirect
 	github.com/go-opentype/shape v0.5.0 // indirect
 	github.com/go-pcore/pcore v0.0.0-20260831114716-f9c3e7f59eaa // indirect
 	github.com/go-puppet/puppet v0.0.0-20260918012035-fc6b0424cdbd // indirect
 	github.com/go-regexp/engine v0.1.3 // indirect
-	github.com/go-richdoc/richdoc v0.2.0 // indirect
+	github.com/go-richdoc/richdoc v0.4.0 // indirect
 	github.com/go-ruby-fast-gettext-locale/fast-gettext-locale v0.0.0-20260825110154-a53e0e3a41a7 // indirect
 	github.com/go-scss/scss v0.0.0-20260905061546-39932e01faa4 // indirect
 	github.com/go-simd/adler32 v0.0.0-20260923204409-4db2a9281622 // indirect
@@ -317,9 +317,9 @@ require (
 	github.com/go-typeset/bidi v0.3.0 // indirect
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
 	github.com/go-webauthn/x v0.3.1 // indirect
-	github.com/go-widgets/mvvm v0.8.0 // indirect
-	github.com/go-widgets/painter v0.11.0 // indirect
-	github.com/go-widgets/toolkit v0.288.0 // indirect
+	github.com/go-widgets/mvvm v0.9.0 // indirect
+	github.com/go-widgets/painter v0.13.0 // indirect
+	github.com/go-widgets/toolkit v0.321.2 // indirect
 	github.com/go-widgets/tui v0.61.0 // indirect
 	github.com/go-zookeeper/zk v1.0.4 // indirect
 	github.com/goccy/go-json v0.10.6 // indirect
