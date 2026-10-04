@@ -2899,17 +2899,57 @@ func (vm *VM) ioBufferArg(v object.Value) *object.String {
 	return nil
 }
 
-// displayStr renders v the way Kernel#print / #puts / String() do: a user object
-// (RObject) goes through its (possibly user-defined) #to_s, so an overridden to_s
-// is honoured; built-in value types use their authoritative native ToS directly.
-// A non-String #to_s result falls back to the native ToS.
+// displayStr is MRI's rb_obj_as_string: the string an object DISPLAYS as, which
+// is what #puts, #print, #write and $stdout's siblings each write.
+//
+//	if (RB_TYPE_P(obj, T_STRING)) return obj;
+//	str = rb_funcall(obj, idTo_s, 0);
+//	return rb_obj_as_string_result(str, obj);   /* rb_any_to_s if not a String */
+//
+// A String is returned AS IS -- MRI never re-dispatches #to_s on one, so a
+// redefined String#to_s does not change what `puts "s"` prints (measured).
+// Everything else dispatches #to_s, and a #to_s that answers with a non-String
+// falls back to the object's own rendering.
+//
+// The dispatch used to be reserved for *RObject -- a user object -- while every
+// built-in value type took its Go-level ToS() directly. That was a fast path
+// with no guard, and it was observable on seven of nine core classes at once:
+//
+//	class Integer; def to_s; "HIJACKED"; end; end
+//	puts 1       ruby 4.0.5  HIJACKED    before  1
+//	print 1      ruby 4.0.5  HIJACKED    before  1
+//	"#{1}"       ruby 4.0.5  HIJACKED            HIJACKED   (interpolation was right)
+//
+// so the same object rendered two ways in one program depending on which route
+// reached it. Symbol, Float, Hash, NilClass, TrueClass, Range and Array behaved
+// the same way.
+//
+// The remaining gap is the fallback's shape: MRI's rb_any_to_s carries the
+// object's address and rbgo's ToS() does not (`#<Weird>` where ruby gives
+// `#<Weird:0x…>`). That is #756, and it is not this function's doing.
 func (vm *VM) displayStr(v object.Value) string {
-	if _, ok := v.(*RObject); !ok {
-		return v.ToS()
-	}
-	r := vm.send(v, "to_s", nil, nil)
-	if s, ok := r.(*object.String); ok {
+	// RB_TYPE_P(v, T_STRING) includes a SUBCLASS instance, which in rbgo is an
+	// *RObject carrying the String in its builtin slot -- so a bare type
+	// assertion misses it, and the dispatch below would then answer a redefined
+	// #to_s where MRI answers the string itself:
+	//
+	//	class S < String; def to_s; "SUB"; end; end
+	//	puts S.new("x")      ruby 4.0.5  x      a bare assertion  SUB
+	//	S.new("x").to_s      ruby 4.0.5  SUB    -- still SUB, both ways
+	//
+	// (The interpolation route needs the same arm and gets it as stringTypeOf in
+	// the OpObjToString opcode; whichever of the two lands second should use the
+	// one helper rather than keep both.)
+	if s, ok := v.(*object.String); ok {
 		return s.Str()
+	}
+	if o, ok := v.(*RObject); ok {
+		if s, ok := o.builtin.(*object.String); ok {
+			return s.Str()
+		}
+	}
+	if r, ok := vm.send(v, "to_s", nil, nil).(*object.String); ok {
+		return r.Str()
 	}
 	return v.ToS()
 }

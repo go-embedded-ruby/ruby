@@ -36,9 +36,50 @@ import (
 // it: inserting a comment above a function shifts every line below it, and a
 // line-keyed diff then reports hundreds of functions as removed and re-added at
 // once. Measured: a 12-line comment faked ~600 of each.
-type fn struct{ file, name string }
+//
+// ord distinguishes SAME-NAMED functions in one file, which (file, name) alone
+// cannot: Go methods carry a receiver the profile does not print, and
+// internal/vm/csv.go has three `ToS()` -- on *CSVRow, *CSVTable and *csvSink.
+// Keying on the pair made the second one look like a duplicate record, and this
+// tool refused the whole profile as unreadable (exit 2). It stayed hidden
+// because functions at 100% are skipped, so it needed TWO same-named functions
+// below the line at once; the day a second one dropped, the gate stopped
+// answering instead of answering wrongly -- which is the right failure, but a
+// failure.
+//
+// It is the occurrence ordinal in file order, not the line, so a comment
+// inserted above a function still moves nothing. It counts EVERY record,
+// including the 100% ones skipped below: counting only the reported ones would
+// renumber the survivors whenever a sibling crossed the line, and an unchanged
+// function would read as removed and re-added.
+type fn struct {
+	file, name string
+	ord        int
+}
 
-func (f fn) String() string { return f.file + " " + f.name }
+func (f fn) String() string { return f.file + " " + f.nameCol() }
+
+// nameCol renders the function column: the bare name for the first of its name
+// in a file, and name#N (1-based) for the others, so a record round-trips.
+func (f fn) nameCol() string {
+	if f.ord == 0 {
+		return f.name
+	}
+	return f.name + "#" + strconv.Itoa(f.ord+1)
+}
+
+// parseNameCol is nameCol's inverse.
+func parseNameCol(col string) (name string, ord int, err error) {
+	i := strings.LastIndexByte(col, '#')
+	if i < 0 {
+		return col, 0, nil
+	}
+	n, err := strconv.Atoi(col[i+1:])
+	if err != nil || n < 2 {
+		return "", 0, fmt.Errorf("%q is not a function column (name or name#N with N>=2)", col)
+	}
+	return col[:i], n - 1, nil
+}
 
 type entry struct {
 	fn
@@ -52,6 +93,7 @@ type entry struct {
 // a format change into a clean result.
 func parse(r io.Reader, what, mod string) (map[fn]entry, error) {
 	out := make(map[fn]entry)
+	seen := make(map[string]int) // (file, name) -> how many seen so far, in file order
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	seenTotal := false
@@ -76,10 +118,15 @@ func parse(r io.Reader, what, mod string) (map[fn]entry, error) {
 			return nil, fmt.Errorf("%s line %d: expected file:line: name pct, got %q", what, n, line)
 		}
 		file, ln := splitPos(f[0], mod)
+		// The ordinal is assigned BEFORE the 100% filter, so it does not shift
+		// when a sibling of the same name crosses the line.
+		nameKey := file + "\x00" + f[1]
+		ord := seen[nameKey]
+		seen[nameKey] = ord + 1
 		if pct >= 100 {
 			continue
 		}
-		k := fn{file: file, name: f[1]}
+		k := fn{file: file, name: f[1], ord: ord}
 		if prev, dup := out[k]; dup {
 			return nil, fmt.Errorf("%s line %d: %s appears twice (was %.1f%%)", what, n, k, prev.pct)
 		}
@@ -128,7 +175,11 @@ func parseRecord(r io.Reader, what string) (map[fn]entry, error) {
 		if err != nil {
 			return nil, fmt.Errorf("%s line %d: %q is not a percentage", what, n, f[2])
 		}
-		k := fn{file: f[0], name: f[1]}
+		name, ord, err := parseNameCol(f[1])
+		if err != nil {
+			return nil, fmt.Errorf("%s line %d: %w", what, n, err)
+		}
+		k := fn{file: f[0], name: name, ord: ord}
 		if _, dup := out[k]; dup {
 			return nil, fmt.Errorf("%s line %d: %s appears twice", what, n, k)
 		}
@@ -146,7 +197,10 @@ func writeRecord(w io.Writer, m map[fn]entry, lane string) error {
 		if ks[i].file != ks[j].file {
 			return ks[i].file < ks[j].file
 		}
-		return ks[i].name < ks[j].name
+		if ks[i].name != ks[j].name {
+			return ks[i].name < ks[j].name
+		}
+		return ks[i].ord < ks[j].ord
 	})
 	b := bufio.NewWriter(w)
 	fmt.Fprintf(b, "# Functions below 100%% coverage on the %s lane, recorded.\n", lane)
@@ -154,7 +208,7 @@ func writeRecord(w io.Writer, m map[fn]entry, lane string) error {
 	fmt.Fprintf(b, "# (coverage is measured under -race, where a percentage jitters and a set does not).\n")
 	fmt.Fprintf(b, "# Regenerate with UPDATE_COVERAGE=1 on a green run of this lane.\n")
 	for _, k := range ks {
-		fmt.Fprintf(b, "%s\t%s\t%.1f%%\n", k.file, k.name, m[k].pct)
+		fmt.Fprintf(b, "%s\t%s\t%.1f%%\n", k.file, k.nameCol(), m[k].pct)
 	}
 	return b.Flush()
 }

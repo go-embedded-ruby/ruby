@@ -2,23 +2,59 @@
 # The SET is the gate and may not grow; the percentages are reported, not gated
 # (coverage is measured under -race, where a percentage jitters and a set does not).
 # Regenerate with UPDATE_COVERAGE=1 on a green run of this lane.
+#
+# The `ToS` rows are object.Value's interface entry point for each built-in
+# wrapper type. Since #puts and #print dispatch #to_s (MRI's rb_obj_as_string),
+# the display path reaches each type's RUBY to_s instead -- which calls the SAME
+# renderer, so no output changed: all fourteen probed types print byte-for-byte
+# what they printed before. They stay because ToS() is required by the
+# interface, and they are recorded rather than tested because a test calling
+# them directly would move the percentage and hide the fact that the display
+# path no longer does.
+#
+# Keeping a fast path (dispatch only when #to_s is redefined, as the operator
+# opcodes do) would cover them and save the ~112ns/call the dispatch costs. It
+# is not done: that cost is not observable at program level -- five runs of
+# 200000 puts gave overlapping distributions -- and a second serial-validated
+# cache for an unobservable effect is complexity bought with nothing.
 # Recorded 2026-09-28 from run 36424534618, main @ 1a79138b, CI's own measurement.
 internal/object/object.go	repr	90.9%
+internal/vm/argf.go	ToS	0.0%
 internal/vm/arith.go	binary	96.6%
 internal/vm/arith.go	rubyEql	83.3%
 internal/vm/arith.go	valueEqlRec	98.1%
+internal/vm/bag.go	ToS	0.0%
 internal/vm/bigdecimal_bind.go	Inspect	0.0%
 internal/vm/builtins.go	bootstrap	99.7%
 internal/vm/builtins.go	cloneSingleton	79.2%
 internal/vm/complex.go	registerNumericGeneric	98.9%
 internal/vm/converter_codec.go	encodeCharTo	95.0%
 internal/vm/converter_codec.go	xtextRuneStep	92.9%
+internal/vm/csv.go	ToS	0.0%
+internal/vm/csv.go	ToS#2	0.0%
 internal/vm/date_bind.go	Inspect	0.0%
+internal/vm/date_bind.go	ToS	0.0%
 internal/vm/dir.go	cwdStillNamed	77.8%
+internal/vm/encoding.go	ToS	0.0%
+internal/vm/enumerator.go	ToS#2	0.0%
 internal/vm/filestat.go	Inspect	90.0%
 internal/vm/filestat.go	registerFileStat	99.4%
 internal/vm/io.go	inspectStr	83.3%
+internal/vm/ipaddr.go	ToS	0.0%
+internal/vm/matrix.go	ToS	0.0%
+internal/vm/matrix.go	ToS#2	0.0%
+internal/vm/ndarray.go	ToS	0.0%
 internal/vm/nethttp.go	registerNetHTTP	96.0%
+internal/vm/object_model.go	ToS	0.0%
 internal/vm/object_model.go	classOf	99.5%
 internal/vm/object_model.go	defaultNegation	88.9%
 internal/vm/object_model.go	objSingleton	80.0%
+internal/vm/regexp.go	ToS#2	0.0%
+internal/vm/rexml.go	ToS	0.0%
+internal/vm/rexml.go	ToS#2	0.0%
+internal/vm/rexml.go	ToS#3	0.0%
+internal/vm/rexml.go	ToS#4	0.0%
+internal/vm/rexml.go	ToS#5	0.0%
+internal/vm/set.go	ToS	0.0%
+internal/vm/time.go	ToS	0.0%
+internal/vm/uri.go	ToS	0.0%
