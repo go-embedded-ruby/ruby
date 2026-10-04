@@ -125,9 +125,40 @@ func (vm *VM) sendCatchBreak(recv object.Value, name string, args []object.Value
 		blk.breakLive = true
 		defer func() { blk.breakLive = prev }()
 	}
+	// Snapshot the per-frame tracking-stack depths, so that catching the break
+	// below restores them: the block's exec frame — and every frame between it
+	// and here — unwound by panic and so never ran exec's tail that pops them.
+	//
+	// Without this, `[1, 2, 3].each { |x| break if x == 2 }` left ONE frameNames
+	// entry behind for good. That was invisible while these stacks only fed
+	// backtraces and Kernel#caller, because the next unwind to be CAUGHT anywhere
+	// truncates to its own saved depth and swallows the stale entry with it — the
+	// leak only survives when nothing deeper is caught afterwards, which is why
+	// no backtrace test ever saw it. It stopped being invisible when
+	// len(frameNames) became the call-depth limit (stackdepth.go): a leak there is
+	// depth budget that never comes back, so a long-running program breaking out
+	// of a loop a few tens of thousands of times would eventually raise
+	// SystemStackError with no recursion in sight.
+	//
+	// These are the same six depths Kernel#catch and findYield keep (find.go), and
+	// for the same reason; frameCrefs and frameMethods mirror frameNames one for
+	// one and must be restored WITH it, or index i stops meaning the same frame in
+	// all three (#649).
+	fileStackDepth := len(vm.fileStack)
+	frameNamesDepth := len(vm.frameNames)
+	frameFilesDepth := len(vm.frameFiles)
+	frameCrefsDepth := len(vm.frameCrefs)
+	frameMethodsDepth := len(vm.frameMethods)
+	requireDirsDepth := len(vm.requireDirs)
 	defer func() {
 		if r := recover(); r != nil {
 			if sig, ok := r.(breakSignal); ok && sig.owner == blk {
+				vm.fileStack = truncFrames(vm.fileStack, fileStackDepth)
+				vm.frameNames = truncFrames(vm.frameNames, frameNamesDepth)
+				vm.frameFiles = truncFrames(vm.frameFiles, frameFilesDepth)
+				vm.frameCrefs = truncFrames(vm.frameCrefs, frameCrefsDepth)
+				vm.frameMethods = truncFrames(vm.frameMethods, frameMethodsDepth)
+				vm.requireDirs = truncFrames(vm.requireDirs, requireDirsDepth)
 				result = sig.value
 				return
 			}
