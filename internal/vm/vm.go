@@ -125,9 +125,40 @@ func (vm *VM) sendCatchBreak(recv object.Value, name string, args []object.Value
 		blk.breakLive = true
 		defer func() { blk.breakLive = prev }()
 	}
+	// Snapshot the per-frame tracking-stack depths, so that catching the break
+	// below restores them: the block's exec frame — and every frame between it
+	// and here — unwound by panic and so never ran exec's tail that pops them.
+	//
+	// Without this, `[1, 2, 3].each { |x| break if x == 2 }` left ONE frameNames
+	// entry behind for good. That was invisible while these stacks only fed
+	// backtraces and Kernel#caller, because the next unwind to be CAUGHT anywhere
+	// truncates to its own saved depth and swallows the stale entry with it — the
+	// leak only survives when nothing deeper is caught afterwards, which is why
+	// no backtrace test ever saw it. It stopped being invisible when
+	// len(frameNames) became the call-depth limit (stackdepth.go): a leak there is
+	// depth budget that never comes back, so a long-running program breaking out
+	// of a loop a few tens of thousands of times would eventually raise
+	// SystemStackError with no recursion in sight.
+	//
+	// These are the same six depths Kernel#catch and findYield keep (find.go), and
+	// for the same reason; frameCrefs and frameMethods mirror frameNames one for
+	// one and must be restored WITH it, or index i stops meaning the same frame in
+	// all three (#649).
+	fileStackDepth := len(vm.fileStack)
+	frameNamesDepth := len(vm.frameNames)
+	frameFilesDepth := len(vm.frameFiles)
+	frameCrefsDepth := len(vm.frameCrefs)
+	frameMethodsDepth := len(vm.frameMethods)
+	requireDirsDepth := len(vm.requireDirs)
 	defer func() {
 		if r := recover(); r != nil {
 			if sig, ok := r.(breakSignal); ok && sig.owner == blk {
+				vm.fileStack = truncFrames(vm.fileStack, fileStackDepth)
+				vm.frameNames = truncFrames(vm.frameNames, frameNamesDepth)
+				vm.frameFiles = truncFrames(vm.frameFiles, frameFilesDepth)
+				vm.frameCrefs = truncFrames(vm.frameCrefs, frameCrefsDepth)
+				vm.frameMethods = truncFrames(vm.frameMethods, frameMethodsDepth)
+				vm.requireDirs = truncFrames(vm.requireDirs, requireDirsDepth)
 				result = sig.value
 				return
 			}
@@ -770,7 +801,23 @@ type VM struct {
 	// frameNames is the running method-name stack (innermost last), maintained by
 	// exec for Kernel#__method__ and #caller. GVL-guarded (VM code is serialized
 	// by the GVL).
+	//
+	// Its LENGTH is also the Ruby call depth that exec refuses to exceed (see
+	// maxCallDepth): every Ruby-level frame pushes exactly one entry here, and
+	// the four places that restore it on an unwind are what make it exact
+	// rather than merely indicative.
 	frameNames []string
+
+	// maxCallDepth is the Ruby call depth at which exec raises SystemStackError
+	// instead of recursing one frame further. It is a field and not the constant
+	// itself so a test can lower it to a depth reachable in milliseconds, and so
+	// the measurement that chose the constant can raise it.
+	//
+	// It is set in bootstrap, NOT here and not in the constructor, because a VM
+	// is not always built through one — see the comment at the top of bootstrap.
+	// Zero is the dangerous value: exec's check is `>=`, so a zero limit refuses
+	// EVERY frame rather than none.
+	maxCallDepth int
 
 	// frameFiles is the running source-file stack, kept in lockstep with
 	// frameNames (one entry per exec frame, "" when the ISeq carries no file). It
@@ -1634,6 +1681,31 @@ func zsuperArgs(iseq *bytecode.ISeq, env *Env) (args []object.Value, kwSplat boo
 }
 
 func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, definee *RClass, methodName string, parentEnv *Env, block, selfBlock, blockArg *Proc, methodLexScope *RClass) (execResult object.Value) {
+	// The call-depth limit, checked FIRST: before any of the pending-state
+	// handovers below are consumed, and before the frame pushes anything, so a
+	// refused frame leaves the VM exactly as it found it.
+	//
+	// exec is the ONE place a Ruby-level frame is created — methods, blocks,
+	// procs, lambdas, define_method bodies, class and module bodies, eval and
+	// instance_eval all arrive here — so one check here covers every way a Ruby
+	// program can recurse. See stackdepth.go for why the limit exists and how
+	// defaultMaxCallDepth was measured.
+	//
+	// The depth is len(vm.frameNames) and NOT a counter of its own, which is the
+	// whole reason this cannot leak on a non-local exit. A separate counter would
+	// have to be decremented on each of exec's exits — normal return, a rescued
+	// exception, a non-local return/next, break, throw — and the ones that unwind
+	// by panic do not run exec's tail. frameNames already solves that problem,
+	// and solves it by TRUNCATING TO A SAVED DEPTH rather than by counting pops:
+	// whoever catches an unwind resets the stack to its own depth (vm.go's
+	// returnSignal and rescue recovers, Run's four boundary resets), which
+	// discards the entries of every abandoned frame in one assignment whether
+	// there was one or ten thousand. That makes the depth self-healing: it cannot
+	// be left inflated by a rescued runaway recursion and so cannot poison a
+	// later one.
+	if len(vm.frameNames) >= vm.maxCallDepth {
+		raiseDeep()
+	}
 	// Determine this frame's __method__/__callee__ pair before any nested call can
 	// disturb pendingMethodCtx: a block inherits the pair captured on the block
 	// Proc, an invokeBody/eval caller supplies one via pendingMethodCtx, and any
