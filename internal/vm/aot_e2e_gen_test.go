@@ -238,12 +238,14 @@ L6:
 	s2 = object.IntValue(1)
 	s1 = vm.binaryOp(bytecode.OpSub, s1, s2)
 	vm.setSendNoKW(true)
+	vm.setSendVCall(false)
 	s0 = vm.e2eFib_l1(self, []object.Value{s1}, nil)
 	s1 = self
 	s2 = l0
 	s3 = object.IntValue(2)
 	s2 = vm.binaryOp(bytecode.OpSub, s2, s3)
 	vm.setSendNoKW(true)
+	vm.setSendVCall(false)
 	s1 = vm.e2eFib_l1(self, []object.Value{s2}, nil)
 	s0 = vm.binaryOp(bytecode.OpAdd, s0, s1)
 L17:
