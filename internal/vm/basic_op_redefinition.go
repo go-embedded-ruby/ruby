@@ -7,6 +7,7 @@ package vm
 import (
 	"strconv"
 	"strings"
+	"sync/atomic"
 
 	"github.com/go-embedded-ruby/ruby/internal/bytecode"
 	"github.com/go-embedded-ruby/ruby/internal/object"
@@ -172,6 +173,7 @@ func (vm *VM) overriddenBasicOp(op bytecode.Op, recv object.Value) *Method {
 	if e := &vm.basicOps.cache[op]; e.serial == globalMethodSerial.Load() && e.cls == cls {
 		return e.m
 	}
+	basicOpSlowPath.Add(1)
 	m := vm.resolveBasicOpOverride(op, recv, cls)
 	vm.basicOps.cache[op] = basicOpCacheEntry{serial: globalMethodSerial.Load(), cls: cls, m: m}
 	return m
@@ -222,6 +224,13 @@ func (vm *VM) resolveBasicOpOverride(op bytecode.Op, recv object.Value, cls *RCl
 	}
 	return m
 }
+
+// basicOpSlowPath counts cache MISSES in overriddenBasicOp -- the only path
+// that resolves a method. It exists so the cache's effect can be asserted by a
+// COUNT rather than by a clock: the claim is "no method resolution per
+// iteration", and a count settles that on a loaded machine where a timing
+// cannot. See TestOperatorGuardCostsNoResolutionPerIteration.
+var basicOpSlowPath atomic.Uint64
 
 // basicOpRemoved is the sentinel overriddenBasicOp returns when the built-in
 // operator method has been removed: there is nothing to invoke, and the opcode
