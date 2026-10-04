@@ -691,6 +691,15 @@ func (vm *VM) bootstrap() {
 	// `rescue` does not catch them — matching MRI. SystemExit additionally carries
 	// an exit status (defined below).
 	exc("NoMemoryError", "Exception")
+	// SystemStackError < Exception, NOT StandardError, so a bare `rescue` does not
+	// catch it: MRI sets it up that way in Init_Proc,
+	// `rb_eSysStackError = rb_define_class("SystemStackError", rb_eException)`
+	// (proc.c v3_4_1:4424), and the line after it registers the preallocated
+	// instance whose message is "stack level too deep" — the message raiseDeep
+	// copies verbatim. Verified against the MRI 4.0.5 on the development machine:
+	// `SystemStackError.ancestors` is [SystemStackError, Exception, Object,
+	// Kernel, BasicObject], with no StandardError in it.
+	exc("SystemStackError", "Exception")
 	exc("SecurityError", "Exception")
 	exc("SignalException", "Exception")
 	exc("Interrupt", "SignalException")

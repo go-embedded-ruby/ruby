@@ -770,7 +770,20 @@ type VM struct {
 	// frameNames is the running method-name stack (innermost last), maintained by
 	// exec for Kernel#__method__ and #caller. GVL-guarded (VM code is serialized
 	// by the GVL).
+	//
+	// Its LENGTH is also the Ruby call depth that exec refuses to exceed (see
+	// maxCallDepth): every Ruby-level frame pushes exactly one entry here, and
+	// the four places that restore it on an unwind are what make it exact
+	// rather than merely indicative.
 	frameNames []string
+
+	// maxCallDepth is the Ruby call depth at which exec raises SystemStackError
+	// instead of recursing one frame further. It is defaultMaxCallDepth for a VM
+	// built by New; it is a field and not the constant itself so a test can lower
+	// it to a depth a test can reach quickly, and so the measurement that chose
+	// the constant could raise it. Zero would mean "no limit", which is the
+	// pre-#768 behaviour and is never what a caller wants, so New always sets it.
+	maxCallDepth int
 
 	// frameFiles is the running source-file stack, kept in lockstep with
 	// frameNames (one entry per exec frame, "" when the ISeq carries no file). It
@@ -1242,7 +1255,7 @@ func New(out io.Writer) *VM { return NewWithStderr(out, out) }
 // still captures warnings — which is what mspec's `complain` matcher does, and
 // why the conformance suite could not observe this defect at all.
 func NewWithStderr(out, errOut io.Writer) *VM {
-	vm := &VM{out: out, errOut: errOut, main: object.NewMain(), consts: map[string]object.Value{}, loaded: map[string]bool{}, globals: map[string]object.Value{}}
+	vm := &VM{out: out, errOut: errOut, main: object.NewMain(), consts: map[string]object.Value{}, loaded: map[string]bool{}, globals: map[string]object.Value{}, maxCallDepth: defaultMaxCallDepth}
 	// The controllable clock reads the real wall clock through nowWall (the same
 	// determinism seam Time.now/Date.today already honour) until a require
 	// "timecop" program freezes/travels/scales it. Unmocked, Current() just
@@ -1634,6 +1647,31 @@ func zsuperArgs(iseq *bytecode.ISeq, env *Env) (args []object.Value, kwSplat boo
 }
 
 func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, definee *RClass, methodName string, parentEnv *Env, block, selfBlock, blockArg *Proc, methodLexScope *RClass) (execResult object.Value) {
+	// The call-depth limit, checked FIRST: before any of the pending-state
+	// handovers below are consumed, and before the frame pushes anything, so a
+	// refused frame leaves the VM exactly as it found it.
+	//
+	// exec is the ONE place a Ruby-level frame is created — methods, blocks,
+	// procs, lambdas, define_method bodies, class and module bodies, eval and
+	// instance_eval all arrive here — so one check here covers every way a Ruby
+	// program can recurse. See stackdepth.go for why the limit exists and how
+	// defaultMaxCallDepth was measured.
+	//
+	// The depth is len(vm.frameNames) and NOT a counter of its own, which is the
+	// whole reason this cannot leak on a non-local exit. A separate counter would
+	// have to be decremented on each of exec's exits — normal return, a rescued
+	// exception, a non-local return/next, break, throw — and the ones that unwind
+	// by panic do not run exec's tail. frameNames already solves that problem,
+	// and solves it by TRUNCATING TO A SAVED DEPTH rather than by counting pops:
+	// whoever catches an unwind resets the stack to its own depth (vm.go's
+	// returnSignal and rescue recovers, Run's four boundary resets), which
+	// discards the entries of every abandoned frame in one assignment whether
+	// there was one or ten thousand. That makes the depth self-healing: it cannot
+	// be left inflated by a rescued runaway recursion and so cannot poison a
+	// later one.
+	if len(vm.frameNames) >= vm.maxCallDepth {
+		raiseDeep()
+	}
 	// Determine this frame's __method__/__callee__ pair before any nested call can
 	// disturb pendingMethodCtx: a block inherits the pair captured on the block
 	// Proc, an invokeBody/eval caller supplies one via pendingMethodCtx, and any
