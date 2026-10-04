@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -116,7 +117,6 @@ func TestCovRatchetRefusesWhatItCannotRead(t *testing.T) {
 		{"truncated, no total", "github.com/go-embedded-ruby/ruby/a.go:1:\tf\t50.0%\n", "no total: line"},
 		{"not a cover record", "hello world\n", "not a cover -func record"},
 		{"percentage is not a number", "github.com/go-embedded-ruby/ruby/a.go:1:\tf\tmany%\ntotal:\t(statements)\t100.0%\n", "is not a percentage"},
-		{"same function twice", "github.com/go-embedded-ruby/ruby/a.go:1:\tf\t50.0%\ngithub.com/go-embedded-ruby/ruby/a.go:9:\tf\t60.0%\ntotal:\t(statements)\t100.0%\n", "appears twice"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			out, err := judge(t, tc.profile)
@@ -141,6 +141,40 @@ func TestCovRatchetRefusesWhatItCannotRead(t *testing.T) {
 
 // TestCovRatchetUpdateRoundTrips: -update writes a record this tool reads back
 // and accepts, sorted, so a regenerated record diffs cleanly.
+// TestSameFunctionTwiceIsLegalNotMalformed replaces a case that asserted the
+// opposite. The table above used to include
+//
+//	{"same function twice", "a.go:1:\tf\t50.0%\na.go:9:\tf\t60.0%\n…", "appears twice"}
+//
+// i.e. it pinned the tool's REFUSAL of a profile with one name twice. That
+// encoded the assumption this change removes: a coverage profile does not print
+// the receiver, so two methods of the same name in one file are ordinary input,
+// and internal/vm/csv.go has three `ToS()`. The old case was testing the defect.
+//
+// What is still refused is a record column whose ordinal is not an integer >= 2
+// -- covered by TestNameColumnRoundTrips -- because `f#1` would give the first
+// occurrence a second spelling.
+func TestSameFunctionTwiceIsLegalNotMalformed(t *testing.T) {
+	const prof = "github.com/go-embedded-ruby/ruby/a.go:1:\tf\t50.0%\n" +
+		"github.com/go-embedded-ruby/ruby/a.go:9:\tf\t60.0%\n" +
+		"total:\t(statements)\t100.0%\n"
+	got, err := parse(strings.NewReader(prof), "profile", "github.com/go-embedded-ruby/ruby/")
+	if err != nil {
+		t.Fatalf("two same-named functions must parse, got %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("parsed %d records, want 2: %v", len(got), got)
+	}
+	var names []string
+	for k := range got {
+		names = append(names, k.nameCol())
+	}
+	sort.Strings(names)
+	if names[0] != "f" || names[1] != "f#2" {
+		t.Errorf("function columns %v, want [f f#2]", names)
+	}
+}
+
 func TestCovRatchetUpdateRoundTrips(t *testing.T) {
 	dir := t.TempDir()
 	rp := filepath.Join(dir, "BELOW100.test")
@@ -205,5 +239,105 @@ func TestRecordedLanesParse(t *testing.T) {
 	if len(sets["ubuntu-latest"]) <= len(sets["macos-latest"]) {
 		t.Errorf("ubuntu (%d) should carry more than macOS (%d): the POSIX-only filesystem paths",
 			len(sets["ubuntu-latest"]), len(sets["macos-latest"]))
+	}
+}
+
+// TestSameNamedFunctionsInOneFile: Go methods carry a receiver the coverage
+// profile does not print, so (file, name) is not an identity --
+// internal/vm/csv.go has three `ToS()`, on *CSVRow, *CSVTable and *csvSink.
+// Keying on the pair made the second one read as a duplicate record and this
+// tool refused the whole profile as unreadable:
+//
+//	covratchet: profile line 1871: internal/vm/csv.go ToS appears twice (was 0.0%)
+//	exit status 2
+//
+// It needed TWO of them below 100% at once, because functions at 100% are
+// skipped -- so it lay dormant until a change pushed a second one under, and
+// then stopped the lane rather than answering wrongly.
+func TestSameNamedFunctionsInOneFile(t *testing.T) {
+	const prof = `github.com/x/y/internal/vm/csv.go:37:	ToS	0.0%
+github.com/x/y/internal/vm/csv.go:54:	ToS	50.0%
+github.com/x/y/internal/vm/csv.go:280:	ToS	100.0%
+github.com/x/y/internal/vm/io.go:10:	displayStr	90.0%
+total:	(statements)	99.9%
+`
+	got, err := parse(strings.NewReader(prof), "profile", "github.com/x/y")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	// Two of the three ToS are below 100 and must be two distinct records; the
+	// third is skipped but still CONSUMES its ordinal, so the survivors keep
+	// their numbers when a sibling crosses the line.
+	want := map[string]float64{
+		"/internal/vm/csv.go ToS":       0.0,
+		"/internal/vm/csv.go ToS#2":     50.0,
+		"/internal/vm/io.go displayStr": 90.0,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("parsed %d records, want %d: %v", len(got), len(want), got)
+	}
+	for k, e := range got {
+		w, ok := want[k.String()]
+		if !ok {
+			t.Errorf("unexpected record %q", k.String())
+			continue
+		}
+		if e.pct != w {
+			t.Errorf("%s: %.1f%%, want %.1f%%", k.String(), e.pct, w)
+		}
+	}
+}
+
+// TestNameColumnRoundTrips: the ordinal travels in the function column, so a
+// record written by one run is read back identically by the next.
+func TestNameColumnRoundTrips(t *testing.T) {
+	for _, k := range []fn{
+		{file: "a.go", name: "ToS", ord: 0},
+		{file: "a.go", name: "ToS", ord: 1},
+		{file: "a.go", name: "ToS", ord: 11},
+	} {
+		col := k.nameCol()
+		name, ord, err := parseNameCol(col)
+		if err != nil {
+			t.Fatalf("%q: %v", col, err)
+		}
+		if name != k.name || ord != k.ord {
+			t.Errorf("%q round-tripped to (%q, %d), want (%q, %d)", col, name, ord, k.name, k.ord)
+		}
+	}
+	// A malformed column is refused rather than read as a name containing '#'.
+	for _, bad := range []string{"ToS#", "ToS#x", "ToS#0", "ToS#1"} {
+		if _, _, err := parseNameCol(bad); err == nil {
+			t.Errorf("parseNameCol(%q) was accepted; N must be an integer >= 2", bad)
+		}
+	}
+}
+
+// TestOrdinalSurvivesALineShift is the property the line was rejected for: the
+// identity must not move when a comment is inserted above a function.
+func TestOrdinalSurvivesALineShift(t *testing.T) {
+	before := `github.com/x/y/a.go:10:	ToS	0.0%
+github.com/x/y/a.go:20:	ToS	50.0%
+total:	(statements)	99.9%
+`
+	after := `github.com/x/y/a.go:110:	ToS	0.0%
+github.com/x/y/a.go:120:	ToS	50.0%
+total:	(statements)	99.9%
+`
+	b, err := parse(strings.NewReader(before), "before", "github.com/x/y")
+	if err != nil {
+		t.Fatalf("before: %v", err)
+	}
+	a, err := parse(strings.NewReader(after), "after", "github.com/x/y")
+	if err != nil {
+		t.Fatalf("after: %v", err)
+	}
+	for k := range b {
+		if _, ok := a[k]; !ok {
+			t.Errorf("%s vanished when its line moved; the identity still depends on the line", k)
+		}
+	}
+	if len(a) != len(b) {
+		t.Errorf("record count changed across a pure line shift: %d -> %d", len(b), len(a))
 	}
 }

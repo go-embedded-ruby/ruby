@@ -2015,6 +2015,32 @@ func (c *Compiler) compileBlock(blk *ast.Block) int {
 	positionals, posDefaults, kwParams, kwRest := splitBlockParams(blk)
 	c.push(newBlockBuilder(blockLabel(parent), positionals, parent))
 	b := c.cur()
+	// A block's first line is the line its OPENER sits on -- its `{`, its `do`,
+	// or the `->` of an arrow lambda -- which is what MRI reports as the block
+	// ISeq's location.first_lineno. c.push seeds firstLine from the enclosing
+	// scope's current line, and that is only the same answer when the block opens
+	// on the enclosing statement's first line:
+	//
+	//	h = {                      # line 1
+	//	  :a => proc {             # line 2
+	//	    1
+	//	  },
+	//	  :b => proc { 2 },        # line 5
+	//	}
+	//	h[:a].source_location[1]   # ruby 4.0.5 2    before 1
+	//	h[:b].source_location[1]   # ruby 4.0.5 5    before 1
+	//
+	// The parser records it (ast.Block.Line, parser v0.11.0); before that the
+	// information was not in the tree at all, which is why this could not be
+	// fixed here alone. 0 means the parser did not record one -- a hand-built AST
+	// -- and then the inherited line stands, which is what it always was.
+	//
+	// The body's first line would NOT do: ruby answers 2 for :a, whose first
+	// statement is on line 3, and an empty block has no statement at all.
+	if blk.Line > 0 {
+		b.firstLine = blk.Line + c.lineDelta
+		b.curLine = b.firstLine
+	}
 	// Block/lambda params lower exactly like a method's positionals: a top-level
 	// *rest and anything after it are not required, and each optional param gets a
 	// default-filling prologue (OpArgGiven → evaluate the default when absent).

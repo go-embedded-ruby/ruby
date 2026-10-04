@@ -1025,6 +1025,26 @@ func (vm *VM) bootstrap() {
 	vm.cObject.define("to_s", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(self.ToS())
 	})
+	// nil, true, false and Range each own their #to_s in MRI, and reported
+	// #owner == Kernel here because they fell through to Kernel#to_s:
+	//
+	//	nil.method(:to_s).owner     ruby 4.0.5  NilClass   before  Kernel
+	//	true.method(:to_s).owner    ruby 4.0.5  TrueClass  before  Kernel
+	//	false.method(:to_s).owner   ruby 4.0.5  FalseClass before  Kernel
+	//	(1..2).method(:to_s).owner  ruby 4.0.5  Range      before  Kernel
+	//
+	// The TEXT was already right on all four -- each Go type's ToS() knows what
+	// to print, and Kernel#to_s just forwards to it -- so this moves the method,
+	// not the output ("", "true", "false", "1..2" unchanged, measured).
+	//
+	// It also has to come first: Kernel#to_s is still MRI's rb_any_to_s short
+	// its address (#756), and whoever adds that address needs these four to own
+	// their #to_s already, or nil.to_s becomes "#<NilClass:0x...>".
+	for _, c := range []*RClass{vm.cNilClass, vm.cTrueClass, vm.cFalseClass, vm.cRange} {
+		c.defineArgc("to_s", 0, func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+			return object.NewString(self.ToS())
+		})
+	}
 	vm.cObject.define("inspect", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		// A plain object inspects as MRI's `#<Class:0x<addr> @iv=val, …>`: the class
 		// name, the object's address in hex, then its instance variables in
