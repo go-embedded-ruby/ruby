@@ -193,7 +193,35 @@ jobs:
             workdir="$(mktemp -d)"
             tarball="go${GOVER}.linux-${GOARCH}.tar.gz"
             echo "== fetching $tarball"
-            ( cd "$workdir" && curl -fsSL "https://go.dev/dl/${tarball}" -o "$tarball" && tar -xzf "$tarball" )
+            curl -fsSL "https://go.dev/dl/${tarball}" -o "$workdir/$tarball"
+
+            # Verify before executing anything out of it. These sums are the ones
+            # published at https://go.dev/dl/?mode=json for this GO_VERSION, and
+            # they live HERE, in the repository, rather than being fetched next to
+            # the tarball: a checksum served from the same origin as the file it
+            # describes cannot attest to that file. Bumping GO_VERSION means
+            # updating these, and the `*)` arm below is what says so out loud
+            # instead of silently skipping the check.
+            case "${GOVER}/${GOARCH}" in
+              1.26.4/ppc64le) want=53f49b8c7eace2d30389327b4a516b13321f90377fdf5929a6b63174609bc22e ;;
+              1.26.4/riscv64) want=2b9ba137baaa3031fd74330cb36ab54c5abe380867ca9fbab7c552f3db740555 ;;
+              1.26.4/s390x)   want=1e12a2318f3dd4c57027c865f6cb51f5d1e36b02d10f3e6316ce7b61a27b3ca1 ;;
+              *)
+                echo "== no pinned SHA256 for go${GOVER} on ${GOARCH}"
+                echo "== add it from https://go.dev/dl/?mode=json; refusing to run an unverified toolchain"
+                exit 1
+                ;;
+            esac
+            got="$(sha256sum "$workdir/$tarball" | cut -d' ' -f1)"
+            if [ "$got" != "$want" ]; then
+              echo "== SHA256 mismatch for $tarball"
+              echo "==   want $want"
+              echo "==   got  $got"
+              exit 1
+            fi
+            echo "== $tarball sha256 verified"
+
+            ( cd "$workdir" && tar -xzf "$tarball" )
             export PATH="$workdir/go/bin:$PATH"
             export GOROOT="$workdir/go"
           fi
@@ -269,7 +297,35 @@ jobs:
             workdir="$(mktemp -d)"
             tarball="go${GOVER}.linux-${GOARCH}.tar.gz"
             echo "== fetching $tarball"
-            ( cd "$workdir" && curl -fsSL "https://go.dev/dl/${tarball}" -o "$tarball" && tar -xzf "$tarball" )
+            curl -fsSL "https://go.dev/dl/${tarball}" -o "$workdir/$tarball"
+
+            # Verify before executing anything out of it. These sums are the ones
+            # published at https://go.dev/dl/?mode=json for this GO_VERSION, and
+            # they live HERE, in the repository, rather than being fetched next to
+            # the tarball: a checksum served from the same origin as the file it
+            # describes cannot attest to that file. Bumping GO_VERSION means
+            # updating these, and the `*)` arm below is what says so out loud
+            # instead of silently skipping the check.
+            case "${GOVER}/${GOARCH}" in
+              1.26.4/ppc64le) want=53f49b8c7eace2d30389327b4a516b13321f90377fdf5929a6b63174609bc22e ;;
+              1.26.4/riscv64) want=2b9ba137baaa3031fd74330cb36ab54c5abe380867ca9fbab7c552f3db740555 ;;
+              1.26.4/s390x)   want=1e12a2318f3dd4c57027c865f6cb51f5d1e36b02d10f3e6316ce7b61a27b3ca1 ;;
+              *)
+                echo "== no pinned SHA256 for go${GOVER} on ${GOARCH}"
+                echo "== add it from https://go.dev/dl/?mode=json; refusing to run an unverified toolchain"
+                exit 1
+                ;;
+            esac
+            got="$(sha256sum "$workdir/$tarball" | cut -d' ' -f1)"
+            if [ "$got" != "$want" ]; then
+              echo "== SHA256 mismatch for $tarball"
+              echo "==   want $want"
+              echo "==   got  $got"
+              exit 1
+            fi
+            echo "== $tarball sha256 verified"
+
+            ( cd "$workdir" && tar -xzf "$tarball" )
             export PATH="$workdir/go/bin:$PATH"
             export GOROOT="$workdir/go"
           fi
