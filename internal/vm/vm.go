@@ -3163,16 +3163,16 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				// goes through rb_funcall, which has no scope either (measured:
 				// ruby prints 1). So the refinement belongs HERE and not in
 				// displayStr.
+				// The T_STRING arm lives in objToStringWith, not here: duplicating it
+				// left the helper's own copy unreached, which the coverage gate
+				// reported. A refinement is resolved first because only this loop
+				// knows the lexical scope, and it is skipped for a String there.
 				otsV := pop()
-				if s := stringTypeOf(otsV); s != nil {
-					push(s)
-				} else {
-					var otsRef *Method
-					if vm.anyRefinements {
-						otsRef = refinedFor(otsV, "to_s")
-					}
-					push(vm.objToStringWith(otsV, otsRef))
+				var otsRef *Method
+				if vm.anyRefinements && stringTypeOf(otsV) == nil {
+					otsRef = refinedFor(otsV, "to_s")
 				}
+				push(vm.objToStringWith(otsV, otsRef))
 			case bytecode.OpConcatStrings:
 				// MRI's concatstrings: join A already-pushed parts into one fresh,
 				// unfrozen String. Deliberately NOT String#+ — see the compiler's
