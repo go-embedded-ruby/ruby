@@ -2,10 +2,12 @@ package vm
 
 import (
 	"bytes"
+	"io"
 	"strings"
 	"testing"
 
 	"github.com/go-embedded-ruby/ruby/internal/compiler"
+	"github.com/go-embedded-ruby/ruby/internal/object"
 	"github.com/go-ruby-parser/parser"
 )
 
@@ -297,13 +299,31 @@ func TestDefaultCallDepthLimitLeavesRoomForMRIProgrammes(t *testing.T) {
 	}
 }
 
-// TestANewVMAlwaysHasALimit pins the thing that would silently restore the defect:
-// a VM built by the public constructor must never have maxCallDepth 0, which the
-// `>=` check would read as "refuse every frame" — and, were the check written the
-// other way round, as "no limit at all".
-func TestANewVMAlwaysHasALimit(t *testing.T) {
+// TestEveryBootstrappedVMHasALimit pins the invariant whose absence broke two
+// prelude tests on the first attempt at this change.
+//
+// maxCallDepth was set in the constructor, but a VM is not always built through
+// one: internal tests assemble a &VM{} literal and call bootstrap themselves
+// (bareVM in prelude_test.go). Those VMs got maxCallDepth 0, and because exec's
+// check is `>=`, a zero limit refuses EVERY frame rather than none — so
+// `x = 1 + 1` died with "SystemStackError: stack level too deep" and
+// `nil.no_such_method` raised it in place of NoMethodError.
+//
+// Zero is the dangerous value in BOTH directions: `>=` reads it as "refuse
+// everything", and a check written the other way round would read it as "no
+// limit at all", which is silently the pre-#768 defect. So the test covers the
+// literal-plus-bootstrap path and not only the constructor.
+func TestEveryBootstrappedVMHasALimit(t *testing.T) {
 	if got := New(&bytes.Buffer{}).maxCallDepth; got != defaultMaxCallDepth {
 		t.Errorf("New(...).maxCallDepth = %d, want defaultMaxCallDepth = %d", got, defaultMaxCallDepth)
+	}
+	// The shape bareVM uses: a literal, bootstrapped by hand, never through New.
+	bare := &VM{out: io.Discard, errOut: io.Discard, main: object.NewMain(),
+		consts: map[string]object.Value{}, globals: map[string]object.Value{}, loaded: map[string]bool{}}
+	bare.bootstrap()
+	if bare.maxCallDepth != defaultMaxCallDepth {
+		t.Errorf("a hand-built, bootstrapped VM has maxCallDepth = %d, want defaultMaxCallDepth = %d: a zero limit refuses every frame",
+			bare.maxCallDepth, defaultMaxCallDepth)
 	}
 }
 

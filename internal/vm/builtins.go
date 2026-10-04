@@ -19,6 +19,19 @@ import (
 // bootstrap builds the base class hierarchy and installs the Phase 1 kernel.
 // Kernel methods live on Object so every value answers them.
 func (vm *VM) bootstrap() {
+	// The call-depth limit, set HERE and not in the constructor, because a VM is
+	// not always built through one: internal tests assemble a &VM{} literal
+	// directly (bareVM in prelude_test.go) and would otherwise get a
+	// maxCallDepth of 0, which the `>=` check in exec reads as "refuse every
+	// frame" — every program then dies with SystemStackError on its first call.
+	// That is exactly how this landed the first time, and two prelude tests
+	// caught it. bootstrap is the one gate every usable VM passes through: a VM
+	// that has not been bootstrapped has no classes and cannot run anything.
+	//
+	// Unconditional rather than `if == 0`, so there is one source of truth and
+	// nothing to drift. A test that wants a lower limit sets it AFTER
+	// construction, which is when bootstrap has already run.
+	vm.maxCallDepth = defaultMaxCallDepth
 	vm.cBasicObject = newClass("BasicObject", nil)
 	vm.cObject = newClass("Object", vm.cBasicObject)
 	// Top-level constants ARE Object's constants in Ruby; share the one table so

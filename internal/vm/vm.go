@@ -809,11 +809,14 @@ type VM struct {
 	frameNames []string
 
 	// maxCallDepth is the Ruby call depth at which exec raises SystemStackError
-	// instead of recursing one frame further. It is defaultMaxCallDepth for a VM
-	// built by New; it is a field and not the constant itself so a test can lower
-	// it to a depth a test can reach quickly, and so the measurement that chose
-	// the constant could raise it. Zero would mean "no limit", which is the
-	// pre-#768 behaviour and is never what a caller wants, so New always sets it.
+	// instead of recursing one frame further. It is a field and not the constant
+	// itself so a test can lower it to a depth reachable in milliseconds, and so
+	// the measurement that chose the constant can raise it.
+	//
+	// It is set in bootstrap, NOT here and not in the constructor, because a VM
+	// is not always built through one — see the comment at the top of bootstrap.
+	// Zero is the dangerous value: exec's check is `>=`, so a zero limit refuses
+	// EVERY frame rather than none.
 	maxCallDepth int
 
 	// frameFiles is the running source-file stack, kept in lockstep with
@@ -1286,7 +1289,7 @@ func New(out io.Writer) *VM { return NewWithStderr(out, out) }
 // still captures warnings — which is what mspec's `complain` matcher does, and
 // why the conformance suite could not observe this defect at all.
 func NewWithStderr(out, errOut io.Writer) *VM {
-	vm := &VM{out: out, errOut: errOut, main: object.NewMain(), consts: map[string]object.Value{}, loaded: map[string]bool{}, globals: map[string]object.Value{}, maxCallDepth: defaultMaxCallDepth}
+	vm := &VM{out: out, errOut: errOut, main: object.NewMain(), consts: map[string]object.Value{}, loaded: map[string]bool{}, globals: map[string]object.Value{}}
 	// The controllable clock reads the real wall clock through nowWall (the same
 	// determinism seam Time.now/Date.today already honour) until a require
 	// "timecop" program freezes/travels/scales it. Unmocked, Current() just
