@@ -103,3 +103,57 @@ print "\n"`
 		t.Errorf("got %q\nwant %q", got, want)
 	}
 }
+
+// TestWrapperTypesRenderUnchanged is the control for making #puts dispatch
+// #to_s. Each built-in wrapper type has TWO entry points to one renderer: a
+// Ruby `to_s` method and the Go ToS() that object.Value requires. Dispatching
+// means the display path now takes the Ruby one, which the coverage gate
+// reported as nineteen ToS() methods falling to 0%.
+//
+// Nothing about the OUTPUT may change, and this is what says so: every row is
+// what ruby 4.0.5 prints and what rbgo printed before the dispatch.
+//
+// Two rows differ from ruby and are pinned as they are, because they are
+// pre-existing and tracked elsewhere: a plain object's address (#756) and
+// Enumerator#to_s being over-defined to #inspect (#756 step 4). Pinning the
+// current answer rather than ruby's keeps this test about THIS change.
+func TestWrapperTypesRenderUnchanged(t *testing.T) {
+	src := `require "date"; require "set"; require "uri"; require "ipaddr"; require "matrix"
+require "rexml/document"
+def show(label, v)
+  puts "#{label}=#{(v.to_s rescue "ERR:#{$!.class}").gsub(/0x[0-9a-f]+/, "0xA")}"
+end
+show "Object",    Object.new
+show "Encoding",  Encoding::UTF_8
+show "Regexp",    /ab/i
+show "Time",      Time.at(0).utc
+show "Date",      Date.new(2026, 1, 2)
+show "Set",       Set.new([1, 2])
+show "URI",       URI.parse("http://a/b")
+show "IPAddr",    IPAddr.new("10.0.0.1")
+show "Matrix",    Matrix[[1, 2], [3, 4]]
+show "Vector",    Vector[1, 2]
+show "Enum",      [1, 2].each
+show "REXMLDoc",  REXML::Document.new("<a><b/></a>")
+show "REXMLElem", REXML::Document.new("<a><b/></a>").root
+show "ARGFclass", ARGF.class
+`
+	const want = `Object=#<Object>
+Encoding=UTF-8
+Regexp=(?i-mx:ab)
+Time=1970-01-01 00:00:00 UTC
+Date=2026-01-02
+Set=Set[1, 2]
+URI=http://a/b
+IPAddr=10.0.0.1
+Matrix=Matrix[[1, 2], [3, 4]]
+Vector=Vector[1, 2]
+Enum=#<Enumerator: [1, 2]:each>
+REXMLDoc=<a><b/></a>
+REXMLElem=<a><b/></a>
+ARGFclass=ARGF.class
+`
+	if got := eval(t, src); got != want {
+		t.Errorf("got\n%s\nwant\n%s", got, want)
+	}
+}
