@@ -5,14 +5,14 @@
 [![Docs](https://img.shields.io/badge/docs-mkdocs--material-9B1C2E)](https://go-embedded-ruby.github.io/docs/)
 [![License](https://img.shields.io/badge/license-BSD--3--Clause-blue)](LICENSE)
 [![Go](https://img.shields.io/badge/go-1.26.4%2B-00ADD8)](https://go.dev/dl/)
-[![ruby/spec](https://img.shields.io/badge/ruby%2Fspec-22%2C488%20examples%20passing-1a7f37)](#runtime-conformance--rubyspec)
+[![ruby/spec](https://img.shields.io/badge/ruby%2Fspec-23%2C481%20examples%20passing-1a7f37)](#runtime-conformance--rubyspec)
 
 **A Ruby interpreter written in pure Go, with cgo disabled** — so you can embed it
 in a Go program with `import "github.com/go-embedded-ruby/ruby"`, or ship it as a
 single static binary that cross-compiles wherever Go does, with no C toolchain and
 no libruby.
 
-**How complete is it?** It runs **23,471** of ruby/spec's `language/` + `core/`
+**How complete is it?** It runs **23,481** of ruby/spec's `language/` + `core/`
 examples ([what that counts](#runtime-conformance--rubyspec)) — a large and growing
 subset of the language, and **not** a drop-in replacement for CRuby. Read
 [What does not work yet](#what-does-not-work-yet) before you depend on it; the
@@ -138,6 +138,14 @@ process under a minimal MSpec-compatible shim that ships with this repo.
 | share of those that passed | **95.0 %** |
 | spec files | 2,202 of 2,206 produced a result; 4 produced none |
 | **enforced by CI** | a **per-file** baseline (`BASELINE`), not a single number |
+
+The badge and the summary above it count `BASELINE`, the per-file record CI
+enforces, which moves with every merge. The table is one dated full sweep, so
+the two differ by whatever has landed since — 10 examples at the time of
+writing. Only the baseline is machine-checked against this file
+(`TestReadmeConformanceCountMatchesTheBaseline`); the table's other rows come
+from the sweep named below and are not derivable from the baseline, which
+records passing counts and nothing else.
 
 Measured 2026-09-28 on `862a9f3`, darwin/arm64, against the corpus pinned at
 `SPEC_SHA=87b1631992bd00cf0c4934474766d54dad088191`, on an isolated snapshot of
@@ -905,7 +913,7 @@ specification of the language — through `rbgo` under a minimal MSpec-compatibl
 shim, and gates CI on a **per-file** baseline
 ([`scripts/conformance/rubyspec/`](scripts/conformance/rubyspec/), in
 `BASELINE`). No file may pass fewer examples than its record or stop loading, so
-measured language conformance moves in one direction; the total, **23,471**, is
+measured language conformance moves in one direction; the total, **23,481**, is
 a derived summary rather than the thing gated. Run it with
 `scripts/conformance/rubyspec/run.sh`, and see *Runtime conformance* under
 *Status* for the full breakdown.
