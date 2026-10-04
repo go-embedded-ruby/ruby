@@ -33,6 +33,21 @@ class S
 end
 Fiber.set_scheduler(S.new)
 `
+	// Three rows below ask for a real sleep's RESULT, and test it the way
+	// TestWave28SleepReturnsWholeSeconds does -- `[0, 1].include?(…)` -- rather
+	// than pinning 0. rb_f_sleep brackets the wait with time(0), so its result is
+	// the number of whole-second boundaries CROSSED, not the duration rounded:
+	// a 1ms sleep answers 1 whenever it straddles one, in MRI exactly as here.
+	// Reproduced on ruby 4.0.5 and on both rbgo builds by waiting until 2ms
+	// before a boundary:
+	//
+	//	sleep(0.005) straddling a boundary  => 1
+	//	sleep(0.005) mid-second             => 0
+	//
+	// Pinning 0 made these rows fail whenever the process was descheduled across
+	// a boundary, which is a near-certainty on a loaded CI runner: that is what
+	// took down both POSIX lanes of one run, with nothing in the change touching
+	// sleep.
 	cases := []struct{ src, want string }{
 		// A non-blocking fiber routes sleep to the scheduler; with no argument the
 		// hook is called with no argument (kernel_sleepv forwards argc verbatim),
@@ -53,7 +68,7 @@ Fiber.set_scheduler(S.new)
 		// ...and it never coerces them, so a String reaches the hook unrefused.
 		{sched + `f = Fiber.new(blocking: false) { sleep("2") }; f.resume; p Fiber.scheduler.events`, "[[:kernel_sleep, [\"2\"]]]\n"},
 		// Uninstalling the scheduler puts the ordinary path back.
-		{sched + `Fiber.set_scheduler(nil); p Fiber.new(blocking: false) { sleep(0.001) }.resume`, "0\n"},
+		{sched + `Fiber.set_scheduler(nil); p [0, 1].include?(Fiber.new(blocking: false) { sleep(0.001) }.resume)`, "true\n"},
 
 		// rb_time_interval, numeric cases.
 		{`p sleep(0)`, "0\n"},
@@ -96,7 +111,7 @@ Fiber.set_scheduler(S.new)
 		{`p sleep(Rational(1, 999)).class`, "Integer\n"},
 		{`o = Object.new; def o.divmod(*); [0, 0.001]; end; p sleep(o).class`, "Integer\n"},
 		// NUM2TIMET truncates a Float quotient rather than refusing it.
-		{`o = Object.new; def o.divmod(*); [0.5, 0]; end; p sleep(o)`, "0\n"},
+		{`o = Object.new; def o.divmod(*); [0.5, 0]; end; p [0, 1].include?(sleep(o))`, "true\n"},
 		// arg_range_check applies to the whole-seconds half only.
 		{`begin; sleep(Rational(-1, 2)); rescue => e; p [e.class, e.message]; end`, "[ArgumentError, \"time interval must not be negative\"]\n"},
 		// The quotient goes through NUM2TIMET, which is rb_num2long: it names nil
@@ -112,7 +127,7 @@ Fiber.set_scheduler(S.new)
 		{`begin; sleep(:s); rescue => e; p [e.class, e.message]; end`, "[TypeError, \"can't convert Symbol into time interval\"]\n"},
 		// A #divmod reached only through method_missing still converts, as
 		// rb_check_funcall's respond_to_missing? probe allows.
-		{`o = Object.new; def o.respond_to_missing?(n, p = false); n == :divmod; end; def o.method_missing(n, *a); n == :divmod ? [0, 0.001] : super; end; p sleep(o)`, "0\n"},
+		{`o = Object.new; def o.respond_to_missing?(n, p = false); n == :divmod; end; def o.method_missing(n, *a); n == :divmod ? [0, 0.001] : super; end; p [0, 1].include?(sleep(o))`, "true\n"},
 
 		// rb_check_arity(argc, 0, 1) guards the duration branch of rb_f_sleep.
 		{`begin; sleep(1, 2); rescue => e; p [e.class, e.message]; end`, "[ArgumentError, \"wrong number of arguments (given 2, expected 0..1)\"]\n"},
