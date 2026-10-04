@@ -306,3 +306,38 @@ func TestANewVMAlwaysHasALimit(t *testing.T) {
 		t.Errorf("New(...).maxCallDepth = %d, want defaultMaxCallDepth = %d", got, defaultMaxCallDepth)
 	}
 }
+
+// TestTheLimitHoldsAcrossAThreadBoundary checks a shape the design could
+// plausibly have got wrong. rbgo keeps ONE frame stack for the whole VM, shared
+// by every Ruby thread under the GVL, and Run resets it to [:0] at its
+// boundaries — so a thread body could have been handed a FRESH depth budget
+// while its parent's Go frames were still live, letting a program amplify its
+// reachable depth by one limit per thread it spawns.
+//
+// It does not: the shared stack keeps accumulating across the boundary, so the
+// recursion below reaches HALF the limit in levels (each level costs two
+// entries, the method frame and the block frame) rather than restarting. That is
+// conservative — each Ruby thread is a goroutine with its own Go stack, so the
+// budget is stricter than the stacks require — and conservative is the safe
+// direction for a limit whose job is to stay below a fatal error.
+//
+// Measured with the real constant before it was written down: plain recursion
+// reached 16382 and this shape reached 8191, exactly half.
+func TestTheLimitHoldsAcrossAThreadBoundary(t *testing.T) {
+	got := runAtDepth(t, 60, `
+$max = 0
+def g(n)
+  $max = n if n > $max
+  Thread.new { g(n + 1) }.join
+end
+begin
+  g(0)
+rescue SystemStackError
+end
+puts $max < 60
+puts $max > 10
+`)
+	if got != "true\ntrue" {
+		t.Errorf("got %q, want %q — a thread boundary either reset the depth budget or exhausted it too early", got, "true\ntrue")
+	}
+}
