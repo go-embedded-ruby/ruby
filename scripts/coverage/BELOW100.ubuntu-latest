@@ -3,6 +3,8 @@
 # (coverage is measured under -race, where a percentage jitters and a set does not).
 # Regenerate with UPDATE_COVERAGE=1 on a green run of this lane.
 # Recorded 2026-09-28 from run 36424534618, main @ 1a79138b, CI's own measurement.
+internal/vm/csv.go	ToS	0.0%
+internal/vm/csv.go	ToS#2	0.0%
 internal/object/object.go	repr	90.9%
 internal/vm/arith.go	binary	96.6%
 internal/vm/arith.go	rubyEql	83.3%

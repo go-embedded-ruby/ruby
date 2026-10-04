@@ -207,3 +207,103 @@ func TestRecordedLanesParse(t *testing.T) {
 			len(sets["ubuntu-latest"]), len(sets["macos-latest"]))
 	}
 }
+
+// TestSameNamedFunctionsInOneFile: Go methods carry a receiver the coverage
+// profile does not print, so (file, name) is not an identity --
+// internal/vm/csv.go has three `ToS()`, on *CSVRow, *CSVTable and *csvSink.
+// Keying on the pair made the second one read as a duplicate record and this
+// tool refused the whole profile as unreadable:
+//
+//	covratchet: profile line 1871: internal/vm/csv.go ToS appears twice (was 0.0%)
+//	exit status 2
+//
+// It needed TWO of them below 100% at once, because functions at 100% are
+// skipped -- so it lay dormant until a change pushed a second one under, and
+// then stopped the lane rather than answering wrongly.
+func TestSameNamedFunctionsInOneFile(t *testing.T) {
+	const prof = `github.com/x/y/internal/vm/csv.go:37:	ToS	0.0%
+github.com/x/y/internal/vm/csv.go:54:	ToS	50.0%
+github.com/x/y/internal/vm/csv.go:280:	ToS	100.0%
+github.com/x/y/internal/vm/io.go:10:	displayStr	90.0%
+total:	(statements)	99.9%
+`
+	got, err := parse(strings.NewReader(prof), "profile", "github.com/x/y")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	// Two of the three ToS are below 100 and must be two distinct records; the
+	// third is skipped but still CONSUMES its ordinal, so the survivors keep
+	// their numbers when a sibling crosses the line.
+	want := map[string]float64{
+		"/internal/vm/csv.go ToS":       0.0,
+		"/internal/vm/csv.go ToS#2":     50.0,
+		"/internal/vm/io.go displayStr": 90.0,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("parsed %d records, want %d: %v", len(got), len(want), got)
+	}
+	for k, e := range got {
+		w, ok := want[k.String()]
+		if !ok {
+			t.Errorf("unexpected record %q", k.String())
+			continue
+		}
+		if e.pct != w {
+			t.Errorf("%s: %.1f%%, want %.1f%%", k.String(), e.pct, w)
+		}
+	}
+}
+
+// TestNameColumnRoundTrips: the ordinal travels in the function column, so a
+// record written by one run is read back identically by the next.
+func TestNameColumnRoundTrips(t *testing.T) {
+	for _, k := range []fn{
+		{file: "a.go", name: "ToS", ord: 0},
+		{file: "a.go", name: "ToS", ord: 1},
+		{file: "a.go", name: "ToS", ord: 11},
+	} {
+		col := k.nameCol()
+		name, ord, err := parseNameCol(col)
+		if err != nil {
+			t.Fatalf("%q: %v", col, err)
+		}
+		if name != k.name || ord != k.ord {
+			t.Errorf("%q round-tripped to (%q, %d), want (%q, %d)", col, name, ord, k.name, k.ord)
+		}
+	}
+	// A malformed column is refused rather than read as a name containing '#'.
+	for _, bad := range []string{"ToS#", "ToS#x", "ToS#0", "ToS#1"} {
+		if _, _, err := parseNameCol(bad); err == nil {
+			t.Errorf("parseNameCol(%q) was accepted; N must be an integer >= 2", bad)
+		}
+	}
+}
+
+// TestOrdinalSurvivesALineShift is the property the line was rejected for: the
+// identity must not move when a comment is inserted above a function.
+func TestOrdinalSurvivesALineShift(t *testing.T) {
+	before := `github.com/x/y/a.go:10:	ToS	0.0%
+github.com/x/y/a.go:20:	ToS	50.0%
+total:	(statements)	99.9%
+`
+	after := `github.com/x/y/a.go:110:	ToS	0.0%
+github.com/x/y/a.go:120:	ToS	50.0%
+total:	(statements)	99.9%
+`
+	b, err := parse(strings.NewReader(before), "before", "github.com/x/y")
+	if err != nil {
+		t.Fatalf("before: %v", err)
+	}
+	a, err := parse(strings.NewReader(after), "after", "github.com/x/y")
+	if err != nil {
+		t.Fatalf("after: %v", err)
+	}
+	for k := range b {
+		if _, ok := a[k]; !ok {
+			t.Errorf("%s vanished when its line moved; the identity still depends on the line", k)
+		}
+	}
+	if len(a) != len(b) {
+		t.Errorf("record count changed across a pure line shift: %d -> %d", len(b), len(a))
+	}
+}
