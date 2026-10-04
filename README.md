@@ -5,6 +5,7 @@
 [![Docs](https://img.shields.io/badge/docs-mkdocs--material-9B1C2E)](https://go-embedded-ruby.github.io/docs/)
 [![License](https://img.shields.io/badge/license-BSD--3--Clause-blue)](LICENSE)
 [![Go](https://img.shields.io/badge/go-1.26.4%2B-00ADD8)](https://go.dev/dl/)
+[![Release](https://img.shields.io/badge/release-v0.1.0-blue)](https://github.com/go-embedded-ruby/ruby/releases/tag/v0.1.0)
 [![ruby/spec](https://img.shields.io/badge/ruby%2Fspec-23%2C481%20examples%20passing-1a7f37)](#runtime-conformance--rubyspec)
 
 **A Ruby interpreter written in pure Go, with cgo disabled** — so you can embed it
@@ -700,7 +701,9 @@ hello from rbgo
 ```
 
 (The first run compiles the interpreter, which takes a while and produces a large
-binary. There are no version tags yet, so `@latest` resolves to the tip of `main`.)
+binary. `@latest` now resolves to the newest **release tag** rather than the tip
+of `main` — `v0.1.0` as of this writing — so pass `@main` explicitly if you want
+unreleased work.)
 
 ## Quick start
 
@@ -762,6 +765,15 @@ func Run(src string, out io.Writer) error
 `Run` parses, compiles and executes `src` on a **fresh VM**, writing the program's
 output to `out`. Everything else in this repository is under `internal/`, so this
 is the whole embedding surface today.
+
+```console
+$ go get github.com/go-embedded-ruby/ruby@v0.1.0
+```
+
+`v0.1.0` is the first tagged release; before it the module was consumable only by
+pseudo-version. It is a `v0.x`, so the API carries no compatibility promise yet —
+pin the version rather than tracking `@latest`, and read the release notes, which
+list the open security issues rather than leaving them to be discovered.
 
 ```go
 package main
