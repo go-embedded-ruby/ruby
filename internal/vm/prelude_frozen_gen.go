@@ -4426,7 +4426,7 @@ func embeddedPrelude() *bytecode.ISeq {
 								NumLocals:   1,
 								Locals:      []string{"c"},
 								Lines:       []bytecode.LineEntry{{PC: 0, Line: 109}},
-								FirstLine:   109,
+								FirstLine:   1416,
 								Super:       "",
 							},
 						},
@@ -4882,7 +4882,7 @@ func embeddedPrelude() *bytecode.ISeq {
 								NumLocals:   2,
 								Locals:      []string{"v", "r"},
 								Lines:       []bytecode.LineEntry{{PC: 0, Line: 1609}},
-								FirstLine:   1608,
+								FirstLine:   1609,
 								Super:       "",
 							},
 							&bytecode.ISeq{
@@ -4897,7 +4897,7 @@ func embeddedPrelude() *bytecode.ISeq {
 								NumLocals:   2,
 								Locals:      []string{"v", "r"},
 								Lines:       []bytecode.LineEntry{{PC: 0, Line: 1610}},
-								FirstLine:   1608,
+								FirstLine:   1610,
 								Super:       "",
 							},
 							&bytecode.ISeq{
@@ -4912,7 +4912,7 @@ func embeddedPrelude() *bytecode.ISeq {
 								NumLocals:   2,
 								Locals:      []string{"v", "r"},
 								Lines:       []bytecode.LineEntry{{PC: 0, Line: 1611}},
-								FirstLine:   1608,
+								FirstLine:   1611,
 								Super:       "",
 							},
 							&bytecode.ISeq{
@@ -4927,7 +4927,7 @@ func embeddedPrelude() *bytecode.ISeq {
 								NumLocals:   2,
 								Locals:      []string{"v", "r"},
 								Lines:       []bytecode.LineEntry{{PC: 0, Line: 1612}},
-								FirstLine:   1608,
+								FirstLine:   1612,
 								Super:       "",
 							},
 							&bytecode.ISeq{
@@ -4942,7 +4942,7 @@ func embeddedPrelude() *bytecode.ISeq {
 								NumLocals:   2,
 								Locals:      []string{"v", "r"},
 								Lines:       []bytecode.LineEntry{{PC: 0, Line: 1613}},
-								FirstLine:   1608,
+								FirstLine:   1613,
 								Super:       "",
 							},
 							&bytecode.ISeq{
@@ -4957,7 +4957,7 @@ func embeddedPrelude() *bytecode.ISeq {
 								NumLocals:   2,
 								Locals:      []string{"v", "r"},
 								Lines:       []bytecode.LineEntry{{PC: 0, Line: 1614}},
-								FirstLine:   1608,
+								FirstLine:   1614,
 								Super:       "",
 							},
 							&bytecode.ISeq{
@@ -4973,7 +4973,7 @@ func embeddedPrelude() *bytecode.ISeq {
 								NumLocals:   2,
 								Locals:      []string{"v", "r"},
 								Lines:       []bytecode.LineEntry{{PC: 0, Line: 1615}},
-								FirstLine:   1608,
+								FirstLine:   1615,
 								Super:       "",
 							},
 							&bytecode.ISeq{
