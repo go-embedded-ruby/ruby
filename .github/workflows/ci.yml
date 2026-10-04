@@ -128,7 +128,7 @@ jobs:
       - name: Build rbgo.wasm (CGO=0, GOOS=wasip1)
         run: CGO_ENABLED=0 GOOS=wasip1 GOARCH=wasm go build -o rbgo.wasm ./cmd/rbgo
       - name: Install wazero (pure-Go wasm runtime)
-        run: go install github.com/tetratelabs/wazero/cmd/wazero@latest
+        run: go install github.com/tetratelabs/wazero/cmd/wazero@v1.12.0
       - name: Run a Ruby snippet under wazero
         run: |
           out=$("$(go env GOPATH)/bin/wazero" run rbgo.wasm -e 'puts (1..10).sum')
