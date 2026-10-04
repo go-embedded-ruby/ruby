@@ -231,8 +231,22 @@ jobs:
           src="$(mktemp -d)"
           git clone --depth 50 https://github.com/go-embedded-ruby/ruby "$src/ruby"
           cd "$src/ruby"
-          git fetch --depth 50 origin "$COMMIT" || true
-          git checkout -q "$COMMIT" || echo "== commit $COMMIT not reachable; testing default branch HEAD"
+          # Fail closed. These two lines used to end in `|| true` and
+          # `|| echo "... testing default branch HEAD"`, which defeated the
+          # `set -euo pipefail` above on purpose: an unreachable $COMMIT -- a
+          # --depth miss, a force-push, or a workflow_dispatch off a branch --
+          # left the clone on whatever the default branch pointed at, ran the
+          # suite against THAT, and still printed "validation OK" at the end.
+          # A green tick that did not test its subject is worse than a red one,
+          # because nothing downstream can tell the difference.
+          git fetch --depth 1 origin "$COMMIT"
+          git checkout -q --detach "$COMMIT"
+          head="$(git rev-parse HEAD)"
+          if [ "$head" != "$COMMIT" ]; then
+            echo "== HEAD is $head but \$COMMIT is $COMMIT -- refusing to report on the wrong tree"
+            exit 1
+          fi
+          echo "== testing $head"
 
           # ---- native validation --------------------------------------------------
           export GOWORK=off CGO_ENABLED=0
@@ -335,8 +349,22 @@ jobs:
           src="$(mktemp -d)"
           git clone --depth 50 https://github.com/go-embedded-ruby/ruby "$src/ruby"
           cd "$src/ruby"
-          git fetch --depth 50 origin "$COMMIT" || true
-          git checkout -q "$COMMIT" || echo "== commit $COMMIT not reachable; testing default branch HEAD"
+          # Fail closed. These two lines used to end in `|| true` and
+          # `|| echo "... testing default branch HEAD"`, which defeated the
+          # `set -euo pipefail` above on purpose: an unreachable $COMMIT -- a
+          # --depth miss, a force-push, or a workflow_dispatch off a branch --
+          # left the clone on whatever the default branch pointed at, ran the
+          # suite against THAT, and still printed "validation OK" at the end.
+          # A green tick that did not test its subject is worse than a red one,
+          # because nothing downstream can tell the difference.
+          git fetch --depth 1 origin "$COMMIT"
+          git checkout -q --detach "$COMMIT"
+          head="$(git rev-parse HEAD)"
+          if [ "$head" != "$COMMIT" ]; then
+            echo "== HEAD is $head but \$COMMIT is $COMMIT -- refusing to report on the wrong tree"
+            exit 1
+          fi
+          echo "== testing $head"
 
           # ---- native validation --------------------------------------------------
           export GOWORK=off CGO_ENABLED=0

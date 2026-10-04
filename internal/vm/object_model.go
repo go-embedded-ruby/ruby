@@ -2258,7 +2258,7 @@ func (vm *VM) send(recv object.Value, name string, args []object.Value, blk *Pro
 		if o, ok := recv.(*RObject); ok && object.IsNil(o.builtin) {
 			pureUser = true
 		}
-		if op, ok := operatorOpcode(name); ok && !pureUser {
+		if op, ok := operatorOpcode(name); ok && !pureUser && !vm.basicOpWasDefined(op, recv) {
 			return vm.binaryOp(op, recv, args[0])
 		}
 	}
