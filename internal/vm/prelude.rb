@@ -1987,9 +1987,19 @@ class Pathname
     Pathname.new(Pathname.__lex_plus(@path, other.to_s))
   end
 
-  def /(other)
-    self + other
-  end
+  # `alias / +`, not a forwarding def. The difference is observable three ways:
+  # #original_name answers :+, instance_method(:/) == instance_method(:+), and a
+  # redefinition of #+ does NOT follow -- the alias keeps the body it was made
+  # from, as ruby does:
+  #
+  #   class Pathname; def +(o); "HIJACKED"; end; end
+  #   Pathname.new("/a") / "b"   ruby #<Pathname:/a/b>   forwarding def "HIJACKED"
+  #
+  # It was a forwarding def because the parser refused `alias / +`: after
+  # `alias`, a `/` opened a regexp. Fixed in go-ruby-parser v0.11.1, which this
+  # bumps to, and which CRuby's own pathname.rb line 358 needs for the same
+  # reason.
+  alias / +
 
   def join(*args)
     result = self
