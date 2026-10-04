@@ -728,12 +728,17 @@ func (c *Compiler) compileNode1(n ast.Node) {
 		for _, part := range v.Parts {
 			c.compileNode(part)
 			if _, literal := part.(*ast.StringLit); !literal {
-				// MRI's `dup; objtostring; anytostring`: the original value is kept
-				// below the #to_s result, because when #to_s does not return a
-				// String the fallback renders the VALUE, not the result.
-				b.emit(bytecode.OpDup, 0, 0)
-				b.emit(bytecode.OpSend, b.addName("to_s"), 0)
-				b.emit(bytecode.OpAnyToString, 0, 0)
+				// MRI's objtostring (+ its anytostring fallback), as one opcode.
+				// It is NOT a plain `send :to_s`: a value that is already a String
+				// is left alone, subclasses included, so a redefined String#to_s
+				// does not change what an interpolation produces --
+				//
+				//	class S < String; def to_s; "SUB"; end; end
+				//	"#{S.new("x")}"    ruby 4.0.5  "x"    a bare send  "SUB"
+				//
+				// -- and when #to_s answers with something other than a String the
+				// fallback renders the VALUE, not that answer.
+				b.emit(bytecode.OpObjToString, 0, 0)
 			}
 		}
 		b.emit(bytecode.OpConcatStrings, len(v.Parts), 0)

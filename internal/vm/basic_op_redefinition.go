@@ -368,3 +368,47 @@ func (vm *VM) basicOpWasDefined(op bytecode.Op, recv object.Value) bool {
 	_, had := per[op]
 	return had
 }
+
+// objToString is MRI's objtostring instruction plus its anytostring fallback:
+//
+//	if (RB_TYPE_P(recv, T_STRING)) return recv;
+//	str = rb_funcall(recv, idTo_s, 0);
+//	return rb_obj_as_string_result(str, recv);
+//
+// The T_STRING arm matters and is measured: a String is returned UNTOUCHED,
+// subclasses included, so a redefined String#to_s does not change what an
+// interpolation produces --
+//
+//	class S < String; def to_s; "SUB"; end; end
+//	"#{S.new("x")}"      ruby 4.0.5  "x"
+//	S.new("x").to_s      ruby 4.0.5  "SUB"
+//
+// -- which a plain `send :to_s` gets wrong in both directions at once.
+func (vm *VM) objToString(v object.Value) object.Value {
+	if s := stringTypeOf(v); s != nil {
+		return s
+	}
+	if r, ok := vm.send(v, "to_s", nil, nil).(*object.String); ok {
+		return r
+	}
+	return object.NewString(vm.anyToSForConcat(v))
+}
+
+// stringTypeOf returns the String a value IS -- itself, or the built-in value a
+// String subclass instance wraps -- or nil when it is not a String at all. It
+// is rbgo's RB_TYPE_P(v, T_STRING): a subclass instance is an *RObject carrying
+// the String in its builtin slot, so a bare type assertion misses it.
+//
+// Not to be confused with regexp.go's stringLike, which answers a different
+// question: "String or Symbol, as text", for a regexp group key.
+func stringTypeOf(v object.Value) *object.String {
+	if s, ok := v.(*object.String); ok {
+		return s
+	}
+	if o, ok := v.(*RObject); ok {
+		if s, ok := o.builtin.(*object.String); ok {
+			return s
+		}
+	}
+	return nil
+}

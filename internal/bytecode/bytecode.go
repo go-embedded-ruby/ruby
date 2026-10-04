@@ -122,7 +122,7 @@ const (
 	OpRegexpOnce      // A = target pc past the interpolation build; guards a /o literal: if the occurrence's Regexp is already memoised, push it and jump to A, else fall through to (re)build once
 	OpDefinedSuper    // "super" if the method `super` would reach from the current frame exists, else nil; never evaluates the super arguments
 	OpConcatStrings   // A = part count; pops A values and concatenates their string forms (MRI's concatstrings). It does NOT dispatch String#+, which is what makes an interpolated literal independent of a redefined operator
-	OpAnyToString     // pops a #to_s result and, below it, the value it came from; pushes the result when it is a String, else MRI's rb_any_to_s of the VALUE (its anytostring)
+	OpObjToString     // pops a value; pushes it unchanged when it is a String (subclasses included), else its #to_s -- or MRI's rb_any_to_s of the value when that #to_s did not answer with a String. MRI's objtostring + anytostring in one
 
 	// OpLast is one past the highest opcode. It is not an instruction; it sizes
 	// per-opcode tables (see the VM's basic-operator cache). Keep it last.
@@ -182,7 +182,7 @@ var opNames = map[Op]string{
 	OpSplatToArray: "splat_to_array", OpConcatArray: "concat_array", OpSendArray: "send_array",
 	OpKwGiven: "kw_given", OpHashSetPair: "hash_set_pair", OpHashMerge: "hash_merge",
 	OpSendBlockArg: "send_block_arg", OpSendArrayBlockArg: "send_array_block_arg",
-	OpConcatStrings: "concat_strings", OpAnyToString: "any_to_string",
+	OpConcatStrings: "concat_strings", OpObjToString: "obj_to_string",
 	OpRegexp: "regexp", OpRegexpDyn: "regexp_dyn", OpRegexpOnce: "regexp_once", OpTruthy: "truthy", OpRaiseNoMatch: "raise_no_match",
 	OpBinding:            "binding",
 	OpDefineClassScoped:  "define_class_scoped",

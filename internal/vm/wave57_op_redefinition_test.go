@@ -161,6 +161,15 @@ p "A#{1}B"`, "\"A1B\"\n"},
 p "A#{1}B"`, "\"A1B\"\n"},
 		{"both", `class String; def to_s; :T; end; def +(o); :P; end; end
 p "A#{1}B#{2}C"`, "\"A1B2C\"\n"},
+		// A value that IS a String -- subclass included -- is interpolated
+		// UNTOUCHED, which a plain `send :to_s` gets wrong in both directions at
+		// once: it would answer "SUB" here while #to_s itself must still answer
+		// "SUB" when asked directly.
+		{"string subclass", `class S < String; def to_s; "SUB"; end; end
+p "#{S.new("x")}"
+p S.new("x").to_s`, "\"x\"\n\"SUB\"\n"},
+		{"plain string subclass", `class T < String; end
+p "#{T.new("y")}"`, "\"y\"\n"},
 		{"frozen", `p "a#{1}".frozen?`, "false\n"},
 		{"encoding", `p "é#{1}".encoding.to_s`, "\"UTF-8\"\n"},
 	} {

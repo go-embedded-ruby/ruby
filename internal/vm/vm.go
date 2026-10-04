@@ -3142,17 +3142,12 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				elems = append(elems, a2.Elems...)
 				elems = append(elems, b2.Elems...)
 				push(object.NewArrayFromSlice(elems))
-			case bytecode.OpAnyToString:
-				// MRI's anytostring: keep the #to_s result when it is a String,
-				// else render the ORIGINAL value with rb_any_to_s. The value sits
-				// under the result because the compiler dup'd it.
-				res := pop()
-				orig := pop()
-				if _, ok := res.(*object.String); ok {
-					push(res)
-				} else {
-					push(object.NewString(vm.anyToSForConcat(orig)))
-				}
+			case bytecode.OpObjToString:
+				// MRI's objtostring, with its anytostring fallback: a String is
+				// pushed back untouched, anything else goes through #to_s, and a
+				// #to_s that does not answer with a String falls back to
+				// rb_any_to_s of the ORIGINAL value.
+				push(vm.objToString(pop()))
 			case bytecode.OpConcatStrings:
 				// MRI's concatstrings: join A already-pushed parts into one fresh,
 				// unfrozen String. Deliberately NOT String#+ — see the compiler's
