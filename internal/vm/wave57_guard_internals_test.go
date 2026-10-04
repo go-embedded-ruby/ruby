@@ -160,3 +160,61 @@ func TestResolveBasicOpOverrideIgnoresANonOperator(t *testing.T) {
 		t.Errorf("resolveBasicOpOverride(OpDup) = %v, want nil", m.name)
 	}
 }
+
+// TestOperatorOpcodeMapsEveryName: operatorOpcode is the name -> opcode map the
+// send path's fallback and defined? consult. Its `-` case stopped being reached
+// once Integer#- had a real record, so the gate reported it; the mapping is
+// what the function IS, so it is asserted rather than left to a caller.
+func TestOperatorOpcodeMapsEveryName(t *testing.T) {
+	for name, want := range map[string]bytecode.Op{
+		"+": bytecode.OpAdd,
+		"-": bytecode.OpSub,
+		"*": bytecode.OpMul,
+		"/": bytecode.OpDiv,
+		"%": bytecode.OpMod,
+	} {
+		got, ok := operatorOpcode(name)
+		if !ok {
+			t.Errorf("operatorOpcode(%q) reported no opcode", name)
+			continue
+		}
+		if got != want {
+			t.Errorf("operatorOpcode(%q) = %v, want %v", name, got, want)
+		}
+		// and the names round-trip through basicOpName
+		if back := basicOpName(got); back != name {
+			t.Errorf("basicOpName(operatorOpcode(%q)) = %q", name, back)
+		}
+	}
+	for _, name := range []string{"==", "<", "**", "[]", "to_s", ""} {
+		if _, ok := operatorOpcode(name); ok {
+			t.Errorf("operatorOpcode(%q) claimed an opcode; only the five arithmetic names have one", name)
+		}
+	}
+}
+
+// TestNoRecordBeforeAndNoneNowKeepsTheInlinePath: a watched class that never
+// had this operator -- Hash has no #+ in ruby either -- must keep the inline
+// path, so the opcode produces MRI's own error rather than this guard reading
+// "nothing resolves" as "it was removed".
+func TestNoRecordBeforeAndNoneNowKeepsTheInlinePath(t *testing.T) {
+	vm := New(io.Discard)
+	h := object.NewHash()
+	if m := vm.resolveBasicOpOverride(bytecode.OpAdd, h, vm.cHash); m != nil {
+		t.Errorf("resolveBasicOpOverride for Hash#+ = %v, want nil (no record then, none now)", m.name)
+	}
+	// The control: Integer#+ HAS a record, so the same call answers nil for a
+	// different reason -- it resolves to the record itself, not to nothing.
+	if m := vm.resolveBasicOpOverride(bytecode.OpAdd, object.IntValue(1), vm.cInteger); m != nil {
+		t.Errorf("resolveBasicOpOverride for an untouched Integer#+ = %v, want nil", m.name)
+	}
+	// And the error the inline path gives for Hash#+ is the one ruby gives.
+	const src = `begin
+  p({a: 1} + {b: 2})
+rescue => e
+  puts "#{e.class}"
+end`
+	if got := eval(t, src); got != "TypeError\n" {
+		t.Errorf("Hash#+ raised %q; the inline path must still produce its own error", got)
+	}
+}
