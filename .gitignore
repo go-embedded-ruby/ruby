@@ -12,6 +12,12 @@ cov.out
 # Go test binaries (e.g. `go test -c`)
 *.test
 
+# Test/debug logs. race.log -- a `panic: test timed out` goroutine dump from
+# TestThread -- rode into the repository in #294 and sat on a PUBLIC default
+# branch for months, carrying the author's home path eight times. A dump is
+# never worth committing, and `*.out`/`*.test` above did not cover `.log`.
+*.log
+
 # Editor / OS noise
 .DS_Store
 /rbgo.exe
