@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -116,7 +117,6 @@ func TestCovRatchetRefusesWhatItCannotRead(t *testing.T) {
 		{"truncated, no total", "github.com/go-embedded-ruby/ruby/a.go:1:\tf\t50.0%\n", "no total: line"},
 		{"not a cover record", "hello world\n", "not a cover -func record"},
 		{"percentage is not a number", "github.com/go-embedded-ruby/ruby/a.go:1:\tf\tmany%\ntotal:\t(statements)\t100.0%\n", "is not a percentage"},
-		{"same function twice", "github.com/go-embedded-ruby/ruby/a.go:1:\tf\t50.0%\ngithub.com/go-embedded-ruby/ruby/a.go:9:\tf\t60.0%\ntotal:\t(statements)\t100.0%\n", "appears twice"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			out, err := judge(t, tc.profile)
@@ -141,6 +141,40 @@ func TestCovRatchetRefusesWhatItCannotRead(t *testing.T) {
 
 // TestCovRatchetUpdateRoundTrips: -update writes a record this tool reads back
 // and accepts, sorted, so a regenerated record diffs cleanly.
+// TestSameFunctionTwiceIsLegalNotMalformed replaces a case that asserted the
+// opposite. The table above used to include
+//
+//	{"same function twice", "a.go:1:\tf\t50.0%\na.go:9:\tf\t60.0%\n…", "appears twice"}
+//
+// i.e. it pinned the tool's REFUSAL of a profile with one name twice. That
+// encoded the assumption this change removes: a coverage profile does not print
+// the receiver, so two methods of the same name in one file are ordinary input,
+// and internal/vm/csv.go has three `ToS()`. The old case was testing the defect.
+//
+// What is still refused is a record column whose ordinal is not an integer >= 2
+// -- covered by TestNameColumnRoundTrips -- because `f#1` would give the first
+// occurrence a second spelling.
+func TestSameFunctionTwiceIsLegalNotMalformed(t *testing.T) {
+	const prof = "github.com/go-embedded-ruby/ruby/a.go:1:\tf\t50.0%\n" +
+		"github.com/go-embedded-ruby/ruby/a.go:9:\tf\t60.0%\n" +
+		"total:\t(statements)\t100.0%\n"
+	got, err := parse(strings.NewReader(prof), "profile", "github.com/go-embedded-ruby/ruby/")
+	if err != nil {
+		t.Fatalf("two same-named functions must parse, got %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("parsed %d records, want 2: %v", len(got), got)
+	}
+	var names []string
+	for k := range got {
+		names = append(names, k.nameCol())
+	}
+	sort.Strings(names)
+	if names[0] != "f" || names[1] != "f#2" {
+		t.Errorf("function columns %v, want [f f#2]", names)
+	}
+}
+
 func TestCovRatchetUpdateRoundTrips(t *testing.T) {
 	dir := t.TempDir()
 	rp := filepath.Join(dir, "BELOW100.test")
