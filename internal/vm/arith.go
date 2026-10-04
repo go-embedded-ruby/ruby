@@ -251,7 +251,27 @@ func (vm *VM) hasCustomNeq(a object.Value) bool {
 	return vm.overriddenNegation(a, "!=") != nil
 }
 
+// binaryOp is an operator opcode's evaluation: MRI's vm_opt_plus and siblings.
+// It dispatches a redefined operator and otherwise keeps the inline path, which
+// is the BASIC_OP_UNREDEFINED_P guard rbgo was missing -- see
+// basic_op_redefinition.go for what that cost.
 func (vm *VM) binaryOp(op bytecode.Op, a, b object.Value) object.Value {
+	if m := vm.overriddenBasicOp(op, a); m != nil {
+		if m == basicOpRemoved {
+			// The method was removed; raise the NoMethodError a send would.
+			return raise("NoMethodError", "undefined method '%s' for %s",
+				basicOpName(op), vm.undefinedMethodReceiver(a))
+		}
+		return vm.invoke(m, a, []object.Value{b}, nil)
+	}
+	return vm.binaryOpBuiltin(op, a, b)
+}
+
+// binaryOpBuiltin is the inline arithmetic itself, with no redefinition check.
+// The operator methods installed by defineBasicOperatorMethods call it too, so
+// `1 + 2` and `1.send(:+, 2)` run one implementation rather than two that could
+// disagree -- which is how the guard's absence stayed invisible.
+func (vm *VM) binaryOpBuiltin(op bytecode.Op, a, b object.Value) object.Value {
 	// An instance of a user subclass of a built-in value type uses that value's
 	// own operators (so a String-subclass "+", an Array-subclass "*", and the
 	// comparisons all work), on either side of the operator.

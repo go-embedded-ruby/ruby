@@ -17,6 +17,14 @@
 # is not done: that cost is not observable at program level -- five runs of
 # 200000 puts gave overlapping distributions -- and a second serial-validated
 # cache for an unobservable effect is complexity bought with nothing.
+# The three defined.go rows are an operator SPECIAL CASE that fourteen new
+# operator records made unreachable for Integer/Float/String/Array -- defined?
+# now finds the method the ordinary way. It is NOT removed, because it still
+# serves the receivers binaryOp computes on WITHOUT a record: Bignum,
+# Rational, Complex, Time. Settling that needs a defined? census across every
+# such receiver against ruby, which is its own measured wave (issue filed), so
+# the arms stay and are recorded rather than deleted on a guess.
+#
 # Recorded 2026-09-28 from run 36424534618, main @ 1a79138b, CI's own measurement.
 internal/object/object.go	repr	90.9%
 internal/vm/argf.go	ToS	0.0%
@@ -34,6 +42,9 @@ internal/vm/csv.go	ToS	0.0%
 internal/vm/csv.go	ToS#2	0.0%
 internal/vm/date_bind.go	Inspect	0.0%
 internal/vm/date_bind.go	ToS	0.0%
+internal/vm/defined.go	definedResponds	85.7%
+internal/vm/defined.go	hasInlineArith	75.0%
+internal/vm/defined.go	respondsTo	80.0%
 internal/vm/encoding.go	ToS	0.0%
 internal/vm/enumerator.go	ToS#2	0.0%
 internal/vm/io.go	inspectStr	83.3%

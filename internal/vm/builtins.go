@@ -6572,6 +6572,10 @@ func (vm *VM) bootstrap() {
 	// Move Kernel's methods off Object and onto the Kernel module, where MRI
 	// defines them — runs last, once every one of them is defined above.
 	vm.rehomeKernelMethods()
+	// The operator methods MRI defines and rbgo only ever computed in the opcode
+	// (Integer#+, String#*, …). The matching SNAPSHOT is taken later, at the end
+	// of VM construction — see basic_op_redefinition.go and NewWithStderr.
+	vm.defineBasicOperatorMethods()
 }
 
 // The three sets below are the name → owner/visibility map CRuby gives Kernel.
