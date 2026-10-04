@@ -181,6 +181,36 @@ p "#{T.new("y")}"`, "\"y\"\n"},
 	}
 }
 
+// TestInterpolationHonoursARefinement: the interpolation opcode is a CALL SITE,
+// so it resolves refinements the way a send does -- MRI's objtostring carries
+// its own call data, and ruby/spec pins it as "Module#refine for methods
+// accessed indirectly | is honored by string interpolation".
+//
+// Dispatching through a plain Go-level send lost it, because that has no
+// lexical scope to resolve against. The conformance ratchet caught it as the
+// one REGRESSED file in a run that gained 22 examples across 15 others -- which
+// a scalar total of +22 would have hidden.
+//
+// #puts does NOT honour it, on either side: rb_obj_as_string goes through
+// rb_funcall, which has no scope either. That row is the control, and it is
+// ruby's answer as much as rbgo's.
+func TestInterpolationHonoursARefinement(t *testing.T) {
+	src := `module M
+  refine Integer do
+    def to_s; "foo"; end
+  end
+end
+using M
+puts "#{1}"
+puts 1.to_s
+puts 1
+`
+	const want = "foo\nfoo\n1\n"
+	if got := eval(t, src); got != want {
+		t.Errorf("got %q want %q", got, want)
+	}
+}
+
 // TestInterpolationFallsBackToAnyToS is MRI's anytostring: when #to_s does not
 // return a String, the fallback renders the VALUE with rb_any_to_s rather than
 // raising. The address is masked, since it is an address.

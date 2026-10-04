@@ -3147,7 +3147,32 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				// pushed back untouched, anything else goes through #to_s, and a
 				// #to_s that does not answer with a String falls back to
 				// rb_any_to_s of the ORIGINAL value.
-				push(vm.objToString(pop()))
+				//
+				// It is a CALL SITE, so it resolves refinements the way OpSend
+				// does -- objtostring carries its own call data in MRI, and
+				// ruby/spec pins it: "Module#refine for methods accessed
+				// indirectly | is honored by string interpolation". Dispatching
+				// through vm.send alone lost that, because vm.send has no lexical
+				// scope to resolve against:
+				//
+				//	module M; refine Integer do def to_s; "foo"; end end; end
+				//	using M
+				//	"#{1}"     ruby 4.0.5  "foo"    through vm.send  "1"
+				//
+				// #puts does NOT honour it, on either side -- rb_obj_as_string
+				// goes through rb_funcall, which has no scope either (measured:
+				// ruby prints 1). So the refinement belongs HERE and not in
+				// displayStr.
+				otsV := pop()
+				if s := stringTypeOf(otsV); s != nil {
+					push(s)
+				} else {
+					var otsRef *Method
+					if vm.anyRefinements {
+						otsRef = refinedFor(otsV, "to_s")
+					}
+					push(vm.objToStringWith(otsV, otsRef))
+				}
 			case bytecode.OpConcatStrings:
 				// MRI's concatstrings: join A already-pushed parts into one fresh,
 				// unfrozen String. Deliberately NOT String#+ — see the compiler's

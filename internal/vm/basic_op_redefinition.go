@@ -385,11 +385,25 @@ func (vm *VM) basicOpWasDefined(op bytecode.Op, recv object.Value) bool {
 //
 // -- which a plain `send :to_s` gets wrong in both directions at once.
 func (vm *VM) objToString(v object.Value) object.Value {
+	return vm.objToStringWith(v, nil)
+}
+
+// objToStringWith is objToString with the refinement the CALL SITE resolved, if
+// any. The opcode passes it because only the interpreter loop knows the lexical
+// scope a `using` activated refinements in; refined is nil everywhere else, and
+// then this is a plain dispatch.
+func (vm *VM) objToStringWith(v object.Value, refined *Method) object.Value {
 	if s := stringTypeOf(v); s != nil {
 		return s
 	}
-	if r, ok := vm.send(v, "to_s", nil, nil).(*object.String); ok {
-		return r
+	var r object.Value
+	if refined != nil {
+		r = vm.invoke(refined, v, nil, nil)
+	} else {
+		r = vm.send(v, "to_s", nil, nil)
+	}
+	if s, ok := r.(*object.String); ok {
+		return s
 	}
 	return object.NewString(vm.anyToSForConcat(v))
 }
