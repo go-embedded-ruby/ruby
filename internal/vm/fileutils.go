@@ -78,8 +78,8 @@ func (vm *VM) registerFileUtils() {
 		return args[0]
 	})
 	// MRI aliases: mkpath / makedirs.
-	mod.smethods["mkpath"] = mod.smethods["mkdir_p"]
-	mod.smethods["makedirs"] = mod.smethods["mkdir_p"]
+	aliasBuiltinS(mod, "mkpath", "mkdir_p")
+	aliasBuiltinS(mod, "makedirs", "mkdir_p")
 
 	rmrf := func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		for _, p := range pathsOf(args[0]) {
@@ -103,7 +103,7 @@ func (vm *VM) registerFileUtils() {
 		}
 		return object.NilV
 	})
-	mod.smethods["safe_unlink"] = mod.smethods["rm_f"]
+	aliasBuiltinS(mod, "safe_unlink", "rm_f")
 
 	sdef("rm", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		for _, p := range pathsOf(args[0]) {
@@ -121,7 +121,7 @@ func (vm *VM) registerFileUtils() {
 		}
 		return object.NilV
 	})
-	mod.smethods["move"] = mod.smethods["mv"]
+	aliasBuiltinS(mod, "move", "mv")
 
 	sdef("cp", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		src, dst := strArg(args[0]), strArg(args[1])
@@ -134,7 +134,7 @@ func (vm *VM) registerFileUtils() {
 		}
 		return object.NilV
 	})
-	mod.smethods["copy"] = mod.smethods["cp"]
+	aliasBuiltinS(mod, "copy", "cp")
 
 	sdef("touch", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		for _, p := range pathsOf(args[0]) {

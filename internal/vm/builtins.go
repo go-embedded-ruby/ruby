@@ -143,14 +143,15 @@ func (vm *VM) bootstrap() {
 	// copies for the rarer native-block target, so the OpSend fast path may hand
 	// them the live operand-stack region without a defensive copy (defineNR).
 	vm.cProc.defineNR("call", procCall)
-	// Proc#[], #yield and #=== are genuine built-in aliases of Proc#call: MRI
-	// exposes them as the same method definition, so #instance_method(:[]) equals
+	// Proc#[], #yield and #=== are MRI second definitions over Proc#call's
+	// body: they share its definition, so #instance_method(:[]) equals
 	// #instance_method(:call) (and #=== lets a proc/lambda act as a case / grep
-	// pattern). aliasBuiltin shares the one non-retaining *Method record; a fresh
-	// define would compare unequal even with an identical body.
-	aliasBuiltin(vm.cProc, "[]", "call")
-	aliasBuiltin(vm.cProc, "yield", "call")
-	aliasBuiltin(vm.cProc, "===", "call")
+	// pattern), while each still reports ITSELF as #original_name.
+	// defineBuiltinSecondName copies the non-retaining *Method record and points
+	// it at that definition; a plain define would compare unequal.
+	defineBuiltinSecondName(vm.cProc, "[]", "call")
+	defineBuiltinSecondName(vm.cProc, "yield", "call")
+	defineBuiltinSecondName(vm.cProc, "===", "call")
 	// Proc#== is identity equality (a Proc never equals a distinct Proc, even one
 	// with the same body and environment; a #dup returns the same object, so it
 	// equals its original). Proc#eql? is the same definition. Defining it on Proc
@@ -159,7 +160,7 @@ func (vm *VM) bootstrap() {
 	vm.cProc.define("==", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return object.Bool(self == args[0])
 	})
-	aliasBuiltin(vm.cProc, "eql?", "==")
+	defineBuiltinSecondName(vm.cProc, "eql?", "==")
 	vm.cProc.define("arity", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(int64(self.(*Proc).arityVal()))
 	})
@@ -617,7 +618,7 @@ func (vm *VM) bootstrap() {
 	vm.cObject.define("sprintf", formatFn)
 	// #format shares #sprintf's exact method record (see the note at its former
 	// definition site), matching MRI where they are one method.
-	aliasBuiltin(vm.cObject, "format", "sprintf")
+	defineBuiltinSecondName(vm.cObject, "format", "sprintf")
 	vm.cObject.define("printf", nativePrintf)
 	vm.cObject.define("proc", func(_ *VM, _ object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
@@ -1151,7 +1152,7 @@ func (vm *VM) bootstrap() {
 	// Kernel.method(:fail) == …(:raise). The shared record is mirrored onto the
 	// Kernel module by rehomeKernelMethods ("fail" listed beside "raise").
 	// Reference: ruby/ruby v3_4_0 eval.c (rb_f_raise registered under both names).
-	aliasBuiltin(vm.cObject, "fail", "raise")
+	defineBuiltinSecondName(vm.cObject, "fail", "raise")
 	vm.cObject.define("Integer", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		args, doRaise := popExceptionKwarg(args)
 		vm.mustASCIICompat(args[0]) // rb_str_to_inum, before any parsing
@@ -1456,7 +1457,7 @@ func (vm *VM) bootstrap() {
 	// then's body and share the one Method record so
 	// Kernel.instance_method(:then) == Kernel.instance_method(:yield_self).
 	vm.cObject.define("then", thenFn)
-	vm.cObject.methods["yield_self"] = vm.cObject.methods["then"]
+	aliasBuiltin(vm.cObject, "yield_self", "then")
 	// Default equality: object identity for instances, structural for value
 	// types (Comparable#== and user-defined == override this via dispatch).
 	vm.cBasicObject.define("==", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
@@ -1967,7 +1968,7 @@ func (vm *VM) bootstrap() {
 	// Module#class_eval is an alias of Module#module_eval — a shared method record,
 	// so Module.instance_method(:class_eval) == Module.instance_method(:module_eval).
 	vm.cModule.define("module_eval", classEvalFn)
-	aliasBuiltin(vm.cModule, "class_eval", "module_eval")
+	defineBuiltinSecondName(vm.cModule, "class_eval", "module_eval")
 	classExec := func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		if blk == nil {
 			raise("LocalJumpError", "no block given (yield)")
@@ -1979,7 +1980,7 @@ func (vm *VM) bootstrap() {
 	// Module#module_exec runs the block with the module as self and the given
 	// arguments; Module#class_exec is its alias (shared record).
 	vm.cModule.define("module_exec", classExec)
-	aliasBuiltin(vm.cModule, "class_exec", "module_exec")
+	defineBuiltinSecondName(vm.cModule, "class_exec", "module_exec")
 	vm.cModule.define("define_method", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		cls := self.(*RClass)
 		if isFrozen(cls) {
@@ -2048,7 +2049,7 @@ func (vm *VM) bootstrap() {
 		return object.Bool(self == args[0])
 	}
 	vm.cSymbol.defineArgc("==", 1, symEqual)
-	aliasBuiltin(vm.cSymbol, "===", "==")
+	defineBuiltinSecondName(vm.cSymbol, "===", "==")
 	// Symbol#encoding: the encoding of the symbol's string (symbol.c v3_4_0
 	// sym_encoding is rb_obj_encoding(rb_sym2str(sym))). rb_str_intern re-tags an
 	// ASCII-only string as US-ASCII before interning it, whatever encoding it
@@ -2084,7 +2085,7 @@ func (vm *VM) bootstrap() {
 		return object.IntValue(int64(utf8.RuneCountInString(symStr(self))))
 	}
 	vm.cSymbol.defineArgc("length", 0, symLen)
-	aliasBuiltin(vm.cSymbol, "size", "length")
+	defineBuiltinSecondName(vm.cSymbol, "size", "length")
 	vm.cSymbol.defineArgc("empty?", 0, func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(symStr(self) == "")
 	})
@@ -2104,7 +2105,7 @@ func (vm *VM) bootstrap() {
 		return object.Symbol(succString(symStr(self)))
 	}
 	vm.cSymbol.defineArgc("succ", 0, symSucc)
-	aliasBuiltin(vm.cSymbol, "next", "succ")
+	defineBuiltinSecondName(vm.cSymbol, "next", "succ")
 	// Symbol#[] / #slice run the whole String#[] protocol against the symbol's
 	// name (they are registered after strIndexFn is defined, below).
 	// symbol.c v3_4_0 defines #start_with? / #end_with? as
@@ -2233,7 +2234,7 @@ func (vm *VM) bootstrap() {
 	vm.cString.defineArgc("length", 0, strLen)
 	// String#size is a genuine alias of String#length (shared record), so
 	// "abc".method(:size) == "abc".method(:length), matching MRI.
-	aliasBuiltin(vm.cString, "size", "length")
+	defineBuiltinSecondName(vm.cString, "size", "length")
 	vm.cString.defineArgc("bytesize", 0, func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(int64(len(strOf(self))))
 	})
@@ -2328,8 +2329,8 @@ func (vm *VM) bootstrap() {
 	vm.cString.defineArgc("succ!", 0, succBang)
 	// #next and #next! are true aliases of #succ / #succ! (they share the same
 	// Method object, so instance_method(:next) == instance_method(:succ)).
-	aliasBuiltin(vm.cString, "next", "succ")
-	aliasBuiltin(vm.cString, "next!", "succ!")
+	defineBuiltinSecondName(vm.cString, "next", "succ")
+	defineBuiltinSecondName(vm.cString, "next!", "succ!")
 	vm.cString.defineArgc("chr", 0, func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(stringChr(strOf(self)))
 	})
@@ -2774,7 +2775,7 @@ func (vm *VM) bootstrap() {
 	vm.cString.defineArgc("to_s", 0, func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return self
 	})
-	aliasBuiltin(vm.cString, "to_str", "to_s") // MRI alias of String#to_s
+	defineBuiltinSecondName(vm.cString, "to_str", "to_s") // MRI alias of String#to_s
 	strToSym := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		s := self.(*object.String)
 		if !validInEncoding(s.Bytes(), s.EncName()) { // a broken string cannot become a Symbol
@@ -2783,7 +2784,7 @@ func (vm *VM) bootstrap() {
 		return object.Symbol(strOf(self))
 	}
 	vm.cString.defineArgc("to_sym", 0, strToSym)
-	aliasBuiltin(vm.cString, "intern", "to_sym") // MRI alias of String#to_sym
+	defineBuiltinSecondName(vm.cString, "intern", "to_sym") // MRI alias of String#to_sym
 	// scrub replaces each ill-formed byte sequence with a replacement (the encoding's
 	// U+FFFD, or an explicit String / block result), returning a valid copy in the
 	// receiver's encoding. scrub! does the same in place, returning self.
@@ -2892,7 +2893,7 @@ func (vm *VM) bootstrap() {
 		return strIndexFn(vm, object.NewString(symStr(self)), args, blk)
 	}
 	vm.cSymbol.defineArgc("[]", -1, symIndexFn)
-	aliasBuiltin(vm.cSymbol, "slice", "[]")
+	defineBuiltinSecondName(vm.cSymbol, "slice", "[]")
 	// casecmp / casecmp? compare symbol names case-insensitively, but only against
 	// another Symbol — any other argument yields nil, as MRI does (String is never
 	// coerced here). They delegate to the String comparison of the two names.
@@ -2917,7 +2918,7 @@ func (vm *VM) bootstrap() {
 		return vm.send(object.NewString(symStr(self)), "match?", args, blk)
 	})
 	// #slice is a true alias of #[] (shares the exact method record).
-	aliasBuiltin(vm.cString, "slice", "[]")
+	defineBuiltinSecondName(vm.cString, "slice", "[]")
 	vm.cString.defineArgc("ord", 0, func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		s := strOf(self)
 		if s == "" {
@@ -3130,7 +3131,7 @@ func (vm *VM) bootstrap() {
 	})
 	// #length is a true alias of #size (shares the exact method record, so
 	// Array.instance_method(:length) == Array.instance_method(:size), as in MRI).
-	aliasBuiltin(vm.cArray, "length", "size")
+	defineBuiltinSecondName(vm.cArray, "length", "size")
 	vm.cArray.defineArgc("empty?", 0, func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(len(self.(*object.Array).Elems) == 0)
 	})
@@ -3407,7 +3408,7 @@ func (vm *VM) bootstrap() {
 	})
 	// #to_s is a true alias of #inspect: share the same method entry so
 	// Array.instance_method(:to_s) == Array.instance_method(:inspect), as in MRI.
-	vm.cArray.methods["to_s"] = vm.cArray.methods["inspect"]
+	aliasBuiltin(vm.cArray, "to_s", "inspect")
 	vm.cArray.defineArgc("push", -1, func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
 		vm.checkArrayFrozen(a)
@@ -3415,7 +3416,7 @@ func (vm *VM) bootstrap() {
 		return a
 	})
 	// #append is a true alias of #push (shared entry for UnboundMethod identity).
-	vm.cArray.methods["append"] = vm.cArray.methods["push"]
+	aliasBuiltin(vm.cArray, "append", "push")
 	vm.cArray.defineArgc("<<", 1, func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
 		vm.checkArrayFrozen(a)
@@ -3481,7 +3482,7 @@ func (vm *VM) bootstrap() {
 	}
 	vm.cArray.defineArgc("unshift", -1, unshift)
 	// #prepend is a true alias of #unshift: share the entry for identity.
-	vm.cArray.methods["prepend"] = vm.cArray.methods["unshift"]
+	aliasBuiltin(vm.cArray, "prepend", "unshift")
 	// Array#to_ary returns self (the implicit Array-conversion protocol point).
 	vm.cArray.defineArgc("to_ary", 0, func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return self
@@ -3654,7 +3655,7 @@ func (vm *VM) bootstrap() {
 	// #slice is a true alias of #[] (shares the exact method record, so
 	// Array.instance_method(:slice) == Array.instance_method(:[]), as in MRI);
 	// #at takes a single integer index only.
-	aliasBuiltin(vm.cArray, "slice", "[]")
+	defineBuiltinSecondName(vm.cArray, "slice", "[]")
 	vm.cArray.defineArgc("at", 1, func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		if len(args) != 1 {
 			raise("ArgumentError", "wrong number of arguments (given %d, expected 1)", len(args))
@@ -3899,8 +3900,8 @@ func (vm *VM) bootstrap() {
 	// #collect and #filter are true aliases of #map and #select. Defining them on
 	// Array with the shared record (rather than leaving Enumerable's alias to win)
 	// makes Array.instance_method(:collect)/(:filter) == (:map)/(:select), as MRI.
-	aliasBuiltin(vm.cArray, "collect", "map")
-	aliasBuiltin(vm.cArray, "filter", "select")
+	defineBuiltinSecondName(vm.cArray, "collect", "map")
+	defineBuiltinSecondName(vm.cArray, "filter", "select")
 	// reduce/inject are native for the same reason (and #inject delegates here via
 	// the prelude). The fold mirrors Enumerable#reduce exactly — the (init, sym),
 	// (sym), (init) and bare-block forms, the "no block given" yield error, and the
@@ -3968,7 +3969,7 @@ func (vm *VM) bootstrap() {
 	})
 	// collect! is the classic alias of map! (as collect is of map). Share the
 	// method record so Array.instance_method(:collect!) == (:map!), as in MRI.
-	aliasBuiltin(vm.cArray, "collect!", "map!")
+	defineBuiltinSecondName(vm.cArray, "collect!", "map!")
 	vm.cArray.defineArgc("reverse!", 0, func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
 		vm.checkArrayFrozen(a)
@@ -3993,7 +3994,7 @@ func (vm *VM) bootstrap() {
 	}
 	vm.cArray.defineArgc("select!", 0, selectBang)
 	// #filter! is a true alias of #select! (shared record for identity).
-	aliasBuiltin(vm.cArray, "filter!", "select!")
+	defineBuiltinSecondName(vm.cArray, "filter!", "select!")
 	vm.cArray.defineArgc("reject!", 0, func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
 			return enumFor(self, "reject!")
@@ -4486,7 +4487,7 @@ func (vm *VM) bootstrap() {
 		}
 		return object.NilV
 	})
-	aliasBuiltin(vm.cArray, "find_index", "index")
+	defineBuiltinSecondName(vm.cArray, "find_index", "index")
 	// rindex searches backward from the end: rindex(obj) → the last index whose
 	// element == obj; rindex { |e| … } → the last index whose block is truthy (an
 	// argument, if given, wins over the block); no argument and no block → a sized
@@ -4937,7 +4938,7 @@ func (vm *VM) bootstrap() {
 	})
 	// length is a true alias of size (Hash.instance_method(:length) ==
 	// Hash.instance_method(:size)).
-	aliasBuiltin(vm.cHash, "length", "size")
+	defineBuiltinSecondName(vm.cHash, "length", "size")
 	vm.cHash.defineArgc("empty?", 0, func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(self.(*object.Hash).Len() == 0)
 	})
@@ -4951,15 +4952,16 @@ func (vm *VM) bootstrap() {
 		_, ok := self.(*object.Hash).Get(args[0])
 		return object.Bool(ok)
 	}
-	// key?, has_key?, include? and member? are genuine built-in aliases in MRI —
-	// they share one method definition, so Hash.instance_method(:has_key?) ==
-	// Hash.instance_method(:include?). Install the record once and alias the rest
-	// (a separate #define per name would make four distinct definitions that
-	// compare unequal as UnboundMethods).
+	// key?, has_key?, include? and member? share one method DEFINITION in MRI, so
+	// Hash.instance_method(:has_key?) == Hash.instance_method(:include?) -- but
+	// each is its own method ENTRY, so each reports ITSELF as #original_name
+	// (measured: :has_key?, not :key?). defineBuiltinSecondName gives exactly
+	// that: a distinct record naming the shared definition. Four separate
+	// #define calls would instead make four definitions that compare unequal.
 	vm.cHash.defineArgc("key?", 1, hashKeyP)
-	aliasBuiltin(vm.cHash, "has_key?", "key?")
-	aliasBuiltin(vm.cHash, "include?", "key?")
-	aliasBuiltin(vm.cHash, "member?", "key?")
+	defineBuiltinSecondName(vm.cHash, "has_key?", "key?")
+	defineBuiltinSecondName(vm.cHash, "include?", "key?")
+	defineBuiltinSecondName(vm.cHash, "member?", "key?")
 	vm.cHash.defineArgc("keys", 0, func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		h := self.(*object.Hash)
 		ks := make([]object.Value, len(h.Keys))
@@ -4985,7 +4987,7 @@ func (vm *VM) bootstrap() {
 		})
 		return h
 	})
-	vm.cHash.methods["each_pair"] = vm.cHash.methods["each"]
+	defineBuiltinSecondName(vm.cHash, "each_pair", "each")
 	bumpMethodSerial()
 	vm.cHash.defineArgc("each_key", 0, func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
@@ -5049,7 +5051,7 @@ func (vm *VM) bootstrap() {
 	vm.cHash.defineArgc("merge!", -1, mergeBang)
 	// update is a true alias of merge! (shared record: instance_method(:update)
 	// == instance_method(:merge!)).
-	aliasBuiltin(vm.cHash, "update", "merge!")
+	defineBuiltinSecondName(vm.cHash, "update", "merge!")
 	vm.cHash.defineArgc("slice", -1, func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		h := self.(*object.Hash)
 		out := newHashLike(h)
@@ -5270,7 +5272,7 @@ func (vm *VM) bootstrap() {
 	})
 	// store is a true alias of []= (shared record: instance_method(:store) ==
 	// instance_method(:[]=)).
-	aliasBuiltin(vm.cHash, "store", "[]=")
+	defineBuiltinSecondName(vm.cHash, "store", "[]=")
 	// default / default= and default_proc / default_proc= manage the value (or
 	// block) returned for an absent key. The static default and the default block
 	// are mutually exclusive in MRI: setting one clears the other.
@@ -5378,7 +5380,7 @@ func (vm *VM) bootstrap() {
 	}
 	vm.cHash.defineArgc("value?", 1, hashHasValue)
 	// has_value? is a true alias of value?.
-	aliasBuiltin(vm.cHash, "has_value?", "value?")
+	defineBuiltinSecondName(vm.cHash, "has_value?", "value?")
 	// Hash#key(value): the first key whose value equals value (by ==), else nil.
 	vm.cHash.defineArgc("key", 1, func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		h := self.(*object.Hash)
@@ -5484,8 +5486,8 @@ func (vm *VM) bootstrap() {
 	})
 	// filter is a true alias of select and filter! of select! (shared records, so
 	// Hash.instance_method(:filter) == Hash.instance_method(:select)).
-	aliasBuiltin(vm.cHash, "filter", "select")
-	aliasBuiltin(vm.cHash, "filter!", "select!")
+	defineBuiltinSecondName(vm.cHash, "filter", "select")
+	defineBuiltinSecondName(vm.cHash, "filter!", "select!")
 	// assoc/rassoc scan the pairs in insertion order and return the first
 	// [key, value] whose key (assoc) or value (rassoc) is Ruby-== to the
 	// argument, or nil when none matches. They never consult the default.
@@ -5705,7 +5707,7 @@ func (vm *VM) bootstrap() {
 	})
 	// member? is a true alias of include? (Range.instance_method(:member?) ==
 	// Range.instance_method(:include?)), so it must share the same method entry.
-	vm.cRange.methods["member?"] = vm.cRange.methods["include?"]
+	defineBuiltinSecondName(vm.cRange, "member?", "include?")
 	// Range#initialize(begin, end, exclude_end = false) is the private initializer
 	// behind Range.new. On an already-constructed Range — a raw *object.Range
 	// literal / Range.new result, which is frozen — it raises FrozenError; on a
@@ -6611,15 +6613,30 @@ var kernelNamesHeldBack = []string{"hash"}
 // from cKernel.methods and removed from cObject.methods. That is what makes the
 // hand-maintained mirror this replaces unnecessary — there is no second copy to
 // fall out of step, which is how Kernel#binding came to be missing from the old
-// list (#727) while `send(:binding)` worked. A genuine built-in alias (then /
-// yield_self, format / sprintf) shares ONE record, so moving in place keeps the
-// two names equal automatically; only the module-function singleton copies need
-// the explicit sharing map.
+// list (#727) while `send(:binding)` worked. A built-in SECOND NAME (then /
+// yield_self, format / sprintf) has its own record over a shared definition, so
+// moving in place keeps the two names equal automatically; only the
+// module-function singleton copies need the explicit sharing map, and it is
+// keyed by that definition. format / sprintf is not an alias in MRI at all --
+// it is rb_define_method twice over one C function, which is why
+// Kernel.method(:format).original_name is :format there, not :sprintf.
 //
 // Runs last in setupBuiltins, after every Kernel method is defined.
 func (vm *VM) rehomeKernelMethods() {
 	// One singleton copy per SOURCE record, so format/sprintf keep comparing equal.
-	smirror := map[*Method]*Method{}
+	// smirror is keyed by the DEFINITION, not by the record. Two names over one
+	// definition must get one mirrored singleton between them, because MRI says
+	// so:
+	//
+	//	Kernel.method(:fail) == Kernel.method(:raise)      ruby 4.0.5  true
+	//	Kernel.method(:format) == Kernel.method(:sprintf)  ruby 4.0.5  true
+	//
+	// Keying on the record pointer got that right only while #fail and #raise
+	// WERE one record -- which is also what made Kernel.method(:fail)
+	// .original_name answer :raise where ruby answers :fail. Now that the two
+	// names are distinct entries over a shared definition, the mirror has to
+	// follow the definition to keep both answers.
+	smirror := map[uintptr]*Method{}
 	rehome := func(name string, vis visibility, modfunc bool) {
 		m := vm.cObject.methods[name]
 		if m == nil {
@@ -6640,14 +6657,21 @@ func (vm *VM) rehomeKernelMethods() {
 			delete(vm.cKernel.smethods, name)
 			return
 		}
-		if cp, ok := smirror[m]; ok {
-			vm.cKernel.smethods[name] = cp
+		key := methodDefKey(m)
+		if first, ok := smirror[key]; ok {
+			// Same definition, different name: mirror a record that keeps THIS
+			// name and original_name but points at the first mirror's definition,
+			// so the two singletons compare equal whichever name was seen first.
+			cp := *m
+			cp.vis = visPublic
+			cp.defOf = methodDefRecord(first)
+			vm.cKernel.smethods[name] = &cp
 			return
 		}
 		cp := *m
 		cp.vis = visPublic
 		vm.cKernel.smethods[name] = &cp
-		smirror[m] = &cp
+		smirror[key] = &cp
 	}
 	for _, n := range kernelPublicNames {
 		rehome(n, visPublic, false)

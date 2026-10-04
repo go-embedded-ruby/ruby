@@ -86,9 +86,9 @@ func (vm *VM) registerMethodReflect2() {
 		return object.NewString(self.ToS())
 	}
 	vm.cMethod.define("to_s", toS)
-	aliasBuiltin(vm.cMethod, "inspect", "to_s")
+	defineBuiltinSecondName(vm.cMethod, "inspect", "to_s")
 	cUnbound.define("to_s", toS)
-	aliasBuiltin(cUnbound, "inspect", "to_s")
+	defineBuiltinSecondName(cUnbound, "inspect", "to_s")
 
 	// Object#public_method: like #method, but a private or protected target
 	// raises NameError instead of returning a callable Method.

@@ -57,8 +57,22 @@ func TestFileTestMirrorsFile(t *testing.T) {
 			t.Errorf("FileTest.%s is not File.%s's own method record", name, name)
 		}
 	}
-	if mod.smethods["zero?"] != mod.smethods["empty?"] {
-		t.Errorf("FileTest.zero? must be the same method as FileTest.empty?")
+	// FileTest.empty? must be the same METHOD as FileTest.zero?, which in Ruby
+	// means the same DEFINITION, not the same record. This compared records, and
+	// that is stricter than anything Ruby can observe -- strictly enough to be
+	// wrong, because sharing the record also made #original_name answer :zero?
+	// for both where MRI distinguishes them:
+	//
+	//	File.method(:empty?).original_name   ruby 4.0.5  :empty?   before  :zero?
+	//	File.method(:empty?) == File.method(:zero?)      true              true
+	//
+	// so the two names are now separate entries over one definition, exactly as
+	// in MRI, and the invariant is the one a Ruby program could check.
+	if methodDefKey(mod.smethods["zero?"]) != methodDefKey(mod.smethods["empty?"]) {
+		t.Errorf("FileTest.zero? and FileTest.empty? must share one definition")
+	}
+	if got := methodOriginalName(mod.smethods["empty?"]); got != "empty?" {
+		t.Errorf("FileTest.empty?#original_name = %q, want %q (ruby 4.0.5)", got, "empty?")
 	}
 	// MRI 4.0 removed the deprecated FileTest.exists?/File.exists? spelling
 	// (ruby/ruby v3_4_0 file.c defines only exist?), so neither carries it.

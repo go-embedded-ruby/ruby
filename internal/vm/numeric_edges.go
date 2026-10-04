@@ -532,9 +532,6 @@ func (vm *VM) registerNumericEdges() {
 		return &object.Rational{R: new(big.Rat).Quo(new(big.Rat).SetInt(bigVal(self)), den)}
 	})
 
-	// Float#quo is #fdiv — an exact Float quotient (a zero divisor gives ±Infinity).
-	aliasBuiltin(vm.cFloat, "quo", "fdiv")
-
 	// Float#remainder: self - other*(self/other).truncate — the remainder keeps the
 	// dividend's sign (unlike #modulo/%). A zero divisor raises ZeroDivisionError.
 	vm.cFloat.defineArgc("remainder", 1, func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
@@ -593,18 +590,35 @@ func (vm *VM) registerNumericAliasesAndEdges() {
 	// --- Method aliases (true aliases: instance_method(:a) == instance_method(:b)).
 	// The alias specs compare the two UnboundMethods for identity, so each pair
 	// must share a single method-table entry rather than be two closures.
-	aliasBuiltin(cNumeric, "modulo", "%")
-	aliasBuiltin(cNumeric, "magnitude", "abs")
+	defineBuiltinSecondName(cNumeric, "modulo", "%")
+	defineBuiltinSecondName(cNumeric, "magnitude", "abs")
 	aliasBuiltin(cNumeric, "conj", "conjugate")
 	aliasBuiltin(cNumeric, "imag", "imaginary")
-	aliasBuiltin(cNumeric, "rect", "rectangular")
-	aliasBuiltin(cNumeric, "angle", "arg")
-	aliasBuiltin(cNumeric, "phase", "arg")
+	defineBuiltinSecondName(cNumeric, "rect", "rectangular")
+	defineBuiltinSecondName(cNumeric, "angle", "arg")
+	defineBuiltinSecondName(cNumeric, "phase", "arg")
 	aliasBuiltin(vm.cInteger, "inspect", "to_s")
 	aliasBuiltin(vm.cInteger, "magnitude", "abs")
-	aliasBuiltin(vm.cInteger, "next", "succ")
+	defineBuiltinSecondName(vm.cInteger, "next", "succ")
+	// Float#to_s. MRI defines it ON Float (rb_define_method(rb_cFloat, "to_s",
+	// flo_to_s, 0)), and rbgo had none at all, so both #to_s and #inspect
+	// resolved to Kernel:
+	//
+	//	Float.instance_method(:to_s).owner             ruby 4.0.5  Float  before  Kernel
+	//	Float.instance_methods(false).include?(:to_s)  ruby 4.0.5  true   before  false
+	//
+	// The formatted VALUES were already right — Kernel#to_s calls the same
+	// object.Float.ToS() — so this changes the reflection surface, not the
+	// output (1.5, 0.3333333333333333, 1.0e+20, -0.0, Infinity and 100.0 all
+	// unchanged, measured). It has to come BEFORE the #inspect alias below,
+	// which could not find #to_s and so installed nothing at all.
+	vm.cFloat.defineArgc("to_s", 0, func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.NewString(self.ToS())
+	})
+	// Float#inspect IS a genuine alias of #to_s in MRI (original_name is :to_s,
+	// measured), unlike most of the pairs around it.
 	aliasBuiltin(vm.cFloat, "inspect", "to_s")
-	aliasBuiltin(vm.cFloat, "to_int", "to_i")
+	defineBuiltinSecondName(vm.cFloat, "to_int", "to_i")
 	aliasBuiltin(vm.cFloat, "magnitude", "abs")
 
 	// --- Integer#coerce / Float#coerce via Kernel#Float ---
@@ -671,9 +685,14 @@ func (vm *VM) registerNumericAliasesAndEdges() {
 		}
 		return object.Float(floatOf(self) / b)
 	})
-	// Float#quo is a true alias of #fdiv; re-establish it now that #fdiv has been
-	// redefined above (the earlier alias pointed at the previous #fdiv record).
-	aliasBuiltin(vm.cFloat, "quo", "fdiv")
+	// Float#quo is #fdiv — an exact Float quotient (a zero divisor gives
+	// ±Infinity). This is the ONLY place it can be established: the earlier
+	// attempt in registerNumericEdges did nothing at all, because #fdiv is
+	// defined just above and did not exist yet when that one ran. The comment
+	// there said it was being "re-established" over a previous record; there was
+	// no previous record, and nothing reported the miss — which is why the alias
+	// helpers now panic instead of returning quietly.
+	defineBuiltinSecondName(vm.cFloat, "quo", "fdiv")
 
 	// --- Integer#div — floored quotient, MRI operand rules ---
 	// An Integer/Bignum divisor gives a floored Integer; a Float divisor floors
@@ -721,7 +740,7 @@ func (vm *VM) registerNumericAliasesAndEdges() {
 		}
 		return object.Float(rubyFloatMod(floatOf(self), b))
 	})
-	aliasBuiltin(vm.cFloat, "modulo", "%")
+	defineBuiltinSecondName(vm.cFloat, "modulo", "%")
 	// Float#divmod: an Integer quotient (floored) and a Float modulo. A NaN or
 	// Infinite quotient has no Integer value, so MRI raises FloatDomainError; a
 	// zero divisor raises ZeroDivisionError.
@@ -817,7 +836,11 @@ func argcMessage(given, min, max int) string {
 // answered #arity -1 anyway, because the guard had replaced the record that held
 // it. nonRetaining, attrKind, vis and origName travelled the same path unseen.
 func guardArgc(cls *RClass, min, max int, names ...string) {
+	done := map[string]bool{}
 	for _, name := range names {
+		if done[name] {
+			continue
+		}
 		m, ok := cls.methods[name]
 		if !ok {
 			continue
@@ -836,7 +859,39 @@ func guardArgc(cls *RClass, min, max int, names ...string) {
 		if !guarded.argc.declared && min == max {
 			guarded.argc = declareArgc(min)
 		}
+		// Every OTHER name over this same definition has to be wrapped too. MRI
+		// guards the cfunc, so every method entry above it is guarded; replacing
+		// one entry here used to leave the others pointing at the unguarded
+		// record, which was observable twice over:
+		//
+		//	1.imag(5)   ruby 4.0.5  ArgumentError    before  0
+		//	1.rect(5)   ruby 4.0.5  ArgumentError    before  [1, 0]
+		//
+		// and, because the two entries no longer shared a definition,
+		//
+		//	Numeric.instance_method(:imag) == Numeric.instance_method(:imaginary)
+		//	            ruby 4.0.5  true             before  false
+		//
+		// Each sharer keeps its OWN name and original_name — they are different
+		// method entries, and #original_name tells them apart — and points at the
+		// new guarded record as its definition, so identity survives the wrap.
+		key := methodDefKey(m)
+		sharers := make([]string, 0, 2)
+		for other, om := range cls.methods {
+			if other != name && methodDefKey(om) == key {
+				sharers = append(sharers, other)
+			}
+		}
 		cls.methods[name] = &guarded
+		done[name] = true
+		for _, other := range sharers {
+			c := guarded
+			c.name = cls.methods[other].name
+			c.origName = cls.methods[other].origName
+			c.defOf = &guarded
+			cls.methods[other] = &c
+			done[other] = true
+		}
 		bumpMethodSerial()
 	}
 }

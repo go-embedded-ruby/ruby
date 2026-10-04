@@ -75,7 +75,7 @@ func (vm *VM) registerRangeEdges() {
 	// entries is a true alias of to_a (Range.instance_method(:entries) ==
 	// Range.instance_method(:to_a)), so it shares the same method object rather
 	// than wrapping a second implementation.
-	aliasBuiltin(vm.cRange, "entries", "to_a")
+	defineBuiltinSecondName(vm.cRange, "entries", "to_a")
 }
 
 // rangeReverseSizeVal is the #size of a Range#reverse_each Enumerator (MRI 4.0),

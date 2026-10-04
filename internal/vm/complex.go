@@ -32,27 +32,36 @@ func registerNumericComplexCompat(vm *VM, cNumeric *RClass) {
 	phaseFn := func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return phaseOf(self)
 	}
-	cNumeric.define("phase", phaseFn)
+	// One record per DEFINITION, then the second names on top of it. Defining
+	// each spelling separately gave each its own *Method, which made
+	// Numeric.instance_method(:imag) == Numeric.instance_method(:imaginary)
+	// false where ruby says true -- and it did so by silently overwriting what
+	// numeric_edges.go had already aliased, so the answer depended on which of
+	// the two registration passes ran last. Going through the helpers here makes
+	// it order-independent. Which helper each pair wants is MRI's own answer,
+	// measured per name (see issue #754): #imag and #conj really are
+	// rb_define_alias, #rect, #angle and #phase are second definitions.
 	cNumeric.define("arg", phaseFn)
-	cNumeric.define("angle", phaseFn)
+	defineBuiltinSecondName(cNumeric, "phase", "arg")
+	defineBuiltinSecondName(cNumeric, "angle", "arg")
 	cNumeric.define("polar", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewArray(vm.send(self, "abs", nil, nil), phaseOf(self))
 	})
 	rectFn := func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewArray(self, object.IntValue(0))
 	}
-	cNumeric.define("rect", rectFn)
 	cNumeric.define("rectangular", rectFn)
+	defineBuiltinSecondName(cNumeric, "rect", "rectangular")
 	conjFn := func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return self
 	}
 	cNumeric.define("conjugate", conjFn)
-	cNumeric.define("conj", conjFn)
+	aliasBuiltin(cNumeric, "conj", "conjugate")
 	imagFn := func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(0)
 	}
 	cNumeric.define("imaginary", imagFn)
-	cNumeric.define("imag", imagFn)
+	aliasBuiltin(cNumeric, "imag", "imaginary")
 
 	registerNumericGeneric(vm, cNumeric)
 }
@@ -770,7 +779,7 @@ func (vm *VM) registerComplex() {
 	vm.cComplex.define("/", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return vm.binaryOp(bytecode.OpDiv, self, args[0])
 	})
-	vm.cComplex.methods["quo"] = vm.cComplex.methods["/"]
+	defineBuiltinSecondName(vm.cComplex, "quo", "/")
 
 	vm.cComplex.define("**", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		exp := args[0]
@@ -826,14 +835,18 @@ func (vm *VM) registerComplex() {
 		vm.cComplex.methods[name] = &Method{name: name, owner: vm.cComplex, undefined: true}
 	}
 
-	// True aliases share one Method record so Complex.instance_method(:angle) ==
-	// Complex.instance_method(:arg), matching MRI.
+	// All six share their original's DEFINITION, so Complex.instance_method(:angle)
+	// == Complex.instance_method(:arg) as in MRI -- but each reports ITSELF as
+	// #original_name, and that is where Complex parts company with Numeric:
+	// Complex#imag answers :imag and Complex#conj answers :conj, while Numeric#imag
+	// answers :imaginary and Numeric#conj answers :conjugate. Measured per class,
+	// because the name alone does not decide it.
 	for _, pair := range [][2]string{
 		{"angle", "arg"}, {"phase", "arg"},
 		{"conj", "conjugate"}, {"imag", "imaginary"},
 		{"rect", "rectangular"}, {"magnitude", "abs"},
 	} {
-		vm.cComplex.methods[pair[0]] = vm.cComplex.methods[pair[1]]
+		defineBuiltinSecondName(vm.cComplex, pair[0], pair[1])
 	}
 
 	// Class constructors Complex.rectangular / .rect / .polar.

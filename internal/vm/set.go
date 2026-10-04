@@ -240,5 +240,5 @@ func (vm *VM) registerSet() {
 	aliasBuiltin(vm.cSet, "member?", "include?")
 	aliasBuiltin(vm.cSet, "===", "include?")
 	aliasBuiltin(vm.cSet, "length", "size")
-	aliasBuiltin(vm.cSet, "inspect", "to_s")
+	defineBuiltinSecondName(vm.cSet, "inspect", "to_s")
 }

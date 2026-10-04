@@ -653,7 +653,7 @@ func (vm *VM) registerTime() {
 		return object.IntValue(self(v).t.UnixNano())
 	})
 
-	// True aliases share one Method record so Time.instance_method(:mon) ==
+	// Each of these shares its original's DEFINITION, so Time.instance_method(:mon) ==
 	// Time.instance_method(:month), matching MRI 4.0.6 (Time#mday, #tv_sec,
 	// #gmt_offset, #gmtoff, #gmt?, #isdst, #gmtime, #getgm, #ctime and
 	// #xmlschema are all documented aliases).
@@ -665,7 +665,7 @@ func (vm *VM) registerTime() {
 		{"gmtime", "utc"}, {"getgm", "getutc"},
 		{"ctime", "asctime"}, {"xmlschema", "iso8601"},
 	} {
-		vm.cTime.methods[pair[0]] = vm.cTime.methods[pair[1]]
+		defineBuiltinSecondName(vm.cTime, pair[0], pair[1])
 	}
 }
 

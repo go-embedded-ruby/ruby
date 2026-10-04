@@ -97,7 +97,7 @@ func (vm *VM) registerFile() {
 	// File.fnmatch? is a genuine alias of File.fnmatch (they share one method
 	// record, so File.method(:fnmatch?) == File.method(:fnmatch)), matching MRI.
 	def("fnmatch", fnmatchFn)
-	cFile.smethods["fnmatch?"] = cFile.smethods["fnmatch"]
+	defineBuiltinSecondNameS(cFile, "fnmatch?", "fnmatch")
 
 	def("basename", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		if len(args) < 1 || len(args) > 2 {
@@ -281,7 +281,7 @@ func (vm *VM) registerFile() {
 	def("delete", delete)
 	// unlink is a genuine alias of delete (one shared Method record), so
 	// File.method(:unlink) == File.method(:delete), as MRI's spec checks.
-	cFile.smethods["unlink"] = cFile.smethods["delete"]
+	defineBuiltinSecondNameS(cFile, "unlink", "delete")
 
 	// rename(old, new) atomically moves a file, returning 0 (MRI). Puppet's
 	// FileSystem#replace_file renames its written temp file over the target, so
@@ -461,7 +461,7 @@ func (vm *VM) registerFile() {
 	def("zero?", zero)
 	// empty? is a genuine alias of zero? (shared Method record), matching MRI's
 	// File.method(:zero?) == File.method(:empty?).
-	cFile.smethods["empty?"] = cFile.smethods["zero?"]
+	defineBuiltinSecondNameS(cFile, "empty?", "zero?")
 
 	// Type predicates that delegate to a following stat and degrade to false for a
 	// missing path (MRI's File.pipe?/socket?/…). statTest wraps the stat-and-test.

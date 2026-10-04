@@ -76,7 +76,7 @@ func (vm *VM) registerMarshal() {
 	def("load", load)
 	// Marshal.restore is a true alias of Marshal.load: it shares the one method
 	// record so Marshal.method(:restore) == Marshal.method(:load), as in MRI.
-	mod.smethods["restore"] = mod.smethods["load"]
+	aliasBuiltinS(mod, "restore", "load")
 }
 
 // marshalDumpLimit reads Marshal.dump's depth limit from its arguments: the

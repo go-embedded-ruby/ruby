@@ -2738,7 +2738,7 @@ func (vm *VM) installRegexp() {
 	}
 	vm.cRegexp.define("==", reEqual)
 	// #eql? is a genuine alias of #== (shared record).
-	aliasBuiltin(vm.cRegexp, "eql?", "==")
+	defineBuiltinSecondName(vm.cRegexp, "eql?", "==")
 	// Regexp#hash is consistent with #== / #eql?: equal Regexps hash equal.
 	vm.cRegexp.define("hash", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		r := reArg(self)
@@ -2825,7 +2825,7 @@ func (vm *VM) installRegexp() {
 	})
 	// MatchData#length is a genuine alias of #size (shared record, so
 	// MatchData.instance_method(:length) == MatchData.instance_method(:size)).
-	aliasBuiltin(vm.cMatchData, "length", "size")
+	defineBuiltinSecondName(vm.cMatchData, "length", "size")
 	vm.cMatchData.define("to_a", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		m := mdArg(self)
 		out := make([]object.Value, 0, m.md.NGroups()+1)
@@ -2945,7 +2945,7 @@ func (vm *VM) installRegexp() {
 	}
 	vm.cMatchData.define("==", mdEqual)
 	// #eql? is a genuine alias of #== (shared record).
-	aliasBuiltin(vm.cMatchData, "eql?", "==")
+	defineBuiltinSecondName(vm.cMatchData, "eql?", "==")
 	vm.cMatchData.define("hash", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		m := mdArg(self)
 		return object.IntValue(fnvHash(m.re.source+"\x00"+m.md.Str(0)) ^ int64(m.byteOff+m.md.Begin(0)))
