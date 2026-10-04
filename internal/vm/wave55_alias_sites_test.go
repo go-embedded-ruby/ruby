@@ -7,6 +7,8 @@ package vm
 import (
 	"strings"
 	"testing"
+
+	"github.com/go-embedded-ruby/ruby/internal/object"
 )
 
 // TestBuiltinSecondNameReportsItself: MRI gives most of the pairs that look like
@@ -269,15 +271,20 @@ func TestAliasHelpersPanicOnAMissingOldName(t *testing.T) {
 	}{
 		{"aliasBuiltin", func(c *RClass) { aliasBuiltin(c, "new_name", "absent") }},
 		{"defineBuiltinSecondName", func(c *RClass) { defineBuiltinSecondName(c, "new_name", "absent") }},
+		{"aliasBuiltinS", func(c *RClass) { aliasBuiltinS(c, "new_name", "absent") }},
+		{"defineBuiltinSecondNameS", func(c *RClass) { defineBuiltinSecondNameS(c, "new_name", "absent") }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			cls := &RClass{name: "Probe", methods: map[string]*Method{}}
+			cls := &RClass{name: "Probe", methods: map[string]*Method{}, smethods: map[string]*Method{}}
 			defer func() {
 				r := recover()
 				if r == nil {
 					t.Fatalf("%s returned quietly for an absent old name; it must panic", tc.name)
 				}
 				msg, _ := r.(string)
+				// The qualifier differs by table -- "Probe#absent" for an instance
+				// method, "Probe.absent" for a singleton one -- so the message is
+				// checked by its parts rather than as one string.
 				for _, want := range []string{tc.name, "Probe", "absent", "new_name"} {
 					if !strings.Contains(msg, want) {
 						t.Errorf("panic message %q does not name %q", msg, want)
@@ -286,5 +293,44 @@ func TestAliasHelpersPanicOnAMissingOldName(t *testing.T) {
 			}()
 			tc.call(cls)
 		})
+	}
+}
+
+// TestArityGuardHandlesEachDefinitionOnce: guardArgc carries its wrapper to every
+// name over one definition, so a names list that happens to contain two of those
+// names must not wrap the second a second time. No current call site does -- the
+// one in numeric_edges.go lists imaginary, real and rectangular, whose sharers
+// (imag, rect) are not themselves in the list -- so the skip is reachable only
+// from here, and it is tested here rather than left to a future caller to
+// discover. Double-wrapping would not break the guard, but it would leave the
+// second name pointing at a record the first no longer holds, which is the
+// identity defect this whole change is about.
+func TestArityGuardHandlesEachDefinitionOnce(t *testing.T) {
+	body := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.IntValue(7)
+	}
+	cls := &RClass{name: "Probe", methods: map[string]*Method{}, smethods: map[string]*Method{}}
+	cls.define("canonical", body)
+	defineBuiltinSecondName(cls, "second", "canonical")
+
+	// Both names in the list, so the second one is already marked done.
+	guardNoArg(cls, "canonical", "second")
+
+	a, b := cls.methods["canonical"], cls.methods["second"]
+	if methodDefKey(a) != methodDefKey(b) {
+		t.Errorf("guarding both names split the definition: canonical and second no longer share it")
+	}
+	if got := methodOriginalName(b); got != "second" {
+		t.Errorf("second#original_name = %q after guarding, want %q", got, "second")
+	}
+	if !a.argc.declared || !b.argc.declared {
+		t.Errorf("the guard declared arity on %v/%v, want both", a.argc.declared, b.argc.declared)
+	}
+	// And a name the table does not hold is skipped, not panicked on: guardArgc
+	// is a post-hoc wrapper over whatever was registered, and some registrations
+	// are platform-dependent (fork/exec are absent under wasm).
+	guardNoArg(cls, "never_registered")
+	if _, ok := cls.methods["never_registered"]; ok {
+		t.Errorf("guardArgc invented a method for a name that was not registered")
 	}
 }
