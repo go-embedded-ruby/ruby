@@ -1721,7 +1721,7 @@ OK	core/regexp/new_spec.rb	38
 OK	core/regexp/options_spec.rb	9
 OK	core/regexp/quote_spec.rb	7
 OK	core/regexp/source_spec.rb	7
-OK	core/regexp/timeout_spec.rb	1
+OK	core/regexp/timeout_spec.rb	3
 OK	core/regexp/to_s_spec.rb	10
 OK	core/regexp/try_convert_spec.rb	4
 OK	core/regexp/union_spec.rb	28

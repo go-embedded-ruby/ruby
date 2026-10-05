@@ -418,7 +418,11 @@ JRuby**):
   `match` / `match?` / `scan` / `gsub` / `sub` / `split`, and the match globals
   `$~` / `$1`..`$N` / `$&` / `` $` `` / `$'` — running on the standalone pure-Go
   [go-ruby-regexp](https://github.com/go-ruby-regexp/regexp) engine, so the build stays
-  **CGO=0**.
+  **CGO=0**. ReDoS is bounded and the bound is **reportable**: `Regexp.timeout=`
+  (process-wide) and `Regexp.new(src, timeout:)` (per-Regexp, overriding the
+  class default) are both enforced, and a match that exceeds its limit raises
+  `Regexp::TimeoutError` rather than answering "no match" — so a Regexp used as
+  a validator or a denylist fails closed.
 - **Standard library leaves:** **`JSON`** (`generate`/`dump`/`pretty_generate`/
   `parse` + `Object#to_json`, with object key order preserved and MRI-matching
   number/escape formatting), **`Digest`** (`MD5`/`SHA1`/`SHA256`/`SHA512` —
