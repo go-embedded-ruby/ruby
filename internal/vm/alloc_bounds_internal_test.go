@@ -15,6 +15,27 @@ import (
 	"github.com/go-ruby-parser/parser"
 )
 
+// runKeepingError runs a program and returns the VM, its stdout and whatever
+// came out of Run, so a test can assert on a program that ends by raising AND on
+// the state the VM was left in. runSrcErr does the same but lives behind
+// `//go:build !windows && !wasm`, and these tests must compile on every lane —
+// CI vets the test binary for GOOS=wasip1 and GOOS=js.
+func runKeepingError(t *testing.T, src string) (*VM, string, error) {
+	t.Helper()
+	prog, err := parser.Parse(src)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	iseq, err := compiler.Compile(prog)
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	var buf bytes.Buffer
+	machine := New(&buf)
+	_, runErr := machine.Run(iseq)
+	return machine, buf.String(), runErr
+}
+
 // TestRepeatBoundRegimes is the witness for issue #777. A size taken from a Ruby
 // value and multiplied reaches `make` in three distinct regimes, and before the
 // fix each failed differently and none failed correctly:
@@ -288,7 +309,7 @@ deep`)
 // `[recovered, repanicked]` with a nil error now comes back as an ordinary Ruby
 // exception through Run's error return, with the frame stacks reset.
 func TestRunReportsAnErrorForARefusedAllocation(t *testing.T) {
-	machine, out, runErr := runSrcErr(t, `[1] * (2**62)`)
+	machine, out, runErr := runKeepingError(t, `[1] * (2**62)`)
 	if runErr == nil {
 		t.Fatal("Run returned nil for a program that raised")
 	}
