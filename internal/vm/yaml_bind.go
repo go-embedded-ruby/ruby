@@ -6,6 +6,7 @@ package vm
 
 import (
 	"math/big"
+	"sort"
 	"strings"
 	stdtime "time"
 
@@ -86,18 +87,143 @@ func yamlLoad(vm *VM, src string) object.Value {
 	return fromYAML(vm, v)
 }
 
-// yamlSafeLoad parses src like yamlLoad but threads the permitted_classes
-// allow-list through the library's SafeLoad.
-func yamlSafeLoad(vm *VM, src string, permitted []string) object.Value {
-	var opts []yaml.Option
-	if permitted != nil {
-		opts = append(opts, yaml.WithPermittedClasses(permitted...))
-	}
-	v, err := yaml.SafeLoad(src, opts...)
+// yamlSafeLoad parses src like yamlLoad and then enforces Psych's
+// permitted-class restriction over the loaded graph, raising
+// Psych::DisallowedClass for the first class the document names that o does not
+// permit.
+//
+// It deliberately calls yaml.Load rather than the engine's SafeLoad. The
+// engine's restriction DEGRADES an unpermitted `!ruby/object:` tag to its bare
+// ivar mapping, which hands the caller a Hash where it asked for a refusal --
+// type confusion instead of an error -- and the engine's allow-list cannot
+// express "deny everything" at all (WithPermittedClasses() with no names leaves
+// the slice nil, which its guard reads as "no policy"). Psych's restriction is
+// also wider than a class allow-list: it gates Symbol, Time and the named class
+// of a `!ruby/class` tag. Enforcing it here keeps the Psych semantics in the
+// Psych binding and needs no release of the engine.
+func yamlSafeLoad(vm *VM, src string, o psychSafeOpts) object.Value {
+	v, err := yaml.Load(src)
 	if err != nil {
 		raise("Psych::SyntaxError", "%s", yamlErrMessage(err))
 	}
+	(&yamlPermitCtx{opts: o, seen: map[yaml.Value]bool{}}).check(v)
 	return fromYAML(vm, v)
+}
+
+// yamlPermitCtx walks a loaded document once, raising on the first class it is
+// not permitted to materialise. seen holds the pointer-shaped nodes already
+// cleared, so a node reached twice through an alias is not re-walked (and a
+// shared graph cannot send the walk round in circles).
+type yamlPermitCtx struct {
+	opts psychSafeOpts
+	seen map[yaml.Value]bool
+}
+
+// check enforces the restriction on one loaded value and its children.
+//
+// The order of the checks is MRI's document order, because the exception names
+// the first offending class and callers read that name. Psych resolves a
+// mapping's class before reviving its ivars (to_ruby.rb:244 calls resolve_class
+// before revive), and accepts a pair's key before its value, so a nested
+// gadget reports the OUTER class and `:a: 1` reports Symbol for the key.
+func (c *yamlPermitCtx) check(v yaml.Value) {
+	switch n := v.(type) {
+	case yaml.Symbol:
+		// Psych interns a `:name` scalar through ClassLoader#symbolize, which is
+		// restricted: a bare safe_load refuses symbols outright.
+		c.opts.checkSymbol(string(n))
+	case stdtime.Time:
+		// A timestamp scalar is built by class_loader.date_time / Time, so it too
+		// needs permitting (measured: MRI refuses `a: 2001-12-14 21:59:43 -05:00`).
+		c.opts.checkClass("Time")
+	case yaml.Class:
+		// `!ruby/class 'String'` is gated on the NAMED class, not on "Class":
+		// to_ruby.rb:98 passes the scalar's own value to resolve_class.
+		c.opts.checkClass(string(n))
+	case yaml.Module:
+		c.opts.checkClass(string(n))
+	case *yaml.Regexp:
+		if c.mark(n) {
+			c.opts.checkClass("Regexp")
+		}
+	case []yaml.Value:
+		for _, el := range n {
+			c.check(el)
+		}
+	case *yaml.Map:
+		if c.mark(n) {
+			for _, p := range n.Pairs() {
+				c.check(p.Key)
+				c.check(p.Val)
+			}
+		}
+	case *yaml.Range:
+		if c.mark(n) {
+			c.opts.checkClass("Range")
+			c.check(n.Begin)
+			c.check(n.End)
+		}
+	case *yaml.Object:
+		if c.mark(n) {
+			c.checkObject(n)
+		}
+	}
+	// Everything else is a shape Psych builds without consulting the class
+	// loader -- nil, true/false, Integer, Float, String, and the Array / Hash
+	// containers themselves. Those are exactly the classes psych.rb documents as
+	// permitted by default (psych.rb:278-287), and they are permitted because no
+	// restricted lookup stands in their way, not because Restricted holds them:
+	// Psych::ClassLoader::Restricted seeds @classes from permitted_classes ALONE.
+}
+
+// checkObject gates an `!ruby/object:` instance on its class name, then walks
+// its instance variables.
+func (c *yamlPermitCtx) checkObject(o *yaml.Object) {
+	name := o.Class
+	if name == "" {
+		// An untagged / bare object maps to Object, as to_ruby.rb:244 does with
+		// `resolve_class(name) || class_loader.object`.
+		name = "Object"
+	}
+	c.opts.checkClass(name)
+	for _, k := range yamlIVarOrder(o) {
+		c.check(o.IVars[k])
+	}
+}
+
+// yamlIVarOrder returns o's instance-variable names in the engine's emission
+// order: those named by o.Order first, then the rest lexicographically. Walking
+// the IVars map directly would make WHICH disallowed ivar is reported depend on
+// Go's randomised map iteration, so a document with two offending ivars would
+// raise a different message run to run.
+func yamlIVarOrder(o *yaml.Object) []string {
+	seen := make(map[string]bool, len(o.Order))
+	keys := make([]string, 0, len(o.IVars))
+	for _, k := range o.Order {
+		if _, ok := o.IVars[k]; ok && !seen[k] {
+			keys = append(keys, k)
+			seen[k] = true
+		}
+	}
+	rest := make([]string, 0, len(o.IVars))
+	for k := range o.IVars {
+		if !seen[k] {
+			rest = append(rest, k)
+		}
+	}
+	sort.Strings(rest)
+	return append(keys, rest...)
+}
+
+// mark records a pointer-shaped node as visited, reporting whether this is the
+// first visit. Only pointer shapes are recorded: a []yaml.Value is not a
+// comparable type and would panic as a map key.
+func (c *yamlPermitCtx) mark(v yaml.Value) bool {
+	if c.seen[v] {
+		return false
+	}
+	c.seen[v] = true
+	return true
 }
 
 // yamlErrMessage extracts the human-readable text of a library error, preferring
