@@ -145,3 +145,24 @@ func isAllocFault(msg string) bool {
 	}
 	return false
 }
+
+// randomByteCount converts a Ruby byte count for the entropy methods
+// (Random#bytes, Random.bytes, OpenSSL::Random.random_bytes), refusing a
+// negative one with MRI's message (measured on ruby 4.0.5:
+// `Random.new.bytes(-1)` raises
+// `ArgumentError: negative string size (or size too big)`).
+//
+// The sign MUST be checked here rather than left to the callNative backstop,
+// because Go's makeslice raises the SAME panic text — "makeslice: len out of
+// range" — for a negative length and for one above maxAlloc. The backstop
+// cannot tell those apart, so without this check a negative count would be
+// reported as NoMemoryError, which is MRI's answer for the oversized case only.
+// With the sign settled here, a fault that reaches the backstop from these
+// methods really is an oversized allocation.
+func randomByteCount(v object.Value) int {
+	n := intArg(v)
+	if n < 0 {
+		raise("ArgumentError", "negative string size (or size too big)")
+	}
+	return int(n)
+}

@@ -70,9 +70,22 @@ func TestArrayFillErrors(t *testing.T) {
 		// Non-numeric start / length -> TypeError.
 		{`begin; [].fill("a", true); rescue TypeError; puts "TE"; end`, "TE\n"},
 		{`begin; [1, 2, 3].fill("x", 1, "foo"); rescue TypeError; puts "TE"; end`, "TE\n"},
-		// A Bignum length -> RangeError; a fixnum-huge length -> "array size too big".
+		// A Bignum length -> RangeError.
 		{`begin; [1, 2, 3].fill(10, 1, 2 ** 64); rescue RangeError; puts "RE"; end`, "RE\n"},
-		{`begin; [1, 2, 3].fill(10, 1, 1 << 50); rescue ArgumentError; puts "AE"; end`, "AE\n"},
+		// A length above ARY_MAX_SIZE -> ArgumentError, with rb_ary_fill's own
+		// message (array.c v4.0.5:5087).
+		{`begin; [1, 2, 3].fill(10, 1, 2 ** 62); rescue ArgumentError => e; puts e.message; end`,
+			"argument too big\n"},
+		// A length BELOW ARY_MAX_SIZE that still cannot be allocated -> NoMemoryError.
+		// This case asserted ArgumentError until #777, which was asserting the cap
+		// itself rather than MRI: maxFillSize was an unjustified 1<<40, so every
+		// length between 1<<40 and ARY_MAX_SIZE was refused here and NOT refused by
+		// MRI. Measured on ruby 4.0.5, `[1,2,3].fill(10, 1, 1 << 50)` raises
+		// `NoMemoryError: failed to allocate memory`, and 1<<40 and 1<<35 are
+		// genuinely materialised (both passed 2 GB resident before the probe's cap
+		// stopped them), so the old bound was wrong in both directions.
+		{`begin; [1, 2, 3].fill(10, 1, 1 << 50); rescue NoMemoryError => e; puts e.message; end`,
+			"failed to allocate memory\n"},
 		// A range whose begin is before the start of the array -> RangeError.
 		{`begin; [1, 2, 3].fill("x", -5..-3); rescue RangeError; puts "RE"; end`, "RE\n"},
 		// A block raising mid-fill leaves the already-filled elements in place.

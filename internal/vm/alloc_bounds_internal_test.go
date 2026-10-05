@@ -136,6 +136,26 @@ func TestRepeatBoundRegimes(t *testing.T) {
 		// An ordinary bounds fault must NOT be reclassified: only an allocation
 		// fault becomes NoMemoryError, so this stays the ArgumentError it was.
 		{"index_fault_stays_argerror", `p("x".ljust(3))`, "\"x  \"\n"},
+
+		// --- The entropy methods check the SIGN themselves, because Go's makeslice
+		// uses the same panic text for a negative length and an oversized one, so
+		// the backstop cannot tell them apart. Without the check a negative count
+		// came back as NoMemoryError where MRI 4.0.5 raises ArgumentError.
+		{"random_bytes_negative", `begin; Random.new.bytes(-1); rescue Exception=>e; puts "#{e.class}: #{e.message}"; end`,
+			"ArgumentError: negative string size (or size too big)\n"},
+		{"random_class_bytes_negative", `begin; Random.bytes(-1); rescue Exception=>e; puts "#{e.class}: #{e.message}"; end`,
+			"ArgumentError: negative string size (or size too big)\n"},
+		{"openssl_random_bytes_negative", `require "openssl"
+begin; OpenSSL::Random.random_bytes(-1); rescue Exception=>e; puts "#{e.class}: #{e.message}"; end`,
+			"ArgumentError: negative string size (or size too big)\n"},
+		// ...and with the sign settled, a fault that DOES reach the backstop from
+		// these methods really is an oversized allocation.
+		{"random_bytes_too_big", `begin; Random.new.bytes(2**62); rescue Exception=>e; puts "#{e.class}: #{e.message}"; end`,
+			"NoMemoryError: failed to allocate memory\n"},
+		// A valid count still works.
+		{"random_bytes_ok", `p Random.new(7).bytes(4).bytesize`, "4\n"},
+		{"openssl_random_bytes_ok", `require "openssl"
+p OpenSSL::Random.random_bytes(8).bytesize`, "8\n"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -182,6 +202,67 @@ func TestAllocPanicTextStillNamesMakeslice(t *testing.T) {
 		if isAllocFault(notAlloc) {
 			t.Errorf("isAllocFault(%q) = true, want false", notAlloc)
 		}
+	}
+}
+
+// TestConvertAllocPanicOnlyConvertsAnAllocationFault pins convertAllocPanic's
+// contract: it converts an allocation fault and passes everything else through
+// UNCHANGED.
+//
+// Its re-panic arm cannot fire from either of its two production callers --
+// inside `make([]T, 0, n)` nothing but makeslice can panic -- so this is a
+// contract test, not a reachability claim about allocValues/allocBytes. It earns
+// its place because the arm is what keeps the helper safe to defer around a
+// wider body, and because a helper that silently swallowed an unrelated panic
+// (returning a nil slice to its caller) would be a worse defect than the one
+// #777 fixed.
+func TestConvertAllocPanicOnlyConvertsAnAllocationFault(t *testing.T) {
+	// A non-runtime.Error value passes through untouched.
+	got := func() (r any) {
+		defer func() { r = recover() }()
+		defer convertAllocPanic()
+		panic("not an allocation fault")
+	}()
+	if got != "not an allocation fault" {
+		t.Errorf("a plain panic value was not passed through: got %v", got)
+	}
+
+	// A RubyError passes through as itself, so a raise from inside a wrapped body
+	// keeps its class.
+	got = func() (r any) {
+		defer func() { r = recover() }()
+		defer convertAllocPanic()
+		panic(RubyError{Class: "TypeError", Message: "unrelated"})
+	}()
+	if re, ok := got.(RubyError); !ok || re.Class != "TypeError" {
+		t.Errorf("a RubyError was not passed through: got %#v", got)
+	}
+
+	// A runtime.Error that is NOT an allocation fault also passes through: only
+	// isAllocFault's prefixes convert.
+	got = func() (r any) {
+		defer func() { r = recover() }()
+		defer convertAllocPanic()
+		s := []int{1, 2, 3}
+		i := 5
+		_ = s[i] // index out of range: a runtime.Error, not an allocation fault
+		return nil
+	}()
+	re, ok := got.(error)
+	if !ok || !strings.Contains(re.Error(), "index out of range") {
+		t.Errorf("an index fault was not passed through: got %#v", got)
+	}
+
+	// And an allocation fault DOES convert, to MRI's class and message.
+	got = func() (r any) {
+		defer func() { r = recover() }()
+		defer convertAllocPanic()
+		_ = allocBytes(math.MaxInt64 / 4)
+		return nil
+	}()
+	rerr, ok := got.(RubyError)
+	if !ok || rerr.Class != "NoMemoryError" || rerr.Message != "failed to allocate memory" {
+		t.Errorf("an allocation fault did not convert: got %#v", got)
 	}
 }
 
