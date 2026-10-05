@@ -2612,7 +2612,7 @@ func (vm *VM) bootstrap() {
 			if re, ok := a.(*Regexp); ok {
 				// A matching Regexp sets $~ (so $1.. and Regexp.last_match are live);
 				// a non-match clears it to nil, as MRI does.
-				if md := re.matcher().Match(s); md != nil && md.Begin(0) == 0 {
+				if md := re.match(vm, s); md != nil && md.Begin(0) == 0 {
 					vm.lastMatch = &MatchData{md: md, subject: s, re: re, enc: matchEnc(self)}
 					return object.True
 				}
@@ -2972,7 +2972,7 @@ func (vm *VM) bootstrap() {
 		s := strOf(self)
 		enc := self.(*object.String).Enc
 		if re, ok := regexpSep(args[0]); ok {
-			md := re.matcher().Match(s)
+			md := re.match(vm, s)
 			if md == nil {
 				vm.lastMatch = object.NilV
 				return object.NewArray(strEncOf(self, s), strEncOf(self, ""), strEncOf(self, ""))
@@ -8577,7 +8577,7 @@ func (vm *VM) stringIndexAssign(s *object.String, args []object.Value) object.Va
 // IndexError (unlike #[], which reads nil).
 func (vm *VM) stringAssignRegexp(s *object.String, re *Regexp, groupArgs []object.Value, rhs object.Value) object.Value {
 	subject := s.Str()
-	md := re.matcher().Match(subject)
+	md := re.match(vm, subject)
 	if md == nil {
 		vm.lastMatch = object.NilV
 		raise("IndexError", "regexp not matched")
@@ -8708,7 +8708,7 @@ func (vm *VM) stringSliceBang(s *object.String, args []object.Value) object.Valu
 // s, setting $~; it returns nil (with $~ = nil) when there is no match.
 func (vm *VM) stringSliceBangRegexp(s *object.String, re *Regexp, rest []object.Value) object.Value {
 	subject := s.Str()
-	md := re.matcher().Match(subject)
+	md := re.match(vm, subject)
 	if md == nil {
 		vm.lastMatch = object.NilV
 		return object.NilV

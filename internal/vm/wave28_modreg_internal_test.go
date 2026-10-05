@@ -74,42 +74,42 @@ func TestSearchFromBoundsAndPaths(t *testing.T) {
 
 	// Out-of-range cursors yield no match and echo the cursor back as the base.
 	plain := vm.compileRegexp("a", "").(*Regexp)
-	if md, base := plain.searchFrom("abc", -1); md != nil || base != -1 {
+	if md, base := plain.searchFrom(vm, "abc", -1); md != nil || base != -1 {
 		t.Fatalf("searchFrom(-1) = %v, %d; want nil, -1", md, base)
 	}
-	if md, base := plain.searchFrom("abc", 4); md != nil || base != 4 {
+	if md, base := plain.searchFrom(vm, "abc", 4); md != nil || base != 4 {
 		t.Fatalf("searchFrom(4) = %v, %d; want nil, 4", md, base)
 	}
 
 	// The fast path slices the tail, so offsets come back relative to the cursor.
-	md, base := plain.searchFrom("xxa", 1)
+	md, base := plain.searchFrom(vm, "xxa", 1)
 	if md == nil || base != 1 || base+md.Begin(0) != 2 {
 		t.Fatalf("fast path: base=%d begin=%v", base, md)
 	}
-	if md, _ := plain.searchFrom("xxx", 0); md != nil {
+	if md, _ := plain.searchFrom(vm, "xxx", 0); md != nil {
 		t.Fatalf("fast path should not match")
 	}
 
 	// A left-context pattern takes the anchored probe, which reports absolute
 	// offsets (base 0) and sees the real prefix.
 	anchored := vm.compileRegexp(`\A`, "").(*Regexp)
-	if md, base := anchored.searchFrom("abc", 1); md != nil {
+	if md, base := anchored.searchFrom(vm, "abc", 1); md != nil {
 		t.Fatalf("\\A must not match from 1, got %v (base %d)", md, base)
 	}
-	if md, base := anchored.searchFrom("abc", 0); md == nil || base != 0 {
+	if md, base := anchored.searchFrom(vm, "abc", 0); md == nil || base != 0 {
 		t.Fatalf("\\A must match at 0, got %v (base %d)", md, base)
 	}
 	// The probe must advance by whole characters and reach the very end.
 	bound := vm.compileRegexp(`\b`, "").(*Regexp)
-	if md, base := bound.searchFrom("éa", 0); md == nil || base != 0 || md.Begin(0) != 0 {
+	if md, base := bound.searchFrom(vm, "éa", 0); md == nil || base != 0 || md.Begin(0) != 0 {
 		t.Fatalf("\\b over a multi-byte prefix: %v base=%d", md, base)
 	}
-	if md, _ := bound.searchFrom("...", 0); md != nil {
+	if md, _ := bound.searchFrom(vm, "...", 0); md != nil {
 		t.Fatalf("\\b must not match inside punctuation only")
 	}
 	// The probe must walk PAST a failing start and stop at the end of the string.
 	head := vm.compileRegexp(`\Ab`, "").(*Regexp)
-	if md, _ := head.searchFrom("ab", 0); md != nil {
+	if md, _ := head.searchFrom(vm, "ab", 0); md != nil {
 		t.Fatalf("\\Ab must not match \"ab\" from any start")
 	}
 }

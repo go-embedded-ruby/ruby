@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"errors"
 	"strconv"
 	"strings"
 	"time"
@@ -53,13 +54,106 @@ type Regexp struct {
 }
 
 // matcher returns the engine Regexp to match with: the receiver's compiled
-// program, wrapped with the per-Regexp timeout when one was requested (the copy
-// shares the heavy matcher state, so this is cheap).
-func (r *Regexp) matcher() *onig.Regexp {
-	if f, ok := r.timeout.(object.Float); ok {
-		return r.re.WithTimeout(time.Duration(float64(f) * float64(time.Second)))
+// program, wrapped with whichever match time limit applies (the copy shares the
+// heavy matcher state, so this is cheap).
+//
+// It resolves MRI's precedence between the two limits, which is NOT "the tighter
+// one wins": a per-Regexp timeout: overrides the class-level Regexp.timeout
+// outright, in either direction. ruby/ruby re.c:4657-4694 (rb_reg_timeout_p)
+// reads reg->timelimit first and only falls back to the process-global
+// rb_reg_match_time_limit when it is zero, and re.c:3909-3917 (set_timeout)
+// stores nil as zero — so `timeout: nil` means "unset, use the class default",
+// not "no limit". Measured against ruby 4.0.5: class 0.05 + per-Regexp 1.0 fires
+// at 1.000s, i.e. the LARGER per-Regexp value wins.
+//
+// vm may be nil for a match outside any VM (a library binding compiling its own
+// Regexp), in which case only the per-Regexp limit applies.
+func (r *Regexp) matcher(vm *VM) *onig.Regexp {
+	// Both fields hold either a positive Float or "unset", and "unset" arrives in
+	// two shapes — a Go nil interface and an object.Nil (object.NilV) — depending on
+	// the construction path. Asserting for the Float rather than testing the nil
+	// covers both: coerceTimeout guarantees that anything stored here that is not
+	// "unset" is a positive Float.
+	f, ok := r.timeout.(object.Float)
+	if !ok && vm != nil {
+		f, ok = vm.regexpTimeout.(object.Float)
 	}
-	return r.re
+	if !ok {
+		return r.re
+	}
+	return r.re.WithTimeout(time.Duration(float64(f) * float64(time.Second)))
+}
+
+// raiseMatchLimit turns an engine limit error into the Ruby exception MRI raises
+// for a match that was abandoned rather than decided. It never returns for a
+// recognised limit, and is a no-op for a nil error.
+//
+// Reporting this at all is the fail-closed half of #776: folded into "no match"
+// — which is what every one of these call sites used to do — a timed-out match
+// on a Regexp used as a validator or a denylist is indistinguishable from "the
+// subject does not match", so a crafted subject passes the check.
+//
+// The two limits map to different exceptions because MRI distinguishes them:
+//   - a wall-clock timeout is Regexp::TimeoutError with the message
+//     "regexp match timeout" (ruby/ruby re.c:1726, in rb_reg_onig_match, on
+//     ONIGERR_TIMEOUT; the class is re.c:4831,
+//     Regexp::TimeoutError < RegexpError < StandardError).
+//   - the step budget has no MRI counterpart, because MRI has no step budget.
+//     Its nearest analogue is Onigmo's match-stack limit, which reaches re.c's
+//     `default:` arm (re.c:1727-1731) and raises a plain RegexpError. So that is
+//     what an exhausted budget raises here.
+func raiseMatchLimit(err error) {
+	switch {
+	case err == nil:
+		return
+	case errors.Is(err, onig.ErrTimeout):
+		raise("Regexp::TimeoutError", "regexp match timeout")
+	case errors.Is(err, onig.ErrBudget):
+		// Not an MRI message: MRI has no step budget. See raiseMatchLimit's doc.
+		raise("RegexpError", "regexp match step budget exceeded")
+	default:
+		raise("RegexpError", "regexp match failed: %s", err)
+	}
+}
+
+// match is the leftmost-match funnel every Ruby entry point goes through
+// (=~, match, match?, ===, scan, gsub, sub, split, String#index, …). It applies
+// the resolved time limit and RAISES when a limit is reached, so a nil result
+// always means "this subject does not match" and never "we gave up".
+func (r *Regexp) match(vm *VM, s string) *onig.MatchData {
+	return matchVia(r.matcher(vm), s)
+}
+
+// matchVia and matchAtVia run an ALREADY-RESOLVED matcher (see matcher) and raise
+// on a reached limit. searchFrom resolves the matcher once and then probes many
+// start positions with it, so resolution does not repeat per position.
+func matchVia(m *onig.Regexp, s string) *onig.MatchData {
+	md, err := m.MatchErr(s)
+	raiseMatchLimit(err)
+	return md
+}
+
+func matchAtVia(m *onig.Regexp, s string, pos int) *onig.MatchData {
+	md, err := m.MatchAtErr(s, pos)
+	raiseMatchLimit(err)
+	return md
+}
+
+// matchAt is match for a match anchored exactly at byte offset pos. It raises on
+// a reached limit for the same reason match does; String#rindex and the
+// StringScanner-style cursor ops probe one position after another through here.
+func (r *Regexp) matchAt(vm *VM, s string, pos int) *onig.MatchData {
+	return matchAtVia(r.matcher(vm), s, pos)
+}
+
+// matchString is the boolean funnel behind Regexp#match? and #===. Folding a
+// reached limit into false is the sharpest form of the fail-open — a denylist
+// written as `reject if DENY.match?(input)` lets the subject straight through —
+// so this raises instead.
+func (r *Regexp) matchString(vm *VM, s string) bool {
+	ok, err := r.matcher(vm).MatchStringErr(s)
+	raiseMatchLimit(err)
+	return ok
 }
 
 // optionBits returns the Integer option mask MRI's Regexp#options exposes:
@@ -980,17 +1074,29 @@ func regexpKwHash(args []object.Value) *object.Hash {
 // #timeout reports: an Integer or Float becomes a Float, nil stays nil, and any
 // other type raises TypeError as MRI does.
 func coerceTimeout(v object.Value) object.Value {
+	var f object.Float
 	switch t := v.(type) {
 	case object.Nil:
+		// nil is "unset", not "no limit": for a per-Regexp timeout it means fall back
+		// to Regexp.timeout, and for Regexp.timeout= it clears the default. MRI stores
+		// both as zero (ruby/ruby re.c:3909-3917, set_timeout).
 		return object.NilV
 	case object.Integer:
-		return object.Float(float64(t))
+		f = object.Float(float64(t))
 	case object.Float:
-		return t
+		f = t
 	default:
 		raise("TypeError", "no implicit conversion to float from %s", classNameOf(v))
 		return object.NilV
 	}
+	// A non-nil, non-positive timeout is an error, not "no limit": accepting 0
+	// silently would read back as a configured limit that can never fire.
+	// ruby/ruby re.c:3913-3915 raises ArgumentError here; measured on ruby 4.0.5,
+	// `Regexp.timeout = 0` raises "invalid timeout: 0".
+	if f <= 0 {
+		raise("ArgumentError", "invalid timeout: %s", v.Inspect())
+	}
+	return f
 }
 
 // regexpEncodingBits reports whether the FIXEDENCODING / NOENCODING option bits
@@ -1116,10 +1222,10 @@ func (vm *VM) regexpMatchP(re *Regexp, args []object.Value) object.Value {
 		}
 		// Search from the cursor with the WHOLE subject visible, as
 		// rb_reg_search does — /\A/.match?("hello", 2) is false, not true.
-		md, _ := re.searchFrom(subject, charToByte(subject, int(pos)))
+		md, _ := re.searchFrom(vm, subject, charToByte(subject, int(pos)))
 		return object.Bool(md != nil)
 	}
-	return object.Bool(re.matcher().MatchString(subject))
+	return object.Bool(re.matchString(vm, subject))
 }
 
 // getPat is string.c v3_4_0 get_pat, the pattern coercion String#match and
@@ -1315,16 +1421,16 @@ func patternNeedsLeftContext(src string) bool {
 // steps), so "one character" is always one UTF-8 rune here.
 //
 // Reference: ruby/ruby v3_4_0 re.c reg_onig_search / rb_reg_search0.
-func (r *Regexp) searchFrom(s string, pos int) (md *onig.MatchData, base int) {
+func (r *Regexp) searchFrom(vm *VM, s string, pos int) (md *onig.MatchData, base int) {
 	if pos < 0 || pos > len(s) {
 		return nil, pos
 	}
-	m := r.matcher()
+	m := r.matcher(vm)
 	if !patternNeedsLeftContext(r.source) {
-		return m.Match(s[pos:]), pos
+		return matchVia(m, s[pos:]), pos
 	}
 	for p := pos; p <= len(s); {
-		if hit := m.MatchAt(s, p); hit != nil {
+		if hit := matchAtVia(m, s, p); hit != nil {
 			return hit, 0
 		}
 		if p == len(s) {
@@ -1339,7 +1445,7 @@ func (r *Regexp) searchFrom(s string, pos int) (md *onig.MatchData, base int) {
 // runMatch matches re against subject, returning a MatchData value or nil. It
 // also records the result as $~ (the last match).
 func (vm *VM) runMatch(re *Regexp, subject, enc string) object.Value {
-	md := re.matcher().Match(subject)
+	md := re.match(vm, subject)
 	if md == nil {
 		vm.lastMatch = object.NilV
 		return object.NilV
@@ -1364,7 +1470,7 @@ func (vm *VM) runMatchFrom(re *Regexp, subject, enc string, pos int64) object.Va
 		return object.NilV
 	}
 	byteOff := charToByte(subject, int(pos))
-	md, base := re.searchFrom(subject, byteOff)
+	md, base := re.searchFrom(vm, subject, byteOff)
 	if md == nil {
 		vm.lastMatch = object.NilV
 		return object.NilV
@@ -1380,7 +1486,7 @@ func (vm *VM) runMatchFrom(re *Regexp, subject, enc string, pos int64) object.Va
 // index of the match start, or nil. off may equal the character count.
 func (vm *VM) strIndexRegexp(re *Regexp, subject, enc string, off int) object.Value {
 	byteOff := charToByte(subject, off)
-	md, base := re.searchFrom(subject, byteOff) // leftmost match at or after the cursor
+	md, base := re.searchFrom(vm, subject, byteOff) // leftmost match at or after the cursor
 	if md == nil {
 		vm.lastMatch = object.NilV
 		return object.NilV
@@ -1395,7 +1501,7 @@ func (vm *VM) strIndexRegexp(re *Regexp, subject, enc string, off int) object.Va
 // whole string stays visible to anchors and lookbehind.
 func (vm *VM) lastRegexpMatch(re *Regexp, subject, enc string) *MatchData {
 	for p := len(subject); p >= 0; p-- {
-		md := re.matcher().MatchAt(subject, p)
+		md := re.matchAt(vm, subject, p)
 		if md != nil && md.Begin(0) == p {
 			return &MatchData{md: md, subject: subject, re: re, enc: enc}
 		}
@@ -1410,7 +1516,7 @@ func (vm *VM) lastRegexpMatch(re *Regexp, subject, enc string) *MatchData {
 func (vm *VM) strRindexRegexp(re *Regexp, subject, enc string, limit int) object.Value {
 	for p := limit; p >= 0; p-- {
 		bytep := charToByte(subject, p)
-		md := re.matcher().MatchAt(subject, bytep)
+		md := re.matchAt(vm, subject, bytep)
 		if md != nil && md.Begin(0) == bytep {
 			vm.lastMatch = &MatchData{md: md, subject: subject, re: re, enc: enc}
 			return object.IntValue(int64(p))
@@ -1752,7 +1858,7 @@ func (vm *VM) scan(re *Regexp, subject string, self object.Value, blk *Proc) obj
 	last := object.Value(object.NilV) // $~ after the call: last match, or nil when none
 	pos := 0
 	for pos <= len(subject) {
-		md, base := re.searchFrom(subject, pos)
+		md, base := re.searchFrom(vm, subject, pos)
 		if md == nil {
 			break
 		}
@@ -1838,7 +1944,7 @@ func (vm *VM) stringSplit(subject, enc string, args []object.Value) object.Value
 		return splitWhitespace(subject, limit, enc)
 	}
 	re := scanRegexp(args[0])
-	return splitRegexp(re, subject, limit, enc)
+	return splitRegexp(vm, re, subject, limit, enc)
 }
 
 // replaceSplitPattern returns args with the pattern (args[0]) set to pat,
@@ -1906,7 +2012,7 @@ func isASCIISpace(c byte) bool {
 
 // splitRegexp splits subject on matches of re, interpolating captured groups
 // and honouring the field limit (see stringSplit).
-func splitRegexp(re *Regexp, subject string, limit int, enc string) object.Value {
+func splitRegexp(vm *VM, re *Regexp, subject string, limit int, enc string) object.Value {
 	if subject == "" {
 		return object.NewArray()
 	}
@@ -1918,7 +2024,7 @@ func splitRegexp(re *Regexp, subject string, limit int, enc string) object.Value
 		if limit > 0 && pieces+1 == limit {
 			break
 		}
-		md, base := re.searchFrom(subject, search)
+		md, base := re.searchFrom(vm, subject, search)
 		if md == nil {
 			break
 		}
@@ -2187,7 +2293,7 @@ func (vm *VM) gsub(re *Regexp, self *object.String, replObj *object.String, blk 
 	search := 0                       // byte cursor where the next search begins
 	last := object.Value(object.NilV) // $~ after the call: last match, or nil when there is none
 	for search <= len(subject) {
-		md, base := re.searchFrom(subject, search)
+		md, base := re.searchFrom(vm, subject, search)
 		if md == nil {
 			break
 		}
@@ -2247,7 +2353,7 @@ func (vm *VM) gsubHash(re *Regexp, self *object.String, h *object.Hash, global b
 	search := 0                       // byte cursor where the next search begins
 	last := object.Value(object.NilV) // $~ after the call: last match, or nil when there is none
 	for search <= len(subject) {
-		md, base := re.searchFrom(subject, search)
+		md, base := re.searchFrom(vm, subject, search)
 		if md == nil {
 			break
 		}
@@ -2501,9 +2607,10 @@ func (vm *VM) installRegexp() {
 	vm.cRegexp.consts["NOENCODING"] = object.IntValue(reNoEncoding)
 
 	// Regexp::TimeoutError < RegexpError is MRI's error for a match exceeding
-	// Regexp.timeout. The constant is defined for API parity; the pure-Go engine
-	// reports a timed-out match as a non-match (Match returns nil, indistinguishable
-	// from no match), so it is a real class but is never raised at match time here.
+	// Regexp.timeout (ruby/ruby re.c:4831). It is raised by raiseMatchLimit when
+	// the engine abandons a match at the wall-clock limit, with MRI's message
+	// "regexp match timeout" (re.c:1726). An exhausted step budget — which MRI has
+	// no counterpart for — raises a plain RegexpError instead.
 	if reErr, ok := vm.consts["RegexpError"].(*RClass); ok {
 		to := newClass("Regexp::TimeoutError", reErr)
 		vm.cRegexp.consts["TimeoutError"] = to
@@ -2688,7 +2795,7 @@ func (vm *VM) installRegexp() {
 			return object.False
 		}
 		re := reArg(self)
-		md := re.matcher().Match(s)
+		md := re.match(vm, s)
 		if md == nil {
 			vm.lastMatch = object.NilV
 			return object.False
@@ -3013,7 +3120,7 @@ func (vm *VM) regexpMatchIndex(re *Regexp, subject object.Value) object.Value {
 		raise("TypeError", "no implicit conversion of %s into String", classNameOf(subject))
 	}
 	vm.checkSubjectEncoding(re, subject)
-	md := re.matcher().Match(s)
+	md := re.match(vm, s)
 	if md == nil {
 		vm.lastMatch = object.NilV
 		return object.NilV
@@ -3026,7 +3133,7 @@ func (vm *VM) regexpMatchIndex(re *Regexp, subject object.Value) object.Value {
 // whole match (no extra arg) or the numbered/named capture group, and nil when
 // the pattern does not match. $~ is updated, as in MRI.
 func (vm *VM) stringRegexpIndex(s, enc string, re *Regexp, rest []object.Value) object.Value {
-	md := re.matcher().Match(s)
+	md := re.match(vm, s)
 	if md == nil {
 		vm.lastMatch = object.NilV
 		return object.NilV

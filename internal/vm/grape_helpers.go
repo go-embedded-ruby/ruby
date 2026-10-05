@@ -145,7 +145,12 @@ func grapeRegexp(v object.Value) grape.Regexp {
 	}
 	return grape.Regexp{
 		Source: re.source,
-		Match:  func(s string) bool { return re.re.MatchString(s) },
+		// Through matchString, so the Regexp's own timeout: applies and a match
+		// abandoned at a limit raises instead of answering false. There is no VM in
+		// scope here, so the class-level Regexp.timeout does not reach this binding;
+		// folding the limit into false would be fail-CLOSED for a Grape regexp:
+		// constraint (the param is rejected), but it would report the wrong reason.
+		Match: func(s string) bool { return re.matchString(nil, s) },
 	}
 }
 
