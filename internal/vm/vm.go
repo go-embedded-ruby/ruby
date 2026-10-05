@@ -1450,7 +1450,44 @@ func (vm *VM) Run(iseq *bytecode.ISeq) (result object.Value, err error) {
 				result, err = object.NilV, nil
 				return
 			}
-			rerr := r.(RubyError)
+			// Every panic value that is not a RubyError used to CRASH HERE. This was
+			// an unchecked `r.(RubyError)` assertion, so a Go runtime fault — the
+			// makeslice panic of #777, say — made the assertion itself panic INSIDE
+			// this handler. That is where `[recovered, repanicked]` came from, and it
+			// cost two things, both measured on the pre-fix tree:
+			//
+			//	escaped panic : interface conversion: interface {} is
+			//	                runtime.errorString, not vm.RubyError
+			//	frameNames    : 1
+			//
+			// The assertion's own value REPLACED the original, so `makeslice: cap out
+			// of range` — the only text naming the real cause — was gone; and the
+			// cleanup below was skipped, so a host that recovers in a wrapper carried
+			// on with a VM holding a half-unwound frame stack.
+			//
+			// Guarding the conversion fixes the whole class, not just #777's trigger:
+			// any non-RubyError panic now keeps its own cause and leaves a clean VM.
+			//
+			// It PROPAGATES rather than being wrapped into a returned error, because
+			// this VM draws that line deliberately and in one place already:
+			// callNative converts a fault caused by Ruby INPUT into a rescuable Ruby
+			// exception so an embedding host can never be crashed by a program it
+			// ran, while a broken VM INVARIANT stays loud so a real defect is not
+			// laundered into an error a host would log and move past. An out-of-range
+			// local is the second kind. TestRunPropagatesInternalPanic pins it, and
+			// what #777 broke was the cause and the cleanup — not the propagation.
+			var rerr RubyError
+			switch v := r.(type) {
+			case RubyError:
+				rerr = v
+			default:
+				vm.frameNames = vm.frameNames[:0]
+				vm.frameFiles = vm.frameFiles[:0]
+				vm.frameCrefs = vm.frameCrefs[:0]
+				vm.frameMethods = vm.frameMethods[:0]
+				vm.fileStack = vm.fileStack[:0]
+				panic(v)
+			}
 			// A SystemExit (Kernel#exit/abort) is a clean program termination, not a
 			// crash: unwind to the top, run at_exit handlers, and return without an
 			// error — so a real CLI that ends by calling exit (e.g. Puppet's

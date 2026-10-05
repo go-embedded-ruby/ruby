@@ -411,7 +411,7 @@ func (vm *VM) registerRandom() {
 	})
 	cRandom.define("bytes", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		r := self.(*RandomObj)
-		b := make([]byte, int(intArg(args[0])))
+		b := make([]byte, randomByteCount(args[0]))
 		r.fillBytes(b)
 		return object.NewStringBytes(b)
 	})
@@ -456,7 +456,7 @@ func (vm *VM) registerRandom() {
 		return vm.randValue(vm.defaultRandom, args)
 	}}
 	cRandom.smethods["bytes"] = &Method{name: "bytes", owner: cRandom, native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		b := make([]byte, int(intArg(args[0])))
+		b := make([]byte, randomByteCount(args[0]))
 		vm.defaultRandom.fillBytes(b)
 		return object.NewStringBytesEnc(b, "ASCII-8BIT")
 	}}

@@ -3218,12 +3218,20 @@ func (vm *VM) bootstrap() {
 		if n < 0 {
 			raise("ArgumentError", "negative array size")
 		}
+		// ary_new refuses a capacity above ARY_MAX_SIZE with its own message
+		// (array.c v4.0.5:730, "array size too big"). Without this test the
+		// capacity reached make, whose panic callNative then reported as
+		// `ArgumentError: new: runtime error: makeslice: cap out of range` — the Go
+		// text leaking into a Ruby message (issue #777).
+		if !fitsArrayAlloc(n) {
+			raise("ArgumentError", "array size too big")
+		}
 		// Build the array incrementally so that if the block calls break, the array
 		// is left holding the elements produced before the break, as MRI does.
 		if blk != nil && len(args) == 2 {
 			vm.rbWarn("block supersedes default value argument")
 		}
-		arr.Elems = make([]object.Value, 0, n)
+		arr.Elems = allocValues(n)
 		for i := int64(0); i < n; i++ {
 			switch {
 			case blk != nil:
@@ -9249,10 +9257,12 @@ func (vm *VM) flattenDepthIn(elems []object.Value, depth int, path map[*object.A
 	return out, changed
 }
 
-// maxFillSize caps how large Array#fill may grow an array. MRI raises when the
-// requested size is unreasonable; rejecting here keeps a pathological length
-// (e.g. fill(x, 1, fixnum_max)) from attempting a doomed allocation.
-const maxFillSize = 1 << 40
+// maxFillSize caps how large Array#fill may grow an array. It is ARY_MAX_SIZE
+// (see alloc_bounds.go), the same ceiling ary_new enforces, rather than the
+// 1<<40 that stood here before #777 -- that number was below MRI's real limit
+// and nothing justified it, so a length between 1<<40 and ARY_MAX_SIZE was
+// refused here and accepted by MRI.
+const maxFillSize = aryMaxSize
 
 // arrayFill implements Array#fill in every MRI form: fill(obj), fill(obj, start),
 // fill(obj, start, length), fill(obj, range) and the block variants
@@ -9423,8 +9433,11 @@ func (vm *VM) fillRangeBounds(r *object.Range, alen int) (beg, end int) {
 // inverted interval is a no-op. It returns a.
 func (vm *VM) arrayFillRange(a *object.Array, beg, end int, item object.Value, blk *Proc) object.Value {
 	if end > len(a.Elems) {
-		if end > maxFillSize {
-			raise("ArgumentError", "array size too big")
+		if int64(end) > maxFillSize {
+			// rb_ary_fill's own test (array.c v4.0.5:5087) raises with this message,
+			// which is NOT ary_new's "array size too big" -- measured on MRI 4.0.5,
+			// [1,2,3].fill(0, 0, 2**62) gives "argument too big".
+			raise("ArgumentError", "argument too big")
 		}
 		grow := make([]object.Value, end-len(a.Elems))
 		for i := range grow {

@@ -2292,7 +2292,20 @@ func (vm *VM) callNative(m *Method, self object.Value, args []object.Value, blk 
 	}
 	defer func() {
 		if r := recover(); r != nil {
-			if _, ok := r.(runtime.Error); ok {
+			if re, ok := r.(runtime.Error); ok {
+				// An ALLOCATION fault is a refused allocation, not a bad argument, and
+				// MRI calls it NoMemoryError. Reporting it as ArgumentError also leaked
+				// the Go text verbatim into a Ruby message, which is how
+				// `"x".ljust(2**62)` came to raise
+				// `ArgumentError: ljust: runtime error: makeslice: len out of range`
+				// where MRI 4.0.5 raises `NoMemoryError: failed to allocate memory`
+				// (issue #777). This is the backstop for every size that reaches a
+				// `make` from a Ruby value without a guard of its own; the named
+				// operators guard themselves, because MRI refuses some of those with
+				// ArgumentError BEFORE allocating and only a guard can tell.
+				if isAllocFault(re.Error()) {
+					panic(RubyError{Class: "NoMemoryError", Message: "failed to allocate memory"})
+				}
 				panic(RubyError{Class: "ArgumentError", Message: fmt.Sprintf("%s: %v", m.name, r)})
 			}
 			panic(r)
