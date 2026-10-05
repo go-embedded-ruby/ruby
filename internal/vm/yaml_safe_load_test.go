@@ -253,24 +253,52 @@ rescue Psych::DisallowedClass => e
   puts "refused: #{e.message}"
 end
 puts YAML.safe_load_file(` + rubyStr(path) + `, permitted_classes: [Gadget]).class
-puts YAML.load_file(` + rubyStr(path) + `).class`
+puts YAML.unsafe_load_file(` + rubyStr(path) + `).class`
 	want := "refused: Tried to load unspecified class: Gadget\nGadget\nGadget\n"
 	if got := eval(t, src); got != want {
 		t.Errorf("got %q want %q", got, want)
 	}
 }
 
-// TestYAMLLoadStaysUnrestricted checks the fix did not leak into the unsafe
-// entry points. load / unsafe_load are documented as unsafe and Puppet's
-// persistence calls them; a restriction there would be a different bug.
-func TestYAMLLoadStaysUnrestricted(t *testing.T) {
+// TestYAMLLoadIsRestrictedAndUnsafeLoadIsNot replaces a test that asserted the
+// defect. Its predecessor, TestYAMLLoadStaysUnrestricted, REQUIRED
+// YAML.load("--- !ruby/object:Gadget") to return a Gadget, reasoning that load
+// is "documented as unsafe" and that Puppet's persistence calls it.
+//
+// Psych 4 inverted that: psych.rb:369 makes load delegate to safe_load with
+// permitted_classes: [Symbol] -- the change Psych made precisely because load is
+// the call people habitually write. The Puppet premise does not hold either:
+// MRI refuses Puppet's own state shape through a bare load (measured; see
+// TestYAMLLoadStateRoundTrip), so Puppet passes its own allow-list rather than
+// relying on load being unrestricted.
+//
+// The invariant is the pair. load restricts to Symbol; unsafe_load does not
+// restrict at all, so a caller who genuinely wants objects back still has a
+// spelling to name; and an explicit permitted_classes REPLACES the Symbol
+// default rather than adding to it, which is the subtlety a merge-shaped
+// implementation would get wrong.
+func TestYAMLLoadIsRestrictedAndUnsafeLoadIsNot(t *testing.T) {
 	src := `require "yaml"
 class Gadget; attr_accessor :foo; end
-puts YAML.load("--- !ruby/object:Gadget\nfoo: bar\n").class
-puts YAML.unsafe_load("--- !ruby/object:Gadget\nfoo: bar\n").foo
+g = "--- !ruby/object:Gadget\nfoo: bar\n"
+begin
+  YAML.load(g)
+  puts "load: NOT REFUSED"
+rescue Psych::DisallowedClass => e
+  puts "load: #{e.message}"
+end
+puts YAML.unsafe_load(g).foo
 puts YAML.load(":sym").class
-puts YAML.load("--- !ruby/regexp /ab/i\n").class`
-	want := "Gadget\nbar\nSymbol\nRegexp\n"
+puts YAML.load(g, permitted_classes: [Gadget]).class
+begin
+  YAML.load(":sym", permitted_classes: [Gadget])
+  puts "explicit list: NOT REFUSED"
+rescue Psych::DisallowedClass
+  puts "explicit list replaces the Symbol default"
+end`
+	want := "load: Tried to load unspecified class: Gadget\n" +
+		"bar\nSymbol\nGadget\n" +
+		"explicit list replaces the Symbol default\n"
 	if got := eval(t, src); got != want {
 		t.Errorf("got %q want %q", got, want)
 	}
