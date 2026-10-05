@@ -298,3 +298,30 @@ puts Object.const_defined?(:StillUnheardOf)`
 		t.Errorf("a refused document defined a constant: got %q", got)
 	}
 }
+
+// TestYAMLSafeLoadNamelessObjectIsObject covers checkObject's empty-class arm.
+// A `!ruby/object:` tag with no class name after the colon loads as an object
+// whose Class is "", and it is gated as "Object" -- which is what Psych reports:
+// ClassLoader#load returns nil for an empty name (class_loader.rb:27) and
+// to_ruby.rb:244 falls back to `class_loader.object`.
+//
+// The coverage gate named this arm, so the first question was whether anything
+// can reach it rather than how to cover it. It can: the engine's loader yields
+// Class:"" for the bare-colon spelling (and "Object" for `!ruby/object` with no
+// colon at all), so both spellings are checked here. Measured against MRI
+// 4.0.5, which answers "Tried to load unspecified class: Object" for both.
+func TestYAMLSafeLoadNamelessObjectIsObject(t *testing.T) {
+	for _, tag := range []string{`--- !ruby/object\nfoo: 1\n`, `--- !ruby/object:\nfoo: 1\n`} {
+		src := `require "yaml"
+begin
+  puts YAML.safe_load("` + tag + `").class
+rescue Psych::DisallowedClass => e
+  puts "refused: #{e.message}"
+end
+puts YAML.safe_load("` + tag + `", permitted_classes: [Object]).class`
+		want := "refused: Tried to load unspecified class: Object\nObject\n"
+		if got := eval(t, src); got != want {
+			t.Errorf("tag %q: got %q want %q", tag, got, want)
+		}
+	}
+}
