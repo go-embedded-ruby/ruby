@@ -150,7 +150,7 @@ require (
 	github.com/go-ruby-ransack/ransack v0.0.0-20260717072959-06ca1d7c6829
 	github.com/go-ruby-rdoc/rdoc v0.0.0-20260916101528-7ed1d61f5088
 	github.com/go-ruby-redis/redis v0.0.0-20260916101628-3b91d134e9dc
-	github.com/go-ruby-regexp/regexp v0.0.0-20261005134444-6cc28ccff9ed
+	github.com/go-ruby-regexp/regexp v0.1.0
 	github.com/go-ruby-reline/reline v0.0.0-20260916101734-37c7d2c11d74
 	github.com/go-ruby-resolv/resolv v0.0.0-20260916101809-a2b1b027ae6d
 	github.com/go-ruby-resque/resque v0.0.0-20260903192756-dc5f8e3f2e80
@@ -305,7 +305,7 @@ require (
 	github.com/go-opentype/shape v0.5.0 // indirect
 	github.com/go-pcore/pcore v0.0.0-20260831114716-f9c3e7f59eaa // indirect
 	github.com/go-puppet/puppet v0.0.0-20260918012035-fc6b0424cdbd // indirect
-	github.com/go-regexp/engine v0.2.1-0.20261005134350-5c3a77f8e7e2 // indirect
+	github.com/go-regexp/engine v0.3.0 // indirect
 	github.com/go-richdoc/richdoc v0.4.0 // indirect
 	github.com/go-ruby-fast-gettext-locale/fast-gettext-locale v0.0.0-20260825110154-a53e0e3a41a7 // indirect
 	github.com/go-scss/scss v0.0.0-20260905061546-39932e01faa4 // indirect
