@@ -117,8 +117,8 @@ Regexp.timeout = nil`
 		"subject(class-level): TimeoutError",
 		"reads back: 0.05",
 		// MRI's Regexp#timeout reports only this Regexp's OWN limit and does not fall
-		// back to the class default (ruby/ruby re.c:4751, rb_reg_timeout_get; measured
-		// on ruby 4.0.5, where it reads nil with Regexp.timeout = 0.05 in force).
+		// back to the class default (ruby/ruby re.c:4776, rb_reg_timeout_get, tag v4.0.5;
+		// measured on the installed ruby 4.0.5, where it reads nil with Regexp.timeout = 0.05 in force).
 		"per-regexp reader unaffected: nil",
 		"",
 	}, "\n")
@@ -128,9 +128,9 @@ Regexp.timeout = nil`
 }
 
 // TestTimeoutPrecedenceMatchesMRI pins the resolution rule, which is NOT "the
-// tighter limit wins". ruby/ruby re.c:4657-4694 (rb_reg_timeout_p) reads
-// reg->timelimit first and falls back to the process-global
-// rb_reg_match_time_limit only when it is zero, and re.c:3909-3917 (set_timeout)
+// tighter limit wins". ruby/ruby re.c:4688-4719 (rb_reg_timeout_p, tag
+// v4.0.5) reads reg->timelimit first and falls back to the process-global
+// rb_reg_match_time_limit only when it is zero, and re.c:3935-3942 (set_timeout)
 // stores nil as zero — so `timeout: nil` means "unset, use the class default".
 //
 // Measured on ruby 4.0.5: class 0.05 with per-Regexp 1.0 fires at 1.000s, i.e.
@@ -194,8 +194,8 @@ puts "cleared: #{Regexp.timeout.inspect}"`
 // 0.994s" — was this, not an exhaustive search that found no match.
 //
 // MRI has no step budget, so there is no MRI exception to mirror. Its nearest
-// analogue is Onigmo's match-stack limit, which reaches re.c:1727-1731's
-// `default:` arm and raises a plain RegexpError — so that is what this raises.
+// analogue is Onigmo's match-stack limit, which reaches re.c:1724-1728's
+// `default:` arm (tag v4.0.5) and raises a plain RegexpError — so that is what this raises.
 // Rescuing Regexp::TimeoutError does NOT catch it; rescuing RegexpError catches
 // both, which is what a guard should write.
 func TestStepBudgetRaisesWithNoTimeoutConfigured(t *testing.T) {
@@ -264,8 +264,8 @@ Regexp.timeout = nil`
 // TestInvalidTimeoutRaisesArgumentError covers the third thing the audit turned
 // up: a non-nil, non-positive timeout was accepted silently. `Regexp.timeout = 0`
 // returned 0 and read back as a configured limit that could never fire — a
-// security setting that looks applied and is not. ruby/ruby re.c:3913-3915
-// (set_timeout) raises ArgumentError; measured on ruby 4.0.5 the message is
+// security setting that looks applied and is not. ruby/ruby re.c:3938-3940
+// (set_timeout, tag v4.0.5) raises ArgumentError; measured on ruby 4.0.5 the message is
 // "invalid timeout: 0".
 func TestInvalidTimeoutRaisesArgumentError(t *testing.T) {
 	for _, tc := range []struct{ name, expr, want string }{
@@ -293,8 +293,8 @@ func TestInvalidTimeoutRaisesArgumentError(t *testing.T) {
 
 // TestTimeoutErrorIsRescuableAsRegexpError pins the ancestry a caller writes a
 // rescue against: Regexp::TimeoutError < RegexpError < StandardError
-// (ruby/ruby re.c:4831, rb_define_class_under(rb_cRegexp, "TimeoutError",
-// rb_eRegexpError)). Rescuing RegexpError catches BOTH limits; that is the form a
+// (ruby/ruby re.c:4862 at tag v4.0.5,
+// rb_define_class_under(rb_cRegexp, "TimeoutError", rb_eRegexpError)). Rescuing RegexpError catches BOTH limits; that is the form a
 // guard should use, since the step budget raises the parent.
 func TestTimeoutErrorIsRescuableAsRegexpError(t *testing.T) {
 	const src = `p Regexp::TimeoutError.ancestors[0, 4]

@@ -59,12 +59,14 @@ type Regexp struct {
 //
 // It resolves MRI's precedence between the two limits, which is NOT "the tighter
 // one wins": a per-Regexp timeout: overrides the class-level Regexp.timeout
-// outright, in either direction. ruby/ruby re.c:4657-4694 (rb_reg_timeout_p)
-// reads reg->timelimit first and only falls back to the process-global
-// rb_reg_match_time_limit when it is zero, and re.c:3909-3917 (set_timeout)
-// stores nil as zero — so `timeout: nil` means "unset, use the class default",
-// not "no limit". Measured against ruby 4.0.5: class 0.05 + per-Regexp 1.0 fires
-// at 1.000s, i.e. the LARGER per-Regexp value wins.
+// outright, in either direction. ruby/ruby re.c:4688-4719 (rb_reg_timeout_p,
+// at tag v4.0.5) reads reg->timelimit first and only falls back to the
+// process-global rb_reg_match_time_limit (re.c:93) when it is zero — re.c:4696-4701
+// — and re.c:3935-3942 (set_timeout) stores nil as zero, so `timeout: nil` means
+// "unset, use the class default", not "no limit". The docstring at re.c:4767-4768
+// says it outright: "The global configuration set by Regexp.timeout= is ignored
+// if per-object configuration is set." Measured against the installed ruby 4.0.5:
+// class 0.05 + per-Regexp 1.0 fires at 1.000s, i.e. the LARGER value wins.
 //
 // vm may be nil for a match outside any VM (a library binding compiling its own
 // Regexp), in which case only the per-Regexp limit applies.
@@ -95,12 +97,14 @@ func (r *Regexp) matcher(vm *VM) *onig.Regexp {
 //
 // The two limits map to different exceptions because MRI distinguishes them:
 //   - a wall-clock timeout is Regexp::TimeoutError with the message
-//     "regexp match timeout" (ruby/ruby re.c:1726, in rb_reg_onig_match, on
-//     ONIGERR_TIMEOUT; the class is re.c:4831,
-//     Regexp::TimeoutError < RegexpError < StandardError).
+//     "regexp match timeout" (ruby/ruby re.c:1723 at tag v4.0.5, in
+//     rb_reg_onig_match on ONIGERR_TIMEOUT; the class is re.c:4862,
+//     Regexp::TimeoutError < RegexpError < StandardError). rb_reg_onig_match
+//     (re.c:1700) is the single funnel all of MRI's matching goes through, which
+//     is why every MRI entry point raises.
 //   - the step budget has no MRI counterpart, because MRI has no step budget.
 //     Its nearest analogue is Onigmo's match-stack limit, which reaches re.c's
-//     `default:` arm (re.c:1727-1731) and raises a plain RegexpError. So that is
+//     `default:` arm (re.c:1724-1728) and raises a plain RegexpError. So that is
 //     what an exhausted budget raises here.
 func raiseMatchLimit(err error) {
 	switch {
@@ -1079,7 +1083,7 @@ func coerceTimeout(v object.Value) object.Value {
 	case object.Nil:
 		// nil is "unset", not "no limit": for a per-Regexp timeout it means fall back
 		// to Regexp.timeout, and for Regexp.timeout= it clears the default. MRI stores
-		// both as zero (ruby/ruby re.c:3909-3917, set_timeout).
+		// both as zero (ruby/ruby re.c:3935-3942, set_timeout, at tag v4.0.5).
 		return object.NilV
 	case object.Integer:
 		f = object.Float(float64(t))
@@ -1091,8 +1095,8 @@ func coerceTimeout(v object.Value) object.Value {
 	}
 	// A non-nil, non-positive timeout is an error, not "no limit": accepting 0
 	// silently would read back as a configured limit that can never fire.
-	// ruby/ruby re.c:3913-3915 raises ArgumentError here; measured on ruby 4.0.5,
-	// `Regexp.timeout = 0` raises "invalid timeout: 0".
+	// ruby/ruby re.c:3938-3940 (tag v4.0.5) raises ArgumentError here; measured on
+	// the installed ruby 4.0.5, `Regexp.timeout = 0` raises "invalid timeout: 0".
 	if f <= 0 {
 		raise("ArgumentError", "invalid timeout: %s", v.Inspect())
 	}
@@ -2607,9 +2611,10 @@ func (vm *VM) installRegexp() {
 	vm.cRegexp.consts["NOENCODING"] = object.IntValue(reNoEncoding)
 
 	// Regexp::TimeoutError < RegexpError is MRI's error for a match exceeding
-	// Regexp.timeout (ruby/ruby re.c:4831). It is raised by raiseMatchLimit when
+	// Regexp.timeout (ruby/ruby re.c:4862 at tag v4.0.5). It is raised by
+	// raiseMatchLimit when
 	// the engine abandons a match at the wall-clock limit, with MRI's message
-	// "regexp match timeout" (re.c:1726). An exhausted step budget — which MRI has
+	// "regexp match timeout" (re.c:1723). An exhausted step budget — which MRI has
 	// no counterpart for — raises a plain RegexpError instead.
 	if reErr, ok := vm.consts["RegexpError"].(*RClass); ok {
 		to := newClass("Regexp::TimeoutError", reErr)
@@ -2870,8 +2875,11 @@ func (vm *VM) installRegexp() {
 		return vm.regexpMatchIndex(reArg(self), line)
 	})
 	// Regexp#timeout returns this Regexp's own match-time limit as a Float
-	// (seconds), or nil when none was set at construction. It does not fall back
-	// to the Regexp.timeout default.
+	// (seconds), or nil when none was set at construction. It does NOT fall back to
+	// the Regexp.timeout default — ruby/ruby re.c:4776 (rb_reg_timeout_get, tag
+	// v4.0.5) reads only RREGEXP_PTR(re)->timelimit, and the docstring above it at
+	// re.c:4767-4768 states the rule. Measured on ruby 4.0.5: it reads nil with
+	// Regexp.timeout = 0.05 in force.
 	vm.cRegexp.define("timeout", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		if t := reArg(self).timeout; t != nil {
 			return t

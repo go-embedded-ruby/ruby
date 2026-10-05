@@ -116,7 +116,7 @@ func TestRegexpWave17Values(t *testing.T) {
 		{`p(/a/.match(:abc)[0])`, `"a"` + "\n"},
 		{`p(/a/.match?("abc"))`, "true\n"},
 
-		// Regexp::TimeoutError < RegexpError (ruby/ruby re.c:4831). It IS raised at
+		// Regexp::TimeoutError < RegexpError (ruby/ruby re.c:4862, tag v4.0.5). It IS raised at
 		// match time as of #776 — see regexp_timeout_raise_test.go; this case pins
 		// only the ancestry a rescue is written against.
 		{`p(Regexp::TimeoutError < RegexpError)`, "true\n"},
