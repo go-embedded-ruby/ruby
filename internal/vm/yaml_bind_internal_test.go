@@ -56,8 +56,8 @@ func TestYAMLBindLoadSyntaxError(t *testing.T) {
 		fn   func()
 	}{
 		{"load", func() { yamlLoad(vm, doc) }},
-		{"safe_load", func() { yamlSafeLoad(vm, doc, nil) }},
-		{"safe_load/permitted", func() { yamlSafeLoad(vm, doc, []string{"Foo"}) }},
+		{"safe_load", func() { yamlSafeLoad(vm, doc, psychSafeArgs(nil)) }},
+		{"safe_load/permitted", func() { yamlSafeLoad(vm, doc, psychSafeOpts{classes: map[string]bool{"Foo": true}}) }},
 	} {
 		re := rubyErr(t, call.fn)
 		if re.Class != "Psych::SyntaxError" {
@@ -264,33 +264,73 @@ func TestYAMLBindResolveClass(t *testing.T) {
 	}
 }
 
-// TestYAMLBindPermittedClassesArg covers permittedClassesArg's branches: no
-// trailing args, a trailing non-Hash, a Hash without the keyword, a non-Array
-// value, and the populated case with a Class element and a string element.
-func TestYAMLBindPermittedClassesArg(t *testing.T) {
-	if got := permittedClassesArg(nil); got != nil {
-		t.Errorf("no args -> %v", got)
-	}
-	if got := permittedClassesArg([]object.Value{object.Integer(1)}); got != nil {
-		t.Errorf("non-hash trailing -> %v", got)
-	}
-	if got := permittedClassesArg([]object.Value{object.NewHash()}); got != nil {
-		t.Errorf("hash without keyword -> %v", got)
-	}
-	// permitted_classes whose value is not an Array is ignored.
-	h := object.NewHash()
-	h.Set(object.Symbol("permitted_classes"), object.Integer(7))
-	if got := permittedClassesArg([]object.Value{h}); got != nil {
-		t.Errorf("non-array value -> %v", got)
+// TestYAMLBindPsychSafeArgs covers psychSafeArgs' branches: no trailing args, a
+// trailing non-Hash, a Hash without the keyword, a non-Array value, and the
+// populated case with a Class element and a String element.
+//
+// The invariant every branch is checked against is POSITIVE: the resolved
+// allow-list is always non-nil, and it permits nothing it was not given. The
+// test this replaces asserted the opposite (`got != nil` for the no-keyword
+// case, i.e. "absent means nil means permit all"), so it was asserting the
+// defect of issue #775 rather than guarding against it -- fixing the binding
+// would have turned that test red.
+func TestYAMLBindPsychSafeArgs(t *testing.T) {
+	// Every shape that carries no usable permitted_classes resolves to the EMPTY
+	// policy -- deny every class -- not to the absence of a policy.
+	nonArray := object.NewHash()
+	nonArray.Set(object.Symbol("permitted_classes"), object.Integer(7))
+	for _, c := range []struct {
+		name string
+		rest []object.Value
+	}{
+		{"no args", nil},
+		{"non-hash trailing", []object.Value{object.Integer(1)}},
+		{"hash without keyword", []object.Value{object.NewHash()}},
+		{"non-array value", []object.Value{nonArray}},
+	} {
+		o := psychSafeArgs(c.rest)
+		if o.classes == nil {
+			t.Errorf("%s: classes is nil (unset and empty must not be the same value)", c.name)
+			continue
+		}
+		if len(o.classes) != 0 {
+			t.Errorf("%s: permits %v", c.name, o.classes)
+		}
+		if o.permits("Gadget") || o.permits("Symbol") {
+			t.Errorf("%s: empty allow-list permitted a class", c.name)
+		}
+		if o.symbols != nil {
+			t.Errorf("%s: symbols narrowing = %v, want none", c.name, o.symbols)
+		}
 	}
 	// A populated list: a Class element lists by name, a String element by to_s.
 	vm := New(nil)
-	h2 := object.NewHash()
-	arr := &object.Array{Elems: []object.Value{vm.consts["String"], object.NewString("Symbol")}}
-	h2.Set(object.Symbol("permitted_classes"), arr)
-	got := permittedClassesArg([]object.Value{h2})
-	if len(got) != 2 || got[0] != "String" || got[1] != "Symbol" {
-		t.Errorf("populated -> %v", got)
+	h := object.NewHash()
+	h.Set(object.Symbol("permitted_classes"),
+		&object.Array{Elems: []object.Value{vm.consts["String"], object.NewString("Symbol")}})
+	o := psychSafeArgs([]object.Value{h})
+	if !o.permits("String") || !o.permits("Symbol") || o.permits("Gadget") {
+		t.Errorf("populated -> %v", o.classes)
+	}
+	// permitted_symbols narrows only when at least one name is given: MRI's
+	// Restricted#symbolize short-circuits on @symbols.empty?, so an EMPTY list
+	// means "any name" -- the opposite of permitted_classes' empty list.
+	hEmpty := object.NewHash()
+	hEmpty.Set(object.Symbol("permitted_symbols"), &object.Array{})
+	if o := psychSafeArgs([]object.Value{hEmpty}); o.symbols != nil {
+		t.Errorf("permitted_symbols: [] -> %v, want no narrowing", o.symbols)
+	}
+	hSym := object.NewHash()
+	hSym.Set(object.Symbol("permitted_symbols"), &object.Array{Elems: []object.Value{object.Symbol("foo")}})
+	got := psychSafeArgs([]object.Value{hSym})
+	if got.symbols == nil || !got.symbols["foo"] || got.symbols["bar"] {
+		t.Errorf("permitted_symbols: [:foo] -> %v", got.symbols)
+	}
+	// A non-Array permitted_symbols narrows nothing (psychNameList returns nil).
+	hBad := object.NewHash()
+	hBad.Set(object.Symbol("permitted_symbols"), object.Integer(3))
+	if o := psychSafeArgs([]object.Value{hBad}); o.symbols != nil {
+		t.Errorf("non-array permitted_symbols -> %v", o.symbols)
 	}
 }
 

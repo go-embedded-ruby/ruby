@@ -203,12 +203,46 @@ func (vm *VM) exceptionObject(e RubyError) object.Value {
 	if !object.IsNil(e.Obj) {
 		return vm.captureBacktrace(e.Obj)
 	}
-	cls, ok := vm.consts[e.Class].(*RClass)
+	cls, ok := vm.errorClass(e.Class)
 	if !ok {
 		cls = vm.consts["StandardError"].(*RClass)
 	}
 	obj := &RObject{class: cls, ivars: map[string]object.Value{"@message": object.NewString(e.Message)}}
 	return vm.captureBacktrace(obj)
+}
+
+// errorClass resolves an internal raise's class NAME to its class. A bare name
+// is a top-level constant (vm.consts is Object's own table); a `::`-qualified
+// one is walked segment by segment, because a namespaced error class lives in
+// its module's constant table and not at the top level: registerYAML stores
+// Psych::DisallowedClass as psych.consts["DisallowedClass"], so the flat lookup
+// this replaces could never find it.
+//
+// Every namespaced internal raise therefore surfaced as a bare StandardError,
+// which is why `rescue Psych::DisallowedClass` — and `rescue
+// Psych::SyntaxError`, which rbgo has raised all along — could not fire: the
+// constant named in the rescue clause resolved to a class the exception was
+// never an instance of.
+//
+// The walk is strict (each segment must be a class/module in the PREVIOUS
+// segment's own table, with no ancestor or lexical fallback), because these
+// names are built by newClass("A::B") and registered exactly that way. A name
+// that does not resolve falls back to StandardError as before, so a binding
+// naming a class it never registered degrades rather than crashing.
+func (vm *VM) errorClass(name string) (*RClass, bool) {
+	if !strings.Contains(name, "::") {
+		cls, ok := vm.consts[name].(*RClass)
+		return cls, ok
+	}
+	cur := vm.cObject
+	for _, seg := range strings.Split(name, "::") {
+		next, ok := cur.consts[seg].(*RClass)
+		if !ok {
+			return nil, false
+		}
+		cur = next
+	}
+	return cur, true
 }
 
 // uncaughtBacktrace returns the backtrace strings for an exception escaping Run.

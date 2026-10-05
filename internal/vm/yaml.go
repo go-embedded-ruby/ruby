@@ -56,14 +56,16 @@ func (vm *VM) registerYAML() {
 	psych.smethods["load"] = &Method{name: "load", owner: psych, native: loadFn}
 	psych.smethods["unsafe_load"] = &Method{name: "unsafe_load", owner: psych, native: loadFn}
 
-	// YAML.safe_load(source[, permitted_classes: [...]]) restricts which
-	// !ruby/object: classes materialise; the loader is already safe by construction,
-	// so the allow-list is the only observable difference from load.
+	// YAML.safe_load(source[, permitted_classes: [...], permitted_symbols: [...]])
+	// restricts which classes a document may materialise. Psych's signature is
+	// `permitted_classes: []`, so the DEFAULT is the empty allow-list: a bare
+	// safe_load refuses every tagged class, Symbol and Time, and raises
+	// Psych::DisallowedClass. See psychSafeArgs.
 	safeLoadFn := func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		if len(args) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1..)")
 		}
-		return yamlSafeLoad(vm, yamlSourceArg(args[0]), permittedClassesArg(args[1:]))
+		return yamlSafeLoad(vm, yamlSourceArg(args[0]), psychSafeArgs(args[1:]))
 	}
 	psych.smethods["safe_load"] = &Method{name: "safe_load", owner: psych, native: safeLoadFn}
 
@@ -81,7 +83,7 @@ func (vm *VM) registerYAML() {
 		if len(args) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1..)")
 		}
-		return yamlSafeLoad(vm, yamlReadFile(args[0]), permittedClassesArg(args[1:]))
+		return yamlSafeLoad(vm, yamlReadFile(args[0]), psychSafeArgs(args[1:]))
 	}
 	psych.smethods["safe_load_file"] = &Method{name: "safe_load_file", owner: psych, native: safeLoadFileFn}
 
@@ -134,20 +136,91 @@ func yamlReadFile(v object.Value) string {
 	return string(data)
 }
 
-// permittedClassesArg extracts the permitted_classes: keyword from safe_load's
-// trailing arguments, returning the class names (so SafeLoad restricts to them),
-// or nil when the keyword is absent (permitting all classes). Class / Module
-// values list by name; any other element is rendered via to_s, matching how
-// Psych accepts a list of class objects or names.
-func permittedClassesArg(rest []object.Value) []string {
+// psychSafeOpts is the resolved safe_load restriction: the set of class names a
+// document may materialise, and optionally the set of Symbol names it may name.
+//
+// Psych's restriction has no "unset" state, which is why this type has no nil
+// case for classes. Psych.safe_load's signature is `permitted_classes: []`
+// (psych.rb:323 in Ruby 4.0.5), and Psych::ClassLoader::Restricted
+// (psych/class_loader.rb:77-103) seeds @classes from exactly that list and from
+// nothing else — so "no keyword" and "the empty list" are the SAME policy in
+// MRI, and that policy is "refuse everything". Representing it as a nil slice
+// meaning "permit all" (which this binding and the engine's
+// WithPermittedClasses both did) makes the most restrictive setting the API can
+// express the most permissive one it has.
+type psychSafeOpts struct {
+	// classes is the permitted_classes: allow-list, always non-nil. An empty map
+	// is a real policy -- deny every class -- not the absence of one.
+	classes map[string]bool
+	// symbols narrows WHICH Symbol names may be interned, mirroring
+	// permitted_symbols:. It is nil when no narrowing applies, because
+	// Restricted#symbolize (class_loader.rb:84-92) short-circuits on
+	// `@symbols.empty?`: unlike permitted_classes, an EMPTY permitted_symbols
+	// list means "any name", not "no name". Narrowing is additional to the class
+	// check, never a substitute for it -- MRI's symbolize still routes through
+	// find("Symbol"), so permitted_symbols without Symbol in permitted_classes
+	// refuses every symbol (measured against MRI 4.0.5).
+	symbols map[string]bool
+}
+
+// permits reports whether a class name may materialise.
+func (o psychSafeOpts) permits(name string) bool { return o.classes[name] }
+
+// checkClass raises Psych::DisallowedClass naming name unless it is permitted,
+// with MRI's message (psych/exception.rb:23-27).
+func (o psychSafeOpts) checkClass(name string) {
+	if !o.permits(name) {
+		raise("Psych::DisallowedClass", "Tried to load unspecified class: %s", name)
+	}
+}
+
+// checkSymbol applies MRI's two-part symbol rule: the name must pass the
+// permitted_symbols narrowing (when one is in force), and Symbol itself must be
+// a permitted class. Either refusal raises DisallowedClass naming "Symbol",
+// exactly as Restricted#symbolize and Restricted#find both do.
+func (o psychSafeOpts) checkSymbol(name string) {
+	if o.symbols != nil && !o.symbols[name] {
+		raise("Psych::DisallowedClass", "Tried to load unspecified class: Symbol")
+	}
+	o.checkClass("Symbol")
+}
+
+// psychSafeArgs resolves safe_load's trailing keyword hash into the restriction
+// it describes. The zero keyword case is NOT "permit everything": it is
+// permitted_classes: [], Psych's own default, which permits no class at all.
+//
+// A permitted_classes: that is not an Array (nil, or a bare class) fails CLOSED
+// here -- the allow-list stays empty -- where MRI raises NoMethodError from
+// `permitted_classes.map(&:to_s)`. Both refuse the document; only the exception
+// class differs.
+func psychSafeArgs(rest []object.Value) psychSafeOpts {
+	o := psychSafeOpts{classes: map[string]bool{}}
 	if len(rest) == 0 {
-		return nil
+		return o
 	}
 	h, ok := rest[len(rest)-1].(*object.Hash)
 	if !ok {
-		return nil
+		return o
 	}
-	val, ok := h.Get(object.Symbol("permitted_classes"))
+	for _, name := range psychNameList(h, "permitted_classes") {
+		o.classes[name] = true
+	}
+	// An empty permitted_symbols narrows nothing (see psychSafeOpts.symbols), so
+	// the map is only built when at least one name is given.
+	if names := psychNameList(h, "permitted_symbols"); len(names) > 0 {
+		o.symbols = map[string]bool{}
+		for _, name := range names {
+			o.symbols[name] = true
+		}
+	}
+	return o
+}
+
+// psychNameList reads one keyword from h as a list of names. A Class / Module
+// element contributes its name and any other element its to_s, matching how
+// Psych accepts `[Date]` and `["Date"]` alike (`permitted_classes.map(&:to_s)`).
+func psychNameList(h *object.Hash, key string) []string {
+	val, ok := h.Get(object.Symbol(key))
 	if !ok {
 		return nil
 	}
