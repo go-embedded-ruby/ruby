@@ -6,6 +6,7 @@ package vm
 
 import (
 	"bytes"
+	"fmt"
 	"math"
 	"strings"
 	"testing"
@@ -325,6 +326,13 @@ func TestRepeatBoundsAreDerivedNotGuessed(t *testing.T) {
 // Fixing the guards removed #777's trigger; this test uses a native method that
 // panics with a plain value so the handler's default arm is exercised directly,
 // and would stay meaningful for any future non-RubyError panic.
+//
+// Note what is NOT asserted: that Run returns an error. The panic propagates by
+// design (see the handler, and TestRunPropagatesInternalPanic) because this VM
+// converts a fault caused by Ruby input but lets a broken VM invariant stay
+// loud. So this defect's fix does not by itself resolve the nil-error reading of
+// #773 -- the allocation guards do, for #777's trigger, by making it an ordinary
+// RubyError. See TestRunReportsAnErrorForARefusedAllocation.
 func TestNonRubyErrorPanicKeepsItsCause(t *testing.T) {
 	const cause = "a panic value that is not a RubyError"
 
@@ -345,25 +353,28 @@ deep`)
 		panic(cause)
 	})
 
-	// The whole point: Run must RETURN, not let a panic escape. Anything escaping
-	// here is the original defect.
+	// The panic still PROPAGATES -- that is deliberate and TestRunPropagatesInternalPanic
+	// pins it, because a broken VM invariant must not be laundered into a Ruby
+	// error a host would log and move past. What #777 broke was the CAUSE and the
+	// CLEANUP, and those are what this asserts.
 	var escaped any
-	runErr := func() (e error) {
+	func() {
 		defer func() { escaped = recover() }()
-		_, e = machine.Run(iseq)
-		return e
+		_, _ = machine.Run(iseq)
 	}()
-	if escaped != nil {
-		t.Fatalf("a panic escaped Run: %v (the handler re-panicked, which is the defect)", escaped)
+	if escaped == nil {
+		t.Fatal("the internal panic did not propagate out of Run")
 	}
-
-	// (c): Run must not report success for a program that did not complete.
-	if runErr == nil {
-		t.Fatal("Run returned a nil error for a program that panicked (issue #773 from this side)")
+	// The cause must be the ORIGINAL value. Before the fix it was replaced by the
+	// failed assertion's own panic ("interface conversion: interface {} is
+	// runtime.errorString, not vm.RubyError"), so the text naming the real cause
+	// was gone.
+	s, ok := escaped.(string)
+	if !ok || s != cause {
+		t.Errorf("the cause did not survive: escaped = %#v, want the original %q", escaped, cause)
 	}
-	// The cause must survive. Before the fix the only text naming it was gone.
-	if !strings.Contains(runErr.Error(), cause) {
-		t.Errorf("the cause did not survive: err = %q, want it to contain %q", runErr.Error(), cause)
+	if strings.Contains(fmt.Sprintf("%v", escaped), "interface conversion") {
+		t.Errorf("the handler's own assertion panicked again: %v", escaped)
 	}
 
 	// The handler's cleanup must have run: these are the frame stacks it resets,
