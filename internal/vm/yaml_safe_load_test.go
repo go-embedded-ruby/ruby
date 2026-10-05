@@ -275,3 +275,26 @@ puts YAML.load("--- !ruby/regexp /ab/i\n").class`
 		t.Errorf("got %q want %q", got, want)
 	}
 }
+
+// TestYAMLSafeLoadRefusalDefinesNoConstant guards a second effect of the same
+// defect, which the issue did not mention. yamlResolveClass REGISTERS a
+// placeholder class when a `!ruby/object:` names one the program never defined
+// -- so before the restriction was enforced, loading an untrusted document
+// injected attacker-named constants into the global namespace as a side effect,
+// on top of instantiating them.
+//
+// Running the permission check before fromYAML is what prevents it: no Ruby
+// class is created, and no Ruby method runs, for a document that is refused.
+// MRI defines nothing either (measured).
+func TestYAMLSafeLoadRefusalDefinesNoConstant(t *testing.T) {
+	src := `require "yaml"
+begin; YAML.safe_load("--- !ruby/object:NeverHeardOfIt\nx: 1\n"); rescue Psych::DisallowedClass; end
+begin; YAML.safe_load("--- !ruby/class 'AlsoUnheardOf'\n"); rescue Psych::DisallowedClass; end
+begin; YAML.safe_load("--- !ruby/module 'StillUnheardOf'\n"); rescue Psych::DisallowedClass; end
+puts Object.const_defined?(:NeverHeardOfIt)
+puts Object.const_defined?(:AlsoUnheardOf)
+puts Object.const_defined?(:StillUnheardOf)`
+	if got := eval(t, src); got != "false\nfalse\nfalse\n" {
+		t.Errorf("a refused document defined a constant: got %q", got)
+	}
+}
