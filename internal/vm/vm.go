@@ -1450,7 +1450,28 @@ func (vm *VM) Run(iseq *bytecode.ISeq) (result object.Value, err error) {
 				result, err = object.NilV, nil
 				return
 			}
-			rerr := r.(RubyError)
+			// Every panic value that is not a RubyError used to CRASH HERE. This was
+			// an unchecked `r.(RubyError)` assertion, so a Go runtime fault — the
+			// makeslice panic of #777, say — made the assertion itself panic INSIDE
+			// this handler. That is where `[recovered, repanicked]` came from, and it
+			// cost two things: the assertion's own panic value replaced the original,
+			// so the only text naming the real cause was gone, and every line of
+			// cleanup below was skipped, leaving a host that recovers in a wrapper
+			// holding a VM with a half-unwound frame stack. It also made Run return a
+			// nil error for a program that had not completed, because the assignment
+			// at the end of this handler was never reached (issue #773 from the other
+			// side).
+			//
+			// Guarding the conversion fixes the whole class, not just #777's trigger:
+			// any future non-RubyError panic keeps its cause, the cleanup runs, and
+			// Run reports a non-nil error.
+			var rerr RubyError
+			switch v := r.(type) {
+			case RubyError:
+				rerr = v
+			default:
+				rerr = RubyError{Class: "fatal", Message: fmt.Sprintf("%v", v)}
+			}
 			// A SystemExit (Kernel#exit/abort) is a clean program termination, not a
 			// crash: unwind to the top, run at_exit handlers, and return without an
 			// error — so a real CLI that ends by calling exit (e.g. Puppet's

@@ -362,12 +362,13 @@ func (vm *VM) binaryOpBuiltin(op bytecode.Op, a, b object.Value) object.Value {
 				if _, isStr := b.(*object.String); isStr || vm.respondsToDynamic(b, "to_str") {
 					return vm.arrayJoin(aa, vm.joinSeparator(b), map[*object.Array]bool{})
 				}
-				// A non-String argument is coerced to an Integer via #to_int for the
-				// repeat case; the coerced value falls through to arrayOp below.
-				if vm.respondsToDynamic(b, "to_int") {
-					b = vm.send(b, "to_int", nil, nil)
-				}
 			}
+			// The Integer repeat case also needs a live VM, so it no longer falls
+			// through to the VM-less arrayOp: arrayTimes applies MRI's NUM2LONG
+			// coercion (repeatLong, which subsumes the #to_int conversion this used to
+			// do inline, and raises RangeError rather than TypeError for an
+			// out-of-range Bignum) and MRI's ARY_MAX_SIZE bound. See issue #777.
+			return vm.arrayTimes(aa, b)
 		}
 		// String#* (repeat) needs a live VM: the count is coerced with MRI's
 		// NUM2LONG semantics (Float truncates, a Bignum raises RangeError, any other
@@ -739,6 +740,13 @@ func (vm *VM) stringPlus(a *object.String, b object.Value) object.Value {
 // raises ArgumentError rather than allocating (so an empty receiver returns ""
 // for any in-range count without looping). The result is always a base String
 // in the receiver's encoding.
+//
+// The overflow test is MRI's own (string.c v4.0.5:2593), which divides bare
+// LONG_MAX and so deliberately lets a one-byte receiver through for any count:
+// `"x" * (2**62)` is NOT an ArgumentError on MRI, it is the ALLOCATION that
+// fails, as NoMemoryError. allocBytes reproduces that rather than normalising it
+// — see alloc_bounds.go for the asymmetry against Array#*, and issue #777 for the
+// `make` panic this used to be.
 func (vm *VM) stringTimes(a *object.String, b object.Value) object.Value {
 	n := vm.repeatLong(b)
 	if n < 0 {
@@ -748,14 +756,53 @@ func (vm *VM) stringTimes(a *object.String, b object.Value) object.Value {
 	if len(src) == 0 || n == 0 {
 		return object.NewStringBytesEnc(nil, a.Enc) // empty result, no allocation/looping
 	}
-	if n > int64(math.MaxInt/len(src)) {
+	if !repeatFitsString(len(src), n) {
 		raise("ArgumentError", "argument too big")
 	}
-	out := make([]byte, 0, len(src)*int(n))
+	out := allocBytes(int64(len(src)) * n)
 	for i := int64(0); i < n; i++ {
 		out = append(out, src...)
 	}
 	return object.NewStringBytesEnc(out, a.Enc)
+}
+
+// arrayTimes implements Array#* with an Integer-ish count (rb_ary_times,
+// array.c v4.0.5:5216). It needs a live VM for two reasons: the count is
+// converted like NUM2LONG (repeatLong, so a Float truncates, an out-of-range
+// Bignum raises RangeError and a #to_int object converts), and the bound it
+// enforces is MRI's — ARY_MAX_SIZE divided by the count, never the product.
+//
+// Before #777 this lived in the VM-less arrayOp with no bound at all: it formed
+// len(a.Elems)*int(n) as an int and handed the result to make, so `[1] * (2**62)`
+// panicked on a wrapped-negative capacity and `[1,2,3,4] * (2**62)` wrapped to
+// exactly 0, allocated nothing, and then grew without bound in the fill loop.
+func (vm *VM) arrayTimes(a *object.Array, b object.Value) object.Value {
+	n := vm.repeatLong(b)
+	// MRI tests len == 0 BEFORE the sign (array.c v4.0.5:5228-5233), so a zero
+	// count returns an empty array and any other negative count raises. The order
+	// matters for an EMPTY receiver too: `[] * -1` raises on MRI, so the
+	// empty-receiver short-circuit below must come after this, not before it.
+	if n == 0 {
+		return object.NewArrayFromSlice(nil)
+	}
+	if n < 0 {
+		raise("ArgumentError", "negative argument")
+	}
+	if len(a.Elems) == 0 {
+		// An empty receiver repeats to empty for any in-range count: MRI's guard
+		// passes (ARY_MAX_SIZE/n is never below 0), the length multiplies to 0 and
+		// ary_new(0) returns []. Short-circuiting here is what keeps `[] * (2**62)`
+		// from looping 2**62 times appending nothing, which it used to do.
+		return object.NewArrayFromSlice(nil)
+	}
+	if !repeatFitsArray(len(a.Elems), n) {
+		raise("ArgumentError", "argument too big")
+	}
+	out := allocValues(int64(len(a.Elems)) * n)
+	for i := int64(0); i < n; i++ {
+		out = append(out, a.Elems...)
+	}
+	return object.NewArrayFromSlice(out)
 }
 
 func stringOp(op bytecode.Op, a *object.String, b object.Value) object.Value {
@@ -797,22 +844,12 @@ func arrayOp(op bytecode.Op, a *object.Array, b object.Value) object.Value {
 		out := make([]object.Value, 0, len(a.Elems)+len(bb.Elems))
 		out = append(append(out, a.Elems...), bb.Elems...)
 		return object.NewArrayFromSlice(out)
-	case bytecode.OpMul:
-		// Array * String (join with a separator) is intercepted in binaryOp and
-		// routed through Array#join for full coercion/encoding handling, so only the
-		// Integer repeat case reaches here.
-		n, ok := b.(object.Integer)
-		if !ok {
-			raise("TypeError", "no implicit conversion of %s into Integer", b.Inspect())
-		}
-		if n < 0 {
-			raise("ArgumentError", "negative argument")
-		}
-		out := make([]object.Value, 0, len(a.Elems)*int(n))
-		for i := int64(0); i < int64(n); i++ {
-			out = append(out, a.Elems...)
-		}
-		return object.NewArrayFromSlice(out)
+		// Array#* is intercepted in binaryOp for BOTH of its meanings and routed
+		// through the VM-aware arrayJoin (String separator) or arrayTimes (Integer
+		// repeat), so neither reaches this VM-less path. The repeat case moved there in
+		// #777: it needs the VM for MRI's NUM2LONG coercion, and computing the result
+		// length here as len(a.Elems)*int(n) was an unchecked int multiply that could
+		// wrap negative, wrap to zero, or exceed what make accepts.
 	}
 	return raise("NoMethodError", "undefined method '%s' for an Array", op)
 }
