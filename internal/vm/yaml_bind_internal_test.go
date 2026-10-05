@@ -7,6 +7,7 @@ package vm
 import (
 	"errors"
 	"math/big"
+	"strings"
 	"testing"
 	stdtime "time"
 
@@ -344,5 +345,85 @@ func TestYAMLBindFromTimeConstruct(t *testing.T) {
 	rt, ok := v.(*Time)
 	if !ok || rt.t.Unix() != want {
 		t.Fatalf("time round trip -> %T %v", v, v)
+	}
+}
+
+// TestErrorClassResolvesNamespacedNames covers errorClass directly: a bare
+// top-level name, a `::`-qualified one, and the two ways a qualified name fails
+// to resolve. The failure path is what keeps a binding that names a class it
+// never registered degrading to StandardError instead of panicking, so it is
+// worth a test rather than a comment.
+func TestErrorClassResolvesNamespacedNames(t *testing.T) {
+	vm := New(nil)
+	vm.registerYAML()
+	for _, c := range []struct {
+		name string
+		want string // "" means it must NOT resolve
+	}{
+		{"StandardError", "StandardError"},
+		{"Psych::DisallowedClass", "Psych::DisallowedClass"},
+		{"Psych::SyntaxError", "Psych::SyntaxError"},
+		{"NoSuchTopLevelErrorClass", ""},
+		{"Psych::NoSuchMemberHere", ""}, // first segment resolves, second does not
+		{"NoSuchModule::Whatever", ""},  // first segment does not resolve
+		{"Psych::VERSION::Nested", ""},  // a segment that is not a class/module
+	} {
+		got, ok := vm.errorClass(c.name)
+		if c.want == "" {
+			if ok {
+				t.Errorf("%s: resolved to %v, want no resolution", c.name, got)
+			}
+			continue
+		}
+		if !ok || got == nil || got.ToS() != c.want {
+			t.Errorf("%s: got (%v, %v), want %s", c.name, got, ok, c.want)
+		}
+	}
+}
+
+// TestYAMLPermitWalkShapes covers the restriction walk over the value shapes a
+// Ruby-level test cannot reach through rbgo's own loader: a Module value, and a
+// pointer-shaped node reached TWICE (which mark must clear only once, so a
+// shared graph cannot send the walk round in circles).
+func TestYAMLPermitWalkShapes(t *testing.T) {
+	deny := psychSafeArgs(nil)
+	allow := psychSafeOpts{classes: map[string]bool{"Mod": true, "Ok": true, "Range": true}}
+
+	// A Module is gated on the module it NAMES.
+	if re := rubyErr(t, func() {
+		(&yamlPermitCtx{opts: deny, seen: map[yaml.Value]bool{}}).check(yaml.Module("Mod"))
+	}); re.Class != "Psych::DisallowedClass" || !strings.Contains(re.Message, "Mod") {
+		t.Errorf("module: %v", re)
+	}
+	(&yamlPermitCtx{opts: allow, seen: map[yaml.Value]bool{}}).check(yaml.Module("Mod"))
+
+	// The same *Object twice (what an alias produces) is cleared once; the second
+	// visit takes mark's false branch and must not re-raise.
+	shared := &yaml.Object{Class: "Ok", IVars: map[string]yaml.Value{"a": int64(1)}}
+	(&yamlPermitCtx{opts: allow, seen: map[yaml.Value]bool{}}).check([]yaml.Value{shared, shared})
+
+	// A *Range reached twice, and one whose bound is unpermitted.
+	r := &yaml.Range{Begin: int64(1), End: int64(2)}
+	(&yamlPermitCtx{opts: allow, seen: map[yaml.Value]bool{}}).check([]yaml.Value{r, r})
+	if re := rubyErr(t, func() {
+		(&yamlPermitCtx{opts: allow, seen: map[yaml.Value]bool{}}).
+			check(&yaml.Range{Begin: yaml.Symbol("s"), End: int64(2)})
+	}); !strings.Contains(re.Message, "Symbol") {
+		t.Errorf("range bound: %v", re)
+	}
+
+	// A value the walk does not model falls through untouched (the default arm).
+	(&yamlPermitCtx{opts: deny, seen: map[yaml.Value]bool{}}).check(int64(7))
+	(&yamlPermitCtx{opts: deny, seen: map[yaml.Value]bool{}}).check(nil)
+
+	// yamlIVarOrder: Order names the order, and keys absent from Order are
+	// appended lexicographically rather than in Go's map order.
+	o := &yaml.Object{
+		Class: "Ok",
+		IVars: map[string]yaml.Value{"zz": int64(1), "aa": int64(2), "mm": int64(3)},
+		Order: []string{"zz", "nope"},
+	}
+	if got := yamlIVarOrder(o); len(got) != 3 || got[0] != "zz" || got[1] != "aa" || got[2] != "mm" {
+		t.Errorf("yamlIVarOrder = %v, want [zz aa mm]", got)
 	}
 }
