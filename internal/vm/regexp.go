@@ -2887,8 +2887,14 @@ func (vm *VM) installRegexp() {
 		return object.NilV
 	})
 
-	// Regexp.timeout / Regexp.timeout= read and write the process-wide default
-	// match-time limit (a Float in seconds, or nil for no limit).
+	// Regexp.timeout / Regexp.timeout= read and write the default match-time limit
+	// for every Regexp in this VM (a Float in seconds, or nil for no limit).
+	//
+	// MRI's is process-GLOBAL (rb_reg_match_time_limit, re.c:93 at tag v4.0.5) and
+	// main-ractor-only (re.c:4753 raises from a non-main Ractor). rbgo scopes it to
+	// the VM instead, so a host embedding two interpreters does not give them one
+	// shared mutable security setting, and there is no Ractor to restrict it to.
+	// The resolution against a per-Regexp timeout: is MRI's exactly — see matcher.
 	vm.cRegexp.smethods["timeout"] = &Method{name: "timeout", owner: vm.cRegexp,
 		native: func(vm *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
 			if vm.regexpTimeout == nil {
