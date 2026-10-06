@@ -8,6 +8,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
@@ -169,3 +170,57 @@ func TestNetHTTPErrorClasses(t *testing.T) {
 // get_response / start / request and the instance verbs) are now real; their
 // behaviour is proven end-to-end against in-process httptest servers in
 // nethttp_bind_test.go.
+
+// TestNetHTTPAgainstAnInVMServerThread is the regression witness for #771.
+//
+// Net::HTTP against a server living in one of the program's own Threads hung
+// WITHOUT BOUND: MRI ran the same program in 81 ms, and the probe that first
+// showed it was killed at a 30-minute limit still in the same state. Since
+// ruby.Run takes no context and exposes no cancellation, an embedder lost that
+// goroutine permanently, with no error and no way to interrupt it.
+//
+// The cause was that nethttpExchangeFramed held the emulated GVL across the
+// whole round trip, so the server Thread could never be scheduled. What
+// localised it was the contrast with socket_test.go's loopback tests: a raw
+// TCPSocket client against the same shape of in-VM server always worked,
+// because socket.go routes its reads and writes through ioBlock while the
+// Net::HTTP binding routed nothing.
+//
+// The fix was ablated rather than assumed. Wrapping the exchange ALONE makes
+// this pass, so the dial is deliberately left unwrapped: a second witness with
+// the server sleeping 0.5 s before accept also passes (541 ms here against
+// 554 ms under MRI), because the TCP connect completes into the listen backlog
+// without the Ruby accept having run. One wrap, one defect.
+//
+// The deadline is the point of the shape. A regression here does not FAIL, it
+// HANGS -- and an unbounded hang inside `go test` burns the package's whole
+// timeout and reports "panic: test timed out" with the cause buried in a
+// goroutine dump. Bounding it turns that into one legible line.
+func TestNetHTTPAgainstAnInVMServerThread(t *testing.T) {
+	src := `
+require "socket"
+require "net/http"
+srv = TCPServer.new("127.0.0.1", 0)
+port = srv.addr[1]
+t = Thread.new do
+  c = srv.accept
+  c.readpartial(4096)
+  c.write("HTTP/1.1 200 OK\r\nContent-Length: 7\r\n\r\nNETHTTP")
+  c.close
+end
+body = Net::HTTP.get(URI("http://127.0.0.1:#{port}/"))
+t.join
+srv.close
+puts body`
+
+	done := make(chan string, 1)
+	go func() { done <- runSrc(t, src) }()
+	select {
+	case got := <-done:
+		if got != "NETHTTP" {
+			t.Fatalf("Net::HTTP against an in-VM server got %q, want \"NETHTTP\"", got)
+		}
+	case <-time.After(60 * time.Second):
+		t.Fatal("Net::HTTP against an in-VM server did not finish in 60s: the exchange is holding the GVL again, so the server Thread cannot be scheduled (#771)")
+	}
+}
