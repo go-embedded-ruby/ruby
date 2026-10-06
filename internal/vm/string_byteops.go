@@ -101,7 +101,7 @@ func (vm *VM) strByteindex(self *object.String, args []object.Value) object.Valu
 		// rb_str_byteindex_m goes through rb_reg_search too, so an unmatchable
 		// pattern/subject pair is an Encoding::CompatibilityError, not a nil.
 		vm.checkSubjectEncoding(needle, self)
-		md, base := needle.searchFrom(s, off)
+		md, base := needle.searchFrom(vm, s, off)
 		if md == nil {
 			vm.lastMatch = object.NilV
 			return object.NilV
@@ -182,7 +182,7 @@ func byterindexString(s, needle string, off, n int) object.Value {
 // this is its byte-indexed twin.
 func (vm *VM) byterindexRegexp(s, enc string, re *Regexp, off int) object.Value {
 	for p := off; p >= 0; p-- {
-		md := re.matcher().MatchAt(s, p)
+		md := re.matchAt(vm, s, p)
 		if md != nil && md.Begin(0) == p {
 			vm.lastMatch = &MatchData{md: md, subject: s, re: re, enc: enc}
 			return object.IntValue(int64(p))

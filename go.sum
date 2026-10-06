@@ -305,8 +305,8 @@ github.com/go-pcore/pcore v0.0.0-20260831114716-f9c3e7f59eaa h1:JNWdYslHUIBvlGE7
 github.com/go-pcore/pcore v0.0.0-20260831114716-f9c3e7f59eaa/go.mod h1:MgngaL59lB3D41kl/VWYfkem1sJDBbh3JXG/y/Lrnjo=
 github.com/go-puppet/puppet v0.0.0-20260918012035-fc6b0424cdbd h1:0tExRGSb1rQsGZnJxhL//KAGsbe0kmH5EBHoHYYjzjc=
 github.com/go-puppet/puppet v0.0.0-20260918012035-fc6b0424cdbd/go.mod h1:wdKZWNCMcBQA7Dgp7xu2QFDPF7tQ2fTlOG4cjGEMgxU=
-github.com/go-regexp/engine v0.1.3 h1:0U5DrrBEYjNX/f0yFESpQDWmJOtXmmZqluNAUBXjfxY=
-github.com/go-regexp/engine v0.1.3/go.mod h1:8rju5lq5OkskQh9+m+FjBP6965giMPUdIOdrvFrbqn4=
+github.com/go-regexp/engine v0.3.0 h1:yoJ9GtIr5YloEuQQ3bb7jjD0Qzmh+Exi+f6CUwBT8H8=
+github.com/go-regexp/engine v0.3.0/go.mod h1:fWnPvSuE4HIVpBQIHMiaPMEE7InDc00KeoPr/QNFGwA=
 github.com/go-richdoc/richdoc v0.4.0 h1:oLhMdRXRRZr3RW6Zqra3N6k5nOX6GFmvgyDpMKEBywM=
 github.com/go-richdoc/richdoc v0.4.0/go.mod h1:aCX8ulqg5CoKqSWgWeEWul1Oj0d2VxQeaQNI0+jsm7c=
 github.com/go-rouge/rouge v0.3.0 h1:tPEjmwlXWdtOCR04rBdSUe+lI75RfHx72F1RihOoTMY=
@@ -575,8 +575,8 @@ github.com/go-ruby-rdoc/rdoc v0.0.0-20260916101528-7ed1d61f5088 h1:ZM5ySs951Yynv
 github.com/go-ruby-rdoc/rdoc v0.0.0-20260916101528-7ed1d61f5088/go.mod h1:NBlCj+x2SBtdDSKDvTTCVRoWd9tGPWcUwPvE2nKvYSM=
 github.com/go-ruby-redis/redis v0.0.0-20260916101628-3b91d134e9dc h1:ilAGkAG47yhEemSIGBFLHpW8gJCNwSdIATOV1ANBYHI=
 github.com/go-ruby-redis/redis v0.0.0-20260916101628-3b91d134e9dc/go.mod h1:gt67ft80L9J5DpRGe+x3qPy2hg1g75aWQ6h52inm7og=
-github.com/go-ruby-regexp/regexp v0.0.0-20260927145504-6cbb63926eb2 h1:pNvJf0zgzg0rTEq1fToFa5fnzK13nIble80caTmdG3g=
-github.com/go-ruby-regexp/regexp v0.0.0-20260927145504-6cbb63926eb2/go.mod h1:I3i2r1AXulgMBt/KiWBcxjnoNsB09ZFKkj2Vb5Mhzuw=
+github.com/go-ruby-regexp/regexp v0.1.0 h1:KtFfOt6tKiT/UhoZ8GH6liyIVbmqhXTD04uqAiUQBj8=
+github.com/go-ruby-regexp/regexp v0.1.0/go.mod h1:ndhrN+oK4wdXKM6iOasSIzLSTCs9vD9jhi65gx13Xpg=
 github.com/go-ruby-reline/reline v0.0.0-20260916101734-37c7d2c11d74 h1:DsVosBzp7T+U4Q3/UxcHVUl9mb5SprF9hvSkOQ/4Fdg=
 github.com/go-ruby-reline/reline v0.0.0-20260916101734-37c7d2c11d74/go.mod h1:d89qnDguKRgCpUIFphMQnQrlalJBT4s/muXS/wEQdj0=
 github.com/go-ruby-resolv/resolv v0.0.0-20260916101809-a2b1b027ae6d h1:yU7BQTgui2DiLBkp4mB6QnIjIepY7K9S2hLiiaNLpAM=
