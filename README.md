@@ -4,7 +4,7 @@
 
 [![Docs](https://img.shields.io/badge/docs-mkdocs--material-9B1C2E)](https://go-embedded-ruby.github.io/docs/)
 [![License](https://img.shields.io/badge/license-BSD--3--Clause-blue)](LICENSE)
-[![Go](https://img.shields.io/badge/go-1.26.4%2B-00ADD8)](https://go.dev/dl/)
+[![Go](https://img.shields.io/badge/go-1.27.1%2B-00ADD8)](https://go.dev/dl/)
 [![Release](https://img.shields.io/badge/release-v0.1.0-blue)](https://github.com/go-embedded-ruby/ruby/releases/tag/v0.1.0)
 [![ruby/spec](https://img.shields.io/badge/ruby%2Fspec-23%2C483%20examples%20passing-1a7f37)](#runtime-conformance--rubyspec)
 
