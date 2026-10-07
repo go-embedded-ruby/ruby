@@ -201,7 +201,7 @@ p0 = Person.new
 p0.instance_variable_set(:@name, "Ada")
 p0.instance_variable_set(:@age, 36)
 doc = [p0, p0].to_yaml
-r = YAML.load(doc)
+r = YAML.unsafe_load(doc)
 p r[0].class
 p r[0].name
 p r[0].age

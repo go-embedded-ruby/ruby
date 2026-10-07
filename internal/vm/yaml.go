@@ -43,18 +43,31 @@ func (vm *VM) registerYAML() {
 		psych.smethods[m] = &Method{name: m, owner: psych, native: notImpl(m)}
 	}
 
-	// YAML.load(source[, ...]) / Psych.load parse a YAML document string to a tree
-	// of Ruby values. unsafe_load shares the same implementation. Leading
+	// YAML.load(source[, ...]) / Psych.load is RESTRICTED, and does not share an
+	// implementation with unsafe_load. Psych 4 inverted the two: psych.rb:369 is
+	// `def self.load yaml, permitted_classes: [Symbol], ...` delegating straight
+	// to safe_load, which is the change Psych made precisely because `load` is
+	// the call people habitually write. Binding it to the unrestricted loader was
+	// right for Psych 3 and wrong from Psych 4 on. See psychLoadArgs. Leading
 	// keyword/positional options Psych accepts (filename, symbolize_names, …) are
 	// tolerated and ignored.
 	loadFn := func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		if len(args) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1..)")
 		}
-		return yamlLoad(vm, yamlSourceArg(args[0]))
+		return yamlSafeLoad(vm, yamlSourceArg(args[0]), psychLoadArgs(args[1:]))
 	}
 	psych.smethods["load"] = &Method{name: "load", owner: psych, native: loadFn}
-	psych.smethods["unsafe_load"] = &Method{name: "unsafe_load", owner: psych, native: loadFn}
+
+	// YAML.unsafe_load is the unrestricted entry point (psych.rb:272), and the one
+	// a caller that genuinely wants arbitrary classes back must now name.
+	unsafeLoadFn := func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) == 0 {
+			raise("ArgumentError", "wrong number of arguments (given 0, expected 1..)")
+		}
+		return yamlLoad(vm, yamlSourceArg(args[0]))
+	}
+	psych.smethods["unsafe_load"] = &Method{name: "unsafe_load", owner: psych, native: unsafeLoadFn}
 
 	// YAML.safe_load(source[, permitted_classes: [...], permitted_symbols: [...]])
 	// restricts which classes a document may materialise. Psych's signature is
@@ -69,14 +82,30 @@ func (vm *VM) registerYAML() {
 	}
 	psych.smethods["safe_load"] = &Method{name: "safe_load", owner: psych, native: safeLoadFn}
 
-	// YAML.load_file(path[, ...]) reads the file and parses its contents.
+	// YAML.load_file(path[, ...]) reads the file and parses its contents. It
+	// delegates to load (psych.rb:716), so it carries load's restriction and its
+	// keyword defaults -- measured: load_file over ":s\n" with
+	// permitted_classes: [G] raises Psych::DisallowedClass under MRI, exactly as
+	// load does, because the explicit list replaces the [Symbol] default.
 	loadFileFn := func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) == 0 {
+			raise("ArgumentError", "wrong number of arguments (given 0, expected 1..)")
+		}
+		return yamlSafeLoad(vm, yamlReadFile(args[0]), psychLoadArgs(args[1:]))
+	}
+	psych.smethods["load_file"] = &Method{name: "load_file", owner: psych, native: loadFileFn}
+
+	// YAML.unsafe_load_file(path) is unsafe_load over a file (psych.rb:694). It
+	// is added here with the restriction, not before it: without it a caller that
+	// legitimately wants objects back from a file -- which is what load_file used
+	// to give them -- would have no spelling at all to migrate to.
+	unsafeLoadFileFn := func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		if len(args) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1..)")
 		}
 		return yamlLoad(vm, yamlReadFile(args[0]))
 	}
-	psych.smethods["load_file"] = &Method{name: "load_file", owner: psych, native: loadFileFn}
+	psych.smethods["unsafe_load_file"] = &Method{name: "unsafe_load_file", owner: psych, native: unsafeLoadFileFn}
 
 	// YAML.safe_load_file(path[, permitted_classes: [...]]) is safe_load over a file.
 	safeLoadFileFn := func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
@@ -214,6 +243,43 @@ func psychSafeArgs(rest []object.Value) psychSafeOpts {
 		}
 	}
 	return o
+}
+
+// psychLoadArgs is psychSafeArgs with Psych.load's own default allow-list.
+//
+// psych.rb:369 declares `def self.load yaml, permitted_classes: [Symbol], ...`
+// and delegates to safe_load, so load differs from safe_load ONLY in that
+// default. An explicit permitted_classes REPLACES it rather than adding to it,
+// because it is an ordinary keyword default -- measured against MRI 4.0.5:
+//
+//	load(":s")                           => :s
+//	load(":s", permitted_classes: [G])   => Psych::DisallowedClass
+//	load(":s", permitted_classes: [G, Symbol]) => :s
+//
+// which is why the seeding below is conditional on the keyword being ABSENT
+// rather than on the resulting list being empty. Absent and empty are different
+// policies here: absent means "use load's default", empty means "deny
+// everything", and psychSafeOpts exists to keep them distinguishable.
+func psychLoadArgs(rest []object.Value) psychSafeOpts {
+	o := psychSafeArgs(rest)
+	if !psychHasKeyword(rest, "permitted_classes") {
+		o.classes["Symbol"] = true
+	}
+	return o
+}
+
+// psychHasKeyword reports whether the trailing keyword hash carries key at all,
+// which is not the same question as whether its value is empty.
+func psychHasKeyword(rest []object.Value, key string) bool {
+	if len(rest) == 0 {
+		return false
+	}
+	h, ok := rest[len(rest)-1].(*object.Hash)
+	if !ok {
+		return false
+	}
+	_, ok = h.Get(object.Symbol(key))
+	return ok
 }
 
 // psychNameList reads one keyword from h as a list of names. A Class / Module

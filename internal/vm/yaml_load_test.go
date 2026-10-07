@@ -136,11 +136,14 @@ func TestYAMLLoadBlockScalar(t *testing.T) {
 }
 
 // TestYAMLLoadTime covers the ISO-8601 timestamp the emitter writes loading back
-// to a Time, in both the "Z" and numeric-offset forms.
+// to a Time, in both the "Z" and numeric-offset forms. It goes through
+// unsafe_load because what is under test is the LOADER's ability to build a
+// Time, not load's policy: load permits only Symbol by default, and MRI refuses
+// a timestamp through a bare load for the same reason.
 func TestYAMLLoadTime(t *testing.T) {
 	cases := []struct{ src, want string }{
-		{`t = YAML.load("--- 1970-01-01 00:00:00.000000000 Z\n"); p t.class; p t.to_i`, "Time\n0\n"},
-		{`t = YAML.load("--- 1970-01-01 01:00:00.000000000 +01:00\n"); p t.to_i`, "0\n"},
+		{`t = YAML.unsafe_load("--- 1970-01-01 00:00:00.000000000 Z\n"); p t.class; p t.to_i`, "Time\n0\n"},
+		{`t = YAML.unsafe_load("--- 1970-01-01 01:00:00.000000000 +01:00\n"); p t.to_i`, "0\n"},
 	}
 	for _, c := range cases {
 		if got := eval(t, c.src); got != c.want {
@@ -149,12 +152,19 @@ func TestYAMLLoadTime(t *testing.T) {
 	}
 }
 
+// The allow-list is not a concession to our own restriction: MRI refuses this
+// document through a bare YAML.load too, because Time is not in load's [Symbol]
+// default. Measured on 4.0.5 -- load(doc) raises Psych::DisallowedClass, while
+// load(doc, permitted_classes: [Symbol, Time]) returns the hash. Since this is
+// Puppet's state shape, Puppet cannot be reading it with a bare load either:
+// Puppet::Util::Yaml passes its own allow-list, which is what this mirrors.
+//
 // TestYAMLLoadStateRoundTrip covers the exact shape Puppet's state.yaml uses (a
 // String -> {Symbol -> Time} mapping), which must round-trip through dump/load.
 func TestYAMLLoadStateRoundTrip(t *testing.T) {
 	src := `require "yaml"
 h = {"File[/x]" => {:checked => Time.at(0).utc, :synced => Time.at(0).utc}}
-r = YAML.load(YAML.dump(h))
+r = YAML.load(YAML.dump(h), permitted_classes: [Symbol, Time])
 p r.keys
 p r["File[/x]"].keys
 p r["File[/x]"][:checked].to_i`
@@ -164,6 +174,10 @@ p r["File[/x]"][:checked].to_i`
 	}
 }
 
+// These go through unsafe_load because the subject is the LOADER's ability to
+// rebuild a tagged object, not load's policy: since Psych 4, load permits only
+// Symbol by default and refuses !ruby/object: exactly as MRI does.
+//
 // TestYAMLLoadRubyObject covers loading a !ruby/object: mapping back into an
 // instance of the named class, with the mapping entries as instance variables —
 // including a class the program already defines and one it does not (which the
@@ -172,26 +186,26 @@ func TestYAMLLoadRubyObject(t *testing.T) {
 	cases := []struct{ src, want string }{
 		// Known class: ivars are restored.
 		{`class Foo; attr_reader :a, :b; end
-o = YAML.load("--- !ruby/object:Foo\na: 1\nb: hi\n")
+o = YAML.unsafe_load("--- !ruby/object:Foo\na: 1\nb: hi\n")
 p o.class
 p o.a
 p o.b`, "Foo\n1\n\"hi\"\n"},
 		// Bare !ruby/object loads as an Object instance.
-		{`o = YAML.load("--- !ruby/object\na: 1\n")
+		{`o = YAML.unsafe_load("--- !ruby/object\na: 1\n")
 p o.instance_variable_get(:@a)`, "1\n"},
 		// Unknown class: a placeholder class of that name is created.
-		{`o = YAML.load("--- !ruby/object:Quux\nx: 5\n")
+		{`o = YAML.unsafe_load("--- !ruby/object:Quux\nx: 5\n")
 p o.class.name
 p o.instance_variable_get(:@x)`, "\"Quux\"\n5\n"},
 		// A qualified unknown class name.
-		{`o = YAML.load("--- !ruby/object:A::B\nx: 1\n")
+		{`o = YAML.unsafe_load("--- !ruby/object:A::B\nx: 1\n")
 p o.class.name`, "\"A::B\"\n"},
 		// An empty-bodied object (the "tag {}" inline form).
 		{`class Empty; end
-o = YAML.load("--- !ruby/object:Empty {}\n")
+o = YAML.unsafe_load("--- !ruby/object:Empty {}\n")
 p o.class`, "Empty\n"},
 		// A symbol-keyed object mapping (Psych object ivars).
-		{`o = YAML.load("--- !ruby/object:Quux2\n:x: 1\n")
+		{`o = YAML.unsafe_load("--- !ruby/object:Quux2\n:x: 1\n")
 p o.instance_variable_get(:@x)`, "1\n"},
 	}
 	for _, c := range cases {
@@ -206,7 +220,7 @@ p o.instance_variable_get(:@x)`, "1\n"},
 func TestYAMLLoadAnchors(t *testing.T) {
 	src := `class Node; attr_reader :n; end
 doc = "---\n- &1 !ruby/object:Node\n  n: 7\n- *1\n"
-a = YAML.load(doc)
+a = YAML.unsafe_load(doc)
 p a[0].equal?(a[1])
 p a[1].n`
 	want := "true\n7\n"
