@@ -556,14 +556,29 @@ func (vm *VM) nethttpBuildRequest(cfg *nethttpXfer, method, path string, body []
 // whether the connection may be reused (false ⇒ the server asked to close or the
 // body was unframed and read to EOF). phase names which half failed ("write" /
 // "read") so a deadline timeout maps to Net::WriteTimeout vs Net::ReadTimeout.
+// The whole exchange runs under ioBlock, which releases the emulated GVL for its
+// duration -- the same wrapper socket.go puts around its own reads and writes.
+// Without it this held the lock across the entire round trip, so a Ruby thread
+// in the same VM could not be scheduled while the request was in flight: a
+// program that talks to a server it started itself deadlocked, with no error and
+// no bound. Measured before the fix: MRI 81ms, rbgo still waiting after 30
+// minutes. A raw TCPSocket client against the same in-VM server worked
+// throughout, which is what localised it -- socket.go releases, this did not.
+//
+// Reported as #771; the same mechanism as the third of the five defects PR #698
+// separated, "a blocking call that never releases the lock at all".
 func (vm *VM) nethttpExchangeFramed(cfg *nethttpXfer, s streamIO, reqBytes []byte, noBody bool) (raw []byte, keepAlive bool, phase string, err error) {
-	nethttpSetDeadline(s, cfg.writeTO)
-	if _, werr := s.writer().Write(reqBytes); werr != nil {
-		return nil, false, "write", werr
-	}
-	nethttpSetDeadline(s, cfg.readTO)
-	raw, keepAlive, err = nethttpReadResponse(s.reader(), noBody)
-	return raw, keepAlive, "read", err
+	phase = "read"
+	ioBlock(vm, func() {
+		nethttpSetDeadline(s, cfg.writeTO)
+		if _, werr := s.writer().Write(reqBytes); werr != nil {
+			raw, keepAlive, phase, err = nil, false, "write", werr
+			return
+		}
+		nethttpSetDeadline(s, cfg.readTO)
+		raw, keepAlive, err = nethttpReadResponse(s.reader(), noBody)
+	})
+	return raw, keepAlive, phase, err
 }
 
 // nethttpDialXfer opens the transport for a transfer: a direct dial, a plain-http
