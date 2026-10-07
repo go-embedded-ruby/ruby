@@ -44,11 +44,28 @@ func TestReadmeGoBadgeMatchesTheModuleFloor(t *testing.T) {
 			got, floor, floor)
 	}
 
-	// A second claim in prose would drift independently of the badge, so fail on
-	// any stale one rather than trusting that the badge is the only place.
-	for _, stale := range regexp.MustCompile(`1\.\d+\.\d+`).FindAllString(string(readme), -1) {
-		if strings.HasPrefix(stale, "1.2") && stale != floor && strings.Contains(string(readme), "go-"+stale) {
-			t.Errorf("README still mentions Go %s somewhere outside the badge; go.mod requires %s", stale, floor)
+	// The badge is not the only place the README states the floor, and a guard
+	// scoped to the shape I happened to fix first would have missed the other
+	// one: line 716 said "Requires **Go 1.26.4+**" and stayed stale through two
+	// separate PRs that each corrected only the badge. So this judges the CLAIM
+	// -- every statement of a minimum -- rather than the markup it is wearing.
+	//
+	// It deliberately does NOT fail on every mention of a Go version. A README
+	// may name one for reasons that must not move: a dated measurement ("measured
+	// on Go 1.26.4") would be falsified by updating it, and "Go 1.26 introduced X"
+	// is a fact about when an API appeared. Only a stated MINIMUM tracks go.mod,
+	// so only the two forms that state one are matched.
+	minima := regexp.MustCompile(`(?:badge/go-|Go )\*{0,2}(\d+\.\d+(?:\.\d+)?)\+?\*{0,2}(?:%2B|\+)`)
+	found := 0
+	for _, m := range minima.FindAllStringSubmatch(string(readme), -1) {
+		found++
+		if m[1] != floor {
+			t.Errorf("README states a Go minimum of %s in %q; go.mod requires %s",
+				m[1], strings.TrimSpace(m[0]), floor)
 		}
+	}
+	if found < 2 {
+		t.Errorf("found %d statements of the Go minimum in README.md, expected at least 2 "+
+			"(the badge and the prose requirement); if one was removed on purpose, lower this", found)
 	}
 }
