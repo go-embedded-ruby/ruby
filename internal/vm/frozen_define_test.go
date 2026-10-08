@@ -46,6 +46,20 @@ begin; m.module_eval { def z; end }; rescue FrozenError => e; puts e.message.spl
 		// has to run after the can-this-have-a-singleton test, not before.
 		{`begin; 1.define_singleton_method(:f) {}; rescue => e; p e.class; end`, "TypeError\n"},
 		{`begin; :s.define_singleton_method(:f) {}; rescue => e; p e.class; end`, "TypeError\n"},
+		// nil, true and false report frozen? == true -- they are immutable -- and
+		// MRI nonetheless ALLOWS a singleton method on them: it lands on
+		// NilClass/TrueClass/FalseClass. A guard built on Ruby's `frozen?` refuses
+		// these, and the first version of this one did: it cost
+		// core/{nil,true,false}/singleton_method_spec.rb, three files the
+		// conformance ratchet caught at 0 passing against a baseline of 1. What a
+		// definition guard needs is "frozen by SOMEONE", which is a flag, not
+		// "frozen by nature", which is a type.
+		{`nil.define_singleton_method(:zz) { 42 }
+p nil.zz`, "42\n"},
+		{`true.define_singleton_method(:zz) { 42 }
+p true.zz`, "42\n"},
+		{`def (false).zz; 42; end
+p false.zz`, "42\n"},
 		// Unfrozen definition still works -- a check that refused everything would
 		// also pass every case above.
 		{`c = Class.new

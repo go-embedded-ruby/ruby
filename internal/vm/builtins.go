@@ -11276,9 +11276,42 @@ func (vm *VM) checkDefineFrozen(definee *RClass) {
 	case definee.metaOf != nil:
 		target = definee.metaOf
 	}
-	if isFrozen(target) {
+	if explicitlyFrozen(target) {
 		vm.raiseFrozen(target)
 	}
+}
+
+// explicitlyFrozen is isFrozen minus the values that are frozen BY NATURE.
+// isFrozen answers Ruby's `frozen?`, where an Integer, a Symbol and nil all say
+// true because they are immutable -- and a definition guard built on it refuses
+// `def nil.foo`, which MRI ALLOWS (nil/true/false take singleton methods on
+// NilClass/TrueClass/FalseClass; measured on 4.0.7, and ruby/spec asserts it in
+// core/{nil,true,false}/singleton_method_spec.rb). The first version of this
+// guard used isFrozen and cost exactly those three files.
+//
+// What a definition guard needs is "was this frozen by someone", which is a
+// flag, so this reads the flag and nothing else. The values that cannot carry
+// one are not refused here at all: whether they may have a singleton class is
+// ensureSingleton's question, and MRI answers it with TypeError.
+func explicitlyFrozen(v object.Value) bool {
+	switch x := v.(type) {
+	case *object.String:
+		return x.Frozen
+	case *object.Array:
+		return x.Frozen
+	case *object.Hash:
+		return x.Frozen
+	case *Regexp:
+		return x.frozen
+	case *RObject:
+		return x.frozen
+	case *RClass:
+		return x.frozen
+	}
+	if b, ok := v.(boxed); ok {
+		return b.state().frozen
+	}
+	return false
 }
 
 // checkSingletonDefineFrozen refuses `def recv.name` / define_singleton_method
@@ -11291,7 +11324,7 @@ func (vm *VM) checkDefineFrozen(definee *RClass) {
 // 4.0.7, `1.define_singleton_method(:f){}` raises TypeError "can't define
 // singleton" while a frozen Object raises FrozenError.
 func (vm *VM) checkSingletonDefineFrozen(recv object.Value) {
-	if isFrozen(recv) {
+	if explicitlyFrozen(recv) {
 		vm.raiseFrozen(recv)
 	}
 }
