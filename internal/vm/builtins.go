@@ -11250,6 +11250,52 @@ func (vm *VM) checkArrayFrozen(a *object.Array) {
 	}
 }
 
+// checkDefineFrozen refuses a method definition into a frozen definee, which is
+// MRI's rb_class_modify_check (eval.c) on the method-definition path. rbgo had
+// the frozen check on every REFLECTIVE definer -- define_method, attr_accessor,
+// remove_method, const_set -- and not on `def` itself, so the one way everybody
+// actually monkey-patches went through a freeze untouched (#798).
+//
+// For a singleton class the flag that matters belongs to the thing it stands
+// for, and MRI names that thing rather than the anonymous singleton. rbgo
+// records it in two different fields depending on which kind of singleton it
+// is, and missing either one leaves a live bypass:
+//
+//	attached  a per-object singleton's object  -- `def o.foo` on a frozen o
+//	metaOf    a class's metaclass              -- `class << c; def m; end; end`
+//
+// Measured on 4.0.7: the first says "can't modify frozen Object: #<Object:0x..>",
+// the second "can't modify frozen Class: #<Class:0x..>". A first version of this
+// helper handled only `attached`, and `class << frozen_class` went straight
+// through it.
+func (vm *VM) checkDefineFrozen(definee *RClass) {
+	target := object.Value(definee)
+	switch {
+	case definee.attached != nil:
+		target = definee.attached
+	case definee.metaOf != nil:
+		target = definee.metaOf
+	}
+	if isFrozen(target) {
+		vm.raiseFrozen(target)
+	}
+}
+
+// checkSingletonDefineFrozen refuses `def recv.name` / define_singleton_method
+// on a frozen receiver. It is the receiver-side counterpart of
+// checkDefineFrozen: here the object is in hand and no singleton class need be
+// consulted.
+//
+// Callers run it AFTER the can-this-have-a-singleton test, not before: every
+// immediate reports frozen, and MRI answers those with TypeError. Measured on
+// 4.0.7, `1.define_singleton_method(:f){}` raises TypeError "can't define
+// singleton" while a frozen Object raises FrozenError.
+func (vm *VM) checkSingletonDefineFrozen(recv object.Value) {
+	if isFrozen(recv) {
+		vm.raiseFrozen(recv)
+	}
+}
+
 // checkHashFrozen is the Hash counterpart of checkArrayFrozen.
 func (vm *VM) checkHashFrozen(h *object.Hash) {
 	if h.Frozen {
