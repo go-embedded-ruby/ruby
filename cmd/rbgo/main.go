@@ -69,6 +69,15 @@ func runCmd(args []string) {
 	if o.help {
 		help()
 	}
+	if o.showVersion {
+		// vm.Description() is the same string the running VM reports as
+		// RUBY_DESCRIPTION, so `rbgo -v` and `puts RUBY_DESCRIPTION` can never
+		// drift apart.
+		fmt.Println(vm.Description())
+		if o.versionOnly {
+			os.Exit(0)
+		}
+	}
 	src, name, fromFile, err := o.load()
 	if err != nil {
 		var le *loadError

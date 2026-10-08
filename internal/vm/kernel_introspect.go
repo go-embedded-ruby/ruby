@@ -16,12 +16,23 @@ import (
 // — takes the standard CRuby path. The version targets the project's Ruby 3.4
 // compatibility goal, a real version string so guards like
 // `if RUBY_VERSION >= "3.0"` pass.
+// rubyVersion, releaseDate and revision are package level so that RUBY_DESCRIPTION
+// and the `rbgo -v` banner cannot disagree: one source, two readers. They were
+// function-local, which is how a CLI ends up printing a version the running VM
+// does not report.
+const (
+	rubyVersion = "3.4.1"
+	releaseDate = "2024-12-25"
+	revision    = "48d4efcb85000e1ebae42004e963b5d0cedddcf2"
+)
+
+// Description is RUBY_DESCRIPTION, which is exactly what `ruby -v` and
+// `ruby --version` print -- measured against MRI 4.0.7, where all three are the
+// same string byte for byte.
+func Description() string { return "ruby " + rubyVersion + " [" + rubyPlatform() + "]" }
+
 func (vm *VM) registerVersionConstants() {
-	const (
-		version     = "3.4.1"
-		releaseDate = "2024-12-25"
-		revision    = "48d4efcb85000e1ebae42004e963b5d0cedddcf2"
-	)
+	version := rubyVersion
 	// Every RUBY_* String constant is frozen. version.c's Init_version at tag
 	// v3_4_0 builds each one through
 	//     #define MKSTR(name) rb_obj_freeze(rb_usascii_str_new_static(ruby_##name, sizeof(ruby_##name)-1))
@@ -33,7 +44,7 @@ func (vm *VM) registerVersionConstants() {
 	vm.consts["RUBY_ENGINE_VERSION"] = object.NewFrozenStringView(version)
 	vm.consts["RUBY_PATCHLEVEL"] = object.IntValue(0)
 	vm.consts["RUBY_PLATFORM"] = object.NewFrozenStringView(rubyPlatform())
-	vm.consts["RUBY_DESCRIPTION"] = object.NewFrozenStringView("ruby " + version + " [" + rubyPlatform() + "]")
+	vm.consts["RUBY_DESCRIPTION"] = object.NewFrozenStringView(Description())
 	vm.consts["RUBY_COPYRIGHT"] = object.NewFrozenStringView("ruby - Copyright (C) 1993-2025 Yukihiro Matsumoto")
 	// RUBY_RELEASE_DATE and RUBY_REVISION describe the MRI release this runtime
 	// targets, and both are frozen Strings (core/builtin_constants asserts the
