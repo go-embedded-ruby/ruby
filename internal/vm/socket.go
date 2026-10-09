@@ -122,7 +122,7 @@ func (vm *VM) registerTCPSocket(tcp *RClass) {
 		var err error
 		ioBlock(vm, func() { conn, err = net.Dial("tcp", net.JoinHostPort(host, port)) })
 		if err != nil {
-			raise("SocketError", "getaddrinfo: %s", err.Error())
+			raiseDialErr(err, dialAddr(host, port))
 		}
 		return newTCPSocket(tcp, conn)
 	}
@@ -209,6 +209,17 @@ func (vm *VM) registerTCPServer(srv *RClass) {
 func (vm *VM) registerSocketClass(basic *RClass) {
 	sock := newClass("Socket", basic)
 	vm.consts["Socket"] = sock
+
+	// Socket::ResolutionError < SocketError is what MRI raises when a NAME does
+	// not resolve, as opposed to a connect that fails against an address it did
+	// resolve. Measured on 4.0.7: TCPSocket.new("no-such-host.invalid", 80)
+	// raises Socket::ResolutionError, while TCPSocket.new("127.0.0.1", 1)
+	// raises Errno::ECONNREFUSED — rbgo answered SocketError to both.
+	//
+	// It is a SUBCLASS, so every `rescue SocketError` that worked before still
+	// catches a resolution failure; what changes is that the two can now be told
+	// apart, which is the whole point of MRI having two classes.
+	sock.consts["ResolutionError"] = newClass("Socket::ResolutionError", vm.consts["SocketError"].(*RClass))
 	for k, v := range map[string]int64{
 		"AF_INET": 2, "AF_INET6": 30, "AF_UNIX": 1, "PF_INET": 2, "PF_INET6": 30, "PF_UNIX": 1,
 		"SOCK_STREAM": 1, "SOCK_DGRAM": 2,
