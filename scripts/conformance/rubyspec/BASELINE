@@ -18,6 +18,22 @@
 # regression, no new file, no change of loading -- so the deltas are the whole
 # move.
 #
+# ⛔ 2026-10-09: ONE of those twenty was wrong to apply, and this file said so.
+# core/random/bytes_spec.rb went 8 -> 9, and it is the KNOWN FLAKE held at its
+# observed minimum (see "One file is recorded at its OBSERVED MINIMUM" below,
+# and the two earlier waves that applied deltas and deliberately left it alone).
+# The next run read 8 and the lane went red, which is the coin toss that note
+# predicts in those words. Put back to 8.
+#
+# All three checks that commit lists were ARITHMETIC -- sums and columns -- and
+# every one of them passed. None of them asked whether a number SHOULD move,
+# which is the question this file answers in its own header, three times over,
+# about this exact path. Measured here afterwards, same binary, six runs:
+# 9 9 9 9 8 9.
+#
+# So: when applying a ratchet delta, read the header for the FILE being moved
+# before moving it. The sum being right is not evidence that the move was.
+#
 # THE FRAME MATTERS, twice over, and both are why an earlier attempt at this
 # file was wrong:
 #
@@ -1630,7 +1646,7 @@ OK	core/queue/pop_spec.rb	20
 OK	core/queue/push_spec.rb	1
 OK	core/queue/shift_spec.rb	1
 OK	core/queue/size_spec.rb	1
-OK	core/random/bytes_spec.rb	9
+OK	core/random/bytes_spec.rb	8
 OK	core/random/default_spec.rb	1
 OK	core/random/equal_value_spec.rb	2
 OK	core/random/new_seed_spec.rb	3
