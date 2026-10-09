@@ -525,6 +525,7 @@ func (vm *VM) singletonClass(o *RObject) *RClass {
 // lands on main's singleton class — matching MRI — rather than on the definee.
 func (vm *VM) defineSingletonMethod(recv object.Value, name string, iseq *bytecode.ISeq) {
 	if t, ok := recv.(*RClass); ok {
+		vm.checkSingletonDefineFrozen(t)
 		t.smethods[name] = &Method{name: name, iseq: iseq, owner: t}
 		bumpMethodSerial()
 		vm.fireSingletonMethodHook(recv, "singleton_method_added", name)
@@ -539,6 +540,7 @@ func (vm *VM) defineSingletonMethod(recv object.Value, name string, iseq *byteco
 	if !ok {
 		raise("TypeError", "can't define singleton method %q for %s", name, vm.classOf(recv).name)
 	}
+	vm.checkSingletonDefineFrozen(recv)
 	sc.methods[name] = &Method{name: name, iseq: iseq, owner: sc}
 	bumpMethodSerial() // adding a singleton method can change what a cached send resolves to
 	vm.fireSingletonMethodHook(recv, "singleton_method_added", name)
