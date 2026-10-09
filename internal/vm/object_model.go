@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"reflect"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 
@@ -2776,12 +2777,35 @@ func ivarNamesInOrder(self object.Value) []object.Value {
 	st := ivarStoreOf(self, false)
 	if st.order != nil {
 		out := make([]object.Value, 0, len(*st.order))
+		seen := make(map[string]bool, len(*st.order))
 		for _, n := range *st.order {
 			// A remove_instance_variable leaves the name in the order list; the map
 			// says which names are still live.
 			if _, live := st.tbl[n]; live {
 				out = append(out, object.Symbol(n))
+				seen[n] = true
 			}
+		}
+		// A LIVE ivar missing from the order list is still an ivar. For an
+		// *RObject the order pointer is the address of a struct field, so it is
+		// NEVER nil -- which means a constructor that fills the map directly and
+		// leaves ivarOrder empty produces ivars that are readable by name and
+		// invisible to instance_variables, with nothing to say so. That is #787:
+		// a YAML-built object answered `o.a == 1` and `instance_variables == []`.
+		//
+		// This is a floor rather than the fix for any one constructor: the ones
+		// that build ivarOrder (exception.go) never reach it, so MRI's creation
+		// order is preserved where it is known. Sorted, because Go's map order is
+		// random and an enumeration that changes between runs is its own defect.
+		var extra []string
+		for n := range st.tbl {
+			if !seen[n] {
+				extra = append(extra, n)
+			}
+		}
+		sort.Strings(extra)
+		for _, n := range extra {
+			out = append(out, object.Symbol(n))
 		}
 		return out
 	}

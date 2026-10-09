@@ -557,8 +557,24 @@ func (c *yamlFromCtx) convObject(o *yaml.Object) object.Value {
 	cls := c.vm.yamlResolveClass(name)
 	obj := &RObject{class: cls, ivars: map[string]object.Value{}}
 	c.seen[o] = obj
-	for k, val := range o.IVars {
+	// ivarOrder has to be filled alongside ivars, not left to the map. An
+	// *RObject's order list is consulted FIRST by instance_variables, and the
+	// pointer to it is never nil, so an object built with a populated map and an
+	// empty order list has ivars that read back by name and do not appear in the
+	// enumeration -- #787, where a YAML-loaded object answered `o.a == 1` and
+	// `instance_variables == []`.
+	//
+	// The sequence is the library's own emission order (value.go:86-89): the
+	// names in o.Order that exist, then the rest lexicographically. Taking it
+	// from there rather than ranging the map keeps the result both MRI-like
+	// (document order) and stable across runs.
+	for _, k := range yamlIVarOrder(o) {
+		val, ok := o.IVars[k]
+		if !ok {
+			continue
+		}
 		obj.ivars["@"+k] = c.conv(val)
+		obj.ivarOrder = append(obj.ivarOrder, "@"+k)
 	}
 	return obj
 }
