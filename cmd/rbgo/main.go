@@ -69,6 +69,15 @@ func runCmd(args []string) {
 	if o.help {
 		help()
 	}
+	if o.showVersion {
+		// vm.Description() is the same string the running VM reports as
+		// RUBY_DESCRIPTION, so `rbgo -v` and `puts RUBY_DESCRIPTION` can never
+		// drift apart.
+		fmt.Println(vm.Description())
+		if o.versionOnly {
+			os.Exit(0)
+		}
+	}
 	src, name, fromFile, err := o.load()
 	if err != nil {
 		var le *loadError
@@ -147,6 +156,8 @@ const usageText = `usage: rbgo [options] [--] <file.rb> [arguments...]   interpr
 
 options: -w, -W, -W0 | -W1 | -W2, -W:<category>   $VERBOSE: -W0 silent, -W1 default, -w/-W2 verbose
          -e <code>                                may be repeated; then ARGV takes no script
+         -v                                       print the version, set $VERBOSE, and run
+         --version                                print the version and stop
          -h, --help                               this message`
 
 // help prints the usage summary as a successful answer to a question — stdout,

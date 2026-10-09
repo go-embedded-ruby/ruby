@@ -47,6 +47,8 @@ func TestParseOptionsSplitsTheCommandLine(t *testing.T) {
 		warnLevel int
 		warnSet   bool
 		help      bool
+		showVer   bool
+		verOnly   bool
 	}{
 		{name: "script plus arguments", args: []string{"t.rb", "alpha", "beta"},
 			script: "t.rb", argv: []string{"alpha", "beta"}, warnLevel: 1},
@@ -115,6 +117,24 @@ func TestParseOptionsSplitsTheCommandLine(t *testing.T) {
 			argv: nil, warnLevel: 1, help: true},
 		{name: "--help stops the scan", args: []string{"--help", "-Z"},
 			argv: nil, warnLevel: 1, help: true},
+		// -v and --version are NOT the same switch. Measured against MRI 4.0.7:
+		//   ruby -v -e 'puts 1'        prints the banner, then prints 1
+		//   ruby --version -e 'puts 1' prints the banner and stops
+		// So -v carries on scanning (and raises $VERBOSE, like -w), while
+		// --version ends the scan the way -h does.
+		{name: "-v prints the banner AND runs the script", args: []string{"-v", "t.rb", "a"},
+			script: "t.rb", argv: []string{"a"}, warnLevel: 2, warnSet: true, showVer: true},
+		{name: "-v clusters like any other switch", args: []string{"-vW0", "t.rb"},
+			script: "t.rb", argv: []string{}, warnLevel: 0, warnSet: true, showVer: true},
+		{name: "--version does not run the script it is given", args: []string{"--version", "t.rb"},
+			script: "t.rb", argv: []string{}, warnLevel: 1, showVer: true, verOnly: true},
+		// -v alone answers the question and stops. Measured: `echo "puts 42" |
+		// ruby -v` prints the banner and NOT 42, where `| ruby -w` prints 42 --
+		// so this is about -v, not about an empty command line.
+		{name: "-v with nothing to run does not fall back to stdin", args: []string{"-v"},
+			argv: []string{}, warnLevel: 2, warnSet: true, showVer: true, verOnly: true},
+		{name: "-w with nothing to run still reads stdin", args: []string{"-w"},
+			argv: []string{}, warnLevel: 2, warnSet: true},
 		{name: "no arguments: stdin, empty ARGV", args: []string{},
 			argv: []string{}, warnLevel: 1},
 		{name: "options but no script: stdin", args: []string{"-W0"},
@@ -149,6 +169,12 @@ func TestParseOptionsSplitsTheCommandLine(t *testing.T) {
 			if o.help != c.help {
 				t.Errorf("help = %v, want %v", o.help, c.help)
 			}
+			if o.showVersion != c.showVer {
+				t.Errorf("showVersion = %v, want %v", o.showVersion, c.showVer)
+			}
+			if o.versionOnly != c.verOnly {
+				t.Errorf("versionOnly = %v, want %v", o.versionOnly, c.verOnly)
+			}
 		})
 	}
 }
@@ -176,7 +202,15 @@ func TestParseOptionsErrorsAreMRIs(t *testing.T) {
 		// A switch ruby HAS and rbgo does not: calling it "invalid" would be a
 		// false statement about Ruby, so it gets its own wording — and still fails.
 		{[]string{"-n", "t.rb"}, "rbgo: -n is a ruby option that rbgo does not implement"},
-		{[]string{"--version"}, "rbgo: --version is a ruby option that rbgo does not implement"},
+		// Was `--version` until #XXX implemented it. A test that asserts a refusal
+		// goes green exactly while the defect lives, so this case now names a long
+		// option rbgo really does not have -- keeping the wording covered without
+		// pinning a gap shut.
+		{[]string{"--parser=prism"}, "rbgo: --parser is a ruby option that rbgo does not implement"},
+		// --version is NOT --help: it does not abandon the rest of the command
+		// line, so a bad option after it is still an error. Measured on MRI 4.0.7.
+		{[]string{"--version", "--bogus"}, "rbgo: invalid option --bogus  (-h will show valid options) (RuntimeError)"},
+		{[]string{"-v", "-Z"}, "rbgo: invalid option -Z  (-h will show valid options) (RuntimeError)"},
 	}
 	for _, c := range cases {
 		t.Run(strings.Join(c.args, " "), func(t *testing.T) {

@@ -47,6 +47,14 @@ type options struct {
 	warnLevel int      // -W<level>: 0 silent, 1 default, >=2 verbose
 	warnSet   bool     // a -w or -W actually chose a level
 	help      bool     // -h / --help
+	// showVersion and versionOnly are NOT the same switch, which measuring MRI
+	// 4.0.7 settled rather than reading did:
+	//   ruby -v -e 'puts 1'        -> banner, THEN runs, and $VERBOSE is true
+	//   ruby --version -e 'puts 1' -> banner only, the program never runs
+	// Implementing both as "print and exit" would have stopped `rbgo -v s.rb`
+	// running the script.
+	showVersion bool // -v or --version: print RUBY_DESCRIPTION
+	versionOnly bool // --version: and do not run a program
 }
 
 // optError is an option-parsing failure whose Error() is the COMPLETE stderr
@@ -72,7 +80,7 @@ func rubyRaise(format string, args ...any) *optError {
 var mriOnlyOptions = map[byte]string{
 	'a': "split each input line into $F", 'p': "loop and print $_",
 	'n': "loop over input lines", 'd': "set $DEBUG", 'y': "parser debug output",
-	'v': "print the version and set $VERBOSE", 'c': "syntax check only",
+	'c': "syntax check only",
 	's': "parse switches after the script name", 'l': "line-ending processing",
 	'S': "search $PATH for the script", 'r': "require a library first",
 	'i': "in-place edit", 'x': "skip to #!ruby", 'C': "chdir first",
@@ -87,7 +95,7 @@ var mriOnlyLongOptions = map[string]bool{
 	"copyright": true, "crash-report": true, "debug": true, "disable": true,
 	"dump": true, "enable": true, "encoding": true, "external-encoding": true,
 	"internal-encoding": true, "source-encoding": true, "jit": true,
-	"parser": true, "prism": true, "verbose": true, "version": true,
+	"parser": true, "prism": true, "verbose": true,
 	"yjit": true, "yydebug": true, "zjit": true, "backtrace-limit": true,
 }
 
@@ -125,6 +133,12 @@ scan:
 	reswitch:
 		for len(s) > 0 {
 			switch s[0] {
+			case 'v':
+				// case 'v': ruby_show_version() then ruby_verbose = Qtrue, and
+				// proc_options carries on -- the program still runs.
+				o.showVersion = true
+				o.setWarn(2)
+				s = s[1:]
 			case 'w':
 				// case 'w': ruby_verbose = Qtrue, i.e. -W2's level.
 				o.setWarn(2)
@@ -170,6 +184,16 @@ scan:
 				case name == "help":
 					o.help = true
 					break scan
+				case name == "version":
+					// NOT `break scan`, unlike --help. --version is not one of
+					// ruby.c's dump_exit_bits (ruby.c:163 lists only yydebug,
+					// syntax, parsetree, insns), so proc_options runs to the end
+					// and a later bad option still raises. Measured against MRI
+					// 4.0.7: `ruby --version --bogus` exits 1 on --bogus, while
+					// `ruby --help -Z` exits 0.
+					o.showVersion = true
+					o.versionOnly = true
+					s = ""
 				case mriOnlyLongOptions[name]:
 					return nil, unimplemented("--" + name)
 				default:
@@ -203,6 +227,13 @@ scan:
 	if !o.haveE && len(rest) > 0 {
 		o.script = rest[0]
 		rest = rest[1:]
+	}
+	// ruby.c:2374 `if (!opt->e_script) { if (argc <= 0) { if (opt->verbose)
+	// return Qtrue; ...` -- with -v and nothing to run, ruby answers the version
+	// question and stops; it does NOT fall back to stdin. Measured: `echo
+	// "puts 42" | ruby -v` prints only the banner, where `| ruby -w` prints 42.
+	if o.showVersion && !o.haveE && o.script == "" {
+		o.versionOnly = true
 	}
 	o.argv = rest
 	return o, nil
