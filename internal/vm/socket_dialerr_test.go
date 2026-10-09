@@ -4,7 +4,10 @@
 
 package vm_test
 
-import "testing"
+import (
+	"runtime"
+	"testing"
+)
 
 // TestAConnectFailureKeepsItsErrno (#772).
 //
@@ -32,8 +35,9 @@ rescue => e
   puts e.class
 end`, "Errno::ECONNREFUSED\n"},
 
-		// The message is MRI's, byte for byte -- measured against
-		// ruby 4.0.7: `Connection refused - connect(2) for "127.0.0.1" port N`.
+		// The SHAPE of the message, asserted everywhere: whatever the platform
+		// calls a refused connection, the peer it failed against must be in there.
+		// A message that names no peer leaves a caller unable to say which one.
 		{`require "socket"
 s = TCPServer.new("127.0.0.1", 0)
 port = s.addr[1]
@@ -41,8 +45,8 @@ s.close
 begin
   TCPSocket.new("127.0.0.1", port)
 rescue => e
-  puts e.message.sub(port.to_s, "<PORT>")
-end`, "Connection refused - connect(2) for \"127.0.0.1\" port <PORT>\n"},
+  puts e.message.end_with?("- connect(2) for \"127.0.0.1\" port #{port}")
+end`, "true\n"},
 
 		// Net::HTTP is the path the issue was filed on, and it reaches the peer
 		// through a different raiser (raiseTransportErr); both had to change.
@@ -115,5 +119,34 @@ puts "status=#{st.exitstatus} parent-alive"`, "status=1 parent-alive\n"},
 		{`pid = fork { 1 + 1 }
 _, st = Process.wait2(pid)
 puts "status=#{st.exitstatus}"`, "status=0\n"},
+	})
+}
+
+// TestAConnectFailureMessageIsMRIsWording pins the exact bytes, and only where
+// they were measured.
+//
+// `Connection refused - connect(2) for "127.0.0.1" port N` is MRI 4.0.7's
+// message, witnessed on darwin. The windows wording was never measured against
+// a Windows MRI here -- there is no Windows host on this machine, and the local
+// MRI source extract has no win32/win32.c and no version stamp either -- so
+// asserting it there would be asserting a guess.
+//
+// What IS asserted on every platform is the class (Errno::ECONNREFUSED) and the
+// shape of the message, above. Scoping a claim to where it was measured is not
+// the same as loosening it: the claim that was measured stays exact.
+func TestAConnectFailureMessageIsMRIsWording(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("MRI's Windows wording for a refused connect was not measured here; the class and the message shape are asserted for every platform in TestAConnectFailureKeepsItsErrno")
+	}
+	checkCases(t, []runCase{
+		{`require "socket"
+s = TCPServer.new("127.0.0.1", 0)
+port = s.addr[1]
+s.close
+begin
+  TCPSocket.new("127.0.0.1", port)
+rescue => e
+  puts e.message.sub(port.to_s, "<PORT>")
+end`, "Connection refused - connect(2) for \"127.0.0.1\" port <PORT>\n"},
 	})
 }
