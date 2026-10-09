@@ -70,3 +70,31 @@ def o.foo; 8; end
 p o.foo`, "8\n"},
 	})
 }
+
+// TestAFrozenRegexpRefusesDefToo covers the one branch of explicitlyFrozen the
+// first version of this change left untested -- the coverage gate named it, at
+// 90.0%, and the question a named function asks is whether the branch is DEAD
+// or merely unreached. It was unreached: a literal /a/ is born frozen in both
+// engines, and defining on it already raised.
+//
+// Measuring it turned up a second thing. `Regexp.new("a").freeze.frozen?`
+// answered FALSE: Object#freeze had no *Regexp arm while isFrozen had read
+// Regexp.frozen all along, so the two disagreed. The literal case hid it,
+// because a literal needs no freeze call to be frozen.
+func TestAFrozenRegexpRefusesDefToo(t *testing.T) {
+	checkCases(t, []runCase{
+		// freeze must actually mark it. This is the half that was broken.
+		{`r = Regexp.new("a"); p r.frozen?; r.freeze; p r.frozen?`, "false\ntrue\n"},
+		// ... and then refuse a definition, naming the Regexp as MRI does.
+		{`r = Regexp.new("a").freeze
+begin; r.define_singleton_method(:z) {}; rescue FrozenError => e; puts e.message.split(":").first; end`,
+			"can't modify frozen Regexp\n"},
+		// A literal is born frozen in both engines, so it refuses without a
+		// freeze call -- this is the case that was already passing and hid the
+		// one above.
+		{`begin; /a/.define_singleton_method(:z) {}; rescue FrozenError => e; puts e.message.split(":").first; end`,
+			"can't modify frozen Regexp\n"},
+		// The negative control: an unfrozen Regexp still takes a singleton method.
+		{`r = Regexp.new("a"); r.define_singleton_method(:z) { 7 }; p r.z`, "7\n"},
+	})
+}

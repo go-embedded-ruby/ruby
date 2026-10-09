@@ -326,6 +326,14 @@ func (vm *VM) bootstrap() {
 			}
 		case *RClass:
 			o.frozen = true
+		case *Regexp:
+			// isFrozen has read Regexp.frozen all along and freeze never wrote it,
+			// so `Regexp.new("a").freeze.frozen?` answered false where MRI says
+			// true. A literal /a/ is born frozen, which is how this stayed
+			// invisible: the common case was already right. Found by comparing
+			// this switch against isFrozen's TERM BY TERM -- Regexp was the only
+			// type in one and not the other, which a spot check would have missed.
+			o.frozen = true
 		default:
 			// Bound/UnboundMethod (and any future boxed value) freeze via state.
 			if b, ok := self.(boxed); ok {
