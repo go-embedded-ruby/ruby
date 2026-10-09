@@ -326,6 +326,14 @@ func (vm *VM) bootstrap() {
 			}
 		case *RClass:
 			o.frozen = true
+		case *Regexp:
+			// isFrozen has read Regexp.frozen all along and freeze never wrote it,
+			// so `Regexp.new("a").freeze.frozen?` answered false where MRI says
+			// true. A literal /a/ is born frozen, which is how this stayed
+			// invisible: the common case was already right. Found by comparing
+			// this switch against isFrozen's TERM BY TERM -- Regexp was the only
+			// type in one and not the other, which a spot check would have missed.
+			o.frozen = true
 		default:
 			// Bound/UnboundMethod (and any future boxed value) freeze via state.
 			if b, ok := self.(boxed); ok {
@@ -11247,6 +11255,85 @@ func isFrozen(v object.Value) bool {
 func (vm *VM) checkArrayFrozen(a *object.Array) {
 	if a.Frozen {
 		vm.raiseFrozen(a)
+	}
+}
+
+// checkDefineFrozen refuses a method definition into a frozen definee, which is
+// MRI's rb_class_modify_check (eval.c) on the method-definition path. rbgo had
+// the frozen check on every REFLECTIVE definer -- define_method, attr_accessor,
+// remove_method, const_set -- and not on `def` itself, so the one way everybody
+// actually monkey-patches went through a freeze untouched (#798).
+//
+// For a singleton class the flag that matters belongs to the thing it stands
+// for, and MRI names that thing rather than the anonymous singleton. rbgo
+// records it in two different fields depending on which kind of singleton it
+// is, and missing either one leaves a live bypass:
+//
+//	attached  a per-object singleton's object  -- `def o.foo` on a frozen o
+//	metaOf    a class's metaclass              -- `class << c; def m; end; end`
+//
+// Measured on 4.0.7: the first says "can't modify frozen Object: #<Object:0x..>",
+// the second "can't modify frozen Class: #<Class:0x..>". A first version of this
+// helper handled only `attached`, and `class << frozen_class` went straight
+// through it.
+func (vm *VM) checkDefineFrozen(definee *RClass) {
+	target := object.Value(definee)
+	switch {
+	case definee.attached != nil:
+		target = definee.attached
+	case definee.metaOf != nil:
+		target = definee.metaOf
+	}
+	if explicitlyFrozen(target) {
+		vm.raiseFrozen(target)
+	}
+}
+
+// explicitlyFrozen is isFrozen minus the values that are frozen BY NATURE.
+// isFrozen answers Ruby's `frozen?`, where an Integer, a Symbol and nil all say
+// true because they are immutable -- and a definition guard built on it refuses
+// `def nil.foo`, which MRI ALLOWS (nil/true/false take singleton methods on
+// NilClass/TrueClass/FalseClass; measured on 4.0.7, and ruby/spec asserts it in
+// core/{nil,true,false}/singleton_method_spec.rb). The first version of this
+// guard used isFrozen and cost exactly those three files.
+//
+// What a definition guard needs is "was this frozen by someone", which is a
+// flag, so this reads the flag and nothing else. The values that cannot carry
+// one are not refused here at all: whether they may have a singleton class is
+// ensureSingleton's question, and MRI answers it with TypeError.
+func explicitlyFrozen(v object.Value) bool {
+	switch x := v.(type) {
+	case *object.String:
+		return x.Frozen
+	case *object.Array:
+		return x.Frozen
+	case *object.Hash:
+		return x.Frozen
+	case *Regexp:
+		return x.frozen
+	case *RObject:
+		return x.frozen
+	case *RClass:
+		return x.frozen
+	}
+	if b, ok := v.(boxed); ok {
+		return b.state().frozen
+	}
+	return false
+}
+
+// checkSingletonDefineFrozen refuses `def recv.name` / define_singleton_method
+// on a frozen receiver. It is the receiver-side counterpart of
+// checkDefineFrozen: here the object is in hand and no singleton class need be
+// consulted.
+//
+// Callers run it AFTER the can-this-have-a-singleton test, not before: every
+// immediate reports frozen, and MRI answers those with TypeError. Measured on
+// 4.0.7, `1.define_singleton_method(:f){}` raises TypeError "can't define
+// singleton" while a frozen Object raises FrozenError.
+func (vm *VM) checkSingletonDefineFrozen(recv object.Value) {
+	if explicitlyFrozen(recv) {
+		vm.raiseFrozen(recv)
 	}
 }
 

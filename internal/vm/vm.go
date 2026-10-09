@@ -2754,6 +2754,8 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				push(vm.dispatchSend(recv, bname, callArgs, bblk))
 			case bytecode.OpDefineMethod:
 				name := iseq.Names[in.A]
+				// Before anything is written: a frozen definee refuses the def.
+				vm.checkDefineFrozen(methodDefinee)
 				// methodDefinee is the definee, except under instance_eval/instance_exec
 				// where the def lands on the receiver's singleton class instead.
 				m := &Method{name: name, iseq: iseq.Children[in.B], owner: methodDefinee, vis: methodDefinee.defaultVis}

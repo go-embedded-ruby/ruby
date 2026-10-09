@@ -44,6 +44,7 @@ func (vm *VM) registerSingleton() {
 		}
 		name := args[0].ToS()
 		if t, ok := self.(*RClass); ok {
+			vm.checkSingletonDefineFrozen(t)
 			t.smethods[name] = &Method{name: name, proc: body, owner: t}
 			bumpMethodSerial()
 			vm.fireSingletonMethodHook(self, "singleton_method_added", name)
@@ -53,6 +54,7 @@ func (vm *VM) registerSingleton() {
 		if !ok {
 			raise("TypeError", "can't define singleton method %q for %s", name, vm.classOf(self).name)
 		}
+		vm.checkSingletonDefineFrozen(self)
 		sc.methods[name] = &Method{name: name, proc: body, owner: sc}
 		bumpMethodSerial()
 		vm.fireSingletonMethodHook(self, "singleton_method_added", name)
