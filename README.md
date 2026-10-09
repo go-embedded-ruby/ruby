@@ -673,11 +673,10 @@ Otherwise:
 | `File::Stat#==` | `a == b` is `false` for two stats of the same file (MRI: `true`); `a.==(b)` answers `true` |
 | `File#stat` on a file unlinked while open | raises `Errno::ENOENT`; MRI answers from the open descriptor. rbgo's streams are buffered by path and hold no descriptor |
 | `Errno` | all **158** of MRI's constant names are present, but **32** report errno `0` where MRI has a real number (`EAUTH`, `EBADRPC`, `EDEVERR`, …). Measured by set difference on darwin: 81 names are zero-valued under rbgo, 49 under MRI, and every MRI zero is also zero under rbgo. Go's portable `syscall` package does not expose the platform-only names |
-| magic encoding comments | `# encoding: ascii-8bit` is not honoured — a literal still reports `UTF-8`, where MRI reports `ASCII-8BIT` |
 | `pp` | neither `Kernel#pp` nor `require "pp"` exists (`require "prettyprint"` does work) |
 | `Process.fork` | does not exist — Go's runtime cannot be forked safely |
 | `Kernel#fork` | **exists, and does not fork.** `fork { ... }` runs the block **in the same process**, so the “child” mutates the parent's globals, `ENV` and working directory, and returns a synthetic pid (`100001`, counting up) while `Process.pid` is unchanged. Under MRI the block runs in a real child and the parent is untouched. A `SystemExit` raised inside the block unwinds the whole program |
-| `BEGIN { }` / `END { }` | do not parse (`parse error: unexpected "{" after statement`). Everything else the front-end was known to refuse now parses — see [go-ruby-parser](https://github.com/go-ruby-parser/parser) |
+| `END { }` | **crashes the process** with a Go panic when the handler runs at exit — `panic: slice bounds out of range [:1] with capacity 0`, exit 2, where MRI runs the block. For an embedder it takes the host down rather than returning an error from `Run`. Tracked as #805. `BEGIN { }` works. Both used to be refused by the front end, which is how this row came to understate it: a gap turned into a crash and the note still described the gap |
 | `Thread#backtrace` for another thread | raises `NotImplementedError`; rbgo keeps one frame stack per VM, not per thread |
 
 ## Platforms
