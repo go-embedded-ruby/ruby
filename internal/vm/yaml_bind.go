@@ -568,12 +568,11 @@ func (c *yamlFromCtx) convObject(o *yaml.Object) object.Value {
 	// names in o.Order that exist, then the rest lexicographically. Taking it
 	// from there rather than ranging the map keeps the result both MRI-like
 	// (document order) and stable across runs.
+	// No presence check on the lookup: yamlIVarOrder returns only keys that are
+	// in o.IVars, so a missing-key arm here would be dead code the coverage gate
+	// would then ask about -- and it did, on the first version of this.
 	for _, k := range yamlIVarOrder(o) {
-		val, ok := o.IVars[k]
-		if !ok {
-			continue
-		}
-		obj.ivars["@"+k] = c.conv(val)
+		obj.ivars["@"+k] = c.conv(o.IVars[k])
 		obj.ivarOrder = append(obj.ivarOrder, "@"+k)
 	}
 	return obj
