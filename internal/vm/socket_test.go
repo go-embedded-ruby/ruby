@@ -245,7 +245,10 @@ func TestSocketErrors(t *testing.T) {
 	cases := []struct{ src, want string }{
 		{`begin; TCPSocket.new(H); rescue ArgumentError; puts "arity"; end`, "arity"},
 		{`begin; TCPSocket.new(H, []); rescue TypeError; puts "badport"; end`, "badport"},
-		{`begin; TCPSocket.new(H, P); rescue SocketError; puts "refused"; end`, "refused"},
+		// Errno::ECONNREFUSED, not SocketError (#772). This case read
+		// `rescue SocketError` and so went green exactly while the defect lived:
+		// every way of failing to reach a peer arrived as one class.
+		{`begin; TCPSocket.new(H, P); rescue Errno::ECONNREFUSED; puts "refused"; end`, "refused"},
 		{`s=TCPSocket.new(H2,P2); begin; s.read(-1); rescue ArgumentError; puts "neg"; end; s.close`, "neg"},
 		{`s=TCPSocket.new(H2,P2); begin; s.readpartial(-1); rescue ArgumentError; puts "negrp"; end; s.close`, "negrp"},
 		{`s=TCPSocket.new(H2,P2); begin; s.readpartial; rescue ArgumentError; puts "rparity"; end; s.close`, "rparity"},

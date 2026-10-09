@@ -85,3 +85,35 @@ end`, "caught: Socket::ResolutionError\n"},
 		{`require "socket"; p Socket::ResolutionError.ancestors.include?(SocketError)`, "true\n"},
 	})
 }
+
+// TestForkExitStopsTheChildNotTheProgram (#774, the SystemExit half).
+//
+// `fork { exit 7 }` ended the WHOLE program at the fork call: the line after
+// the fork never ran and the process exited 7. MRI runs on and reports 7
+// through Process.wait2, because under a real fork the SystemExit unwinds the
+// CHILD. rbgo runs the block in-process by design, so the block IS the child,
+// and the child's exit is runForkBlock returning the status -- not a panic
+// escaping to the top.
+//
+// This does not close #774: the other half, an UNCAUGHT exception in the block,
+// still takes the parent down (MRI prints it in the child and exits 1). That
+// needs an exception renderer inside the VM, which lives in the CLI today.
+func TestForkExitStopsTheChildNotTheProgram(t *testing.T) {
+	checkCases(t, []runCase{
+		{`pid = fork { exit 7 }
+_, st = Process.wait2(pid)
+puts "status=#{st.exitstatus} parent-alive"`, "status=7 parent-alive\n"},
+		{`pid = fork { exit! 3 }
+_, st = Process.wait2(pid)
+puts "status=#{st.exitstatus} parent-alive"`, "status=3 parent-alive\n"},
+		// abort raises SystemExit with EXIT_FAILURE, so it travels the same path.
+		{`pid = fork { abort }
+_, st = Process.wait2(pid)
+puts "status=#{st.exitstatus} parent-alive"`, "status=1 parent-alive\n"},
+		// A block that returns normally is still 0 -- a catch-everything recover
+		// would pass every case above while breaking this one.
+		{`pid = fork { 1 + 1 }
+_, st = Process.wait2(pid)
+puts "status=#{st.exitstatus}"`, "status=0\n"},
+	})
+}
