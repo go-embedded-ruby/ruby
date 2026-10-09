@@ -623,42 +623,46 @@ throughput tracks the underlying driver rather than the interpreter:
 
 ### What does not work yet
 
-Every entry below was re-checked on `3e8e3cc` (darwin/arm64, 2026-09-26) by running
-it against **MRI 4.0.5 on the same host**. Entries that no longer reproduced have
-been removed.
+Every entry below was re-checked on `fc8ca1a` (darwin/arm64, 2026-10-08) by running
+it against **MRI 4.0.7 on the same host**. Entries that no longer reproduced have
+been removed — two were, on that pass:
 
-**The browser WebAssembly target does not currently build.** `GOOS=js GOARCH=wasm`
-fails to compile, because `internal/vm/errno.go` references three `syscall`
-constants that the `js` port does not define:
+- The two paragraphs saying the **browser WebAssembly target** was broken and
+  ungated. Both were fixed by #684, which closed the three missing `syscall`
+  constants **and** added the gate, so this file was describing a gap that a
+  green lane in the same repository had been contradicting on every pull
+  request. `readme_wasm_lane_test.go` now fails if the two disagree again —
+  including, as it happens, if this very note quotes the old wording back.
+- *"`$stderr` is not a separate stream"*. The VM takes two writers
+  (`vm.NewWithStderr`), and `rbgo -e '$stdout.print "O"; $stderr.print "E"'` now
+  sends one byte to each; `warn` goes to stderr. Covered by
+  `internal/vm/diagnostic_stream_test.go`.
 
-```console
-$ CGO_ENABLED=0 GOOS=js GOARCH=wasm go build ./cmd/rbgo
-# github.com/go-embedded-ruby/ruby/internal/vm
-internal/vm/errno.go:101:35: undefined: syscall.ENOTRECOVERABLE
-internal/vm/errno.go:108:35: undefined: syscall.EOWNERDEAD
-internal/vm/errno.go:120:35: undefined: syscall.ETXTBSY
-```
-
-This affects the playground (`./cmd/wasm`) and the closed-world browser build
-(`rbgo build --closed --target wasm`) alike, since both link `internal/vm`. It is a
-recent regression — the same build succeeded at `68cb53a`, the commit before the
-Errno subsystem landed — and no CI lane catches it, because only the **`wasip1`**
-wasm target is gated. **`GOOS=wasip1 GOARCH=wasm` does build and run** (see
-*Platforms*), so server-side/WASI WebAssembly is unaffected.
-
-**`$stderr` is not a separate stream.** The VM is constructed with a single output
-writer, and `$stderr`/`STDERR` are wired to it, so anything a Ruby program sends to
-`$stderr` — including `warn` — arrives on **stdout**:
+**`Timeout.timeout` never times out.** The module and `Timeout::Error` exist and
+`rescue Timeout::Error` resolves, but the block runs to completion and its value
+is returned: enforcing a deadline needs pre-emptive interruption of a running
+block, which the scheduler does not do yet.
 
 ```console
-$ rbgo -e '$stdout.print "O"; $stderr.print "E"' >out.txt 2>err.txt
-$ cat out.txt; echo "[err: $(cat err.txt)]"
-OE[err: ]
+$ rbgo -e 'require "timeout"; Timeout.timeout(0.3) { sleep 2 }; puts "returned"'
+returned                 # MRI 4.0.7: Timeout::Error after 0.3s
 ```
 
-Uncaught exceptions are the exception to this: the CLI prints those to real stderr
-itself. Redirecting `2>` to separate diagnostics from program output therefore does
-not work as it does under MRI.
+This one **fails open**, which is why it is stated here rather than left in the
+table below. `Timeout.timeout` is the ordinary Ruby way to bound work that might
+hang, so code relying on it for that is unprotected under rbgo — and unprotected
+*silently*, because the call returns successfully. The block is also yielded
+`nil` where MRI yields the limit.
+
+**A backtick command holds the interpreter lock.** While `` `cmd` `` runs, every
+other Ruby `Thread` is stopped; under MRI they keep running. `Kernel#sleep` does
+yield, so this is specific to the subprocess path:
+
+```console
+$ rbgo -e 't = Thread.new { loop { $n = ($n||0)+1; sleep 0.01 } }; sleep 0.05
+          b = $n; `sleep 1`; puts($n > b ? "ran" : "frozen")'
+frozen                   # MRI 4.0.7: ran
+```
 
 Otherwise:
 
@@ -687,14 +691,17 @@ Otherwise:
 | **linux, macOS, windows** | the full suite under `-race`. The **100 % coverage gate** is enforced on linux and macOS only — a few POSIX-only paths (opening `/dev/null` as a character device) are unreachable on windows, so its coverage is structurally below 100 % |
 | **amd64, arm64** | `go test ./...` on native runners |
 | **wasip1/wasm** | built with `CGO_ENABLED=0 GOOS=wasip1 GOARCH=wasm` and **run** under [wazero](https://wazero.io), a pure-Go runtime — verified here: `wazero run rbgo.wasm -e 'puts (1..10).sum'` prints `55` |
+| **js/wasm (browser)** | `CGO_ENABLED=0 GOOS=js GOARCH=wasm go build ./...` plus `go vet` over `./cmd/wasm ./cmd/rbgo ./internal/vm` (`wasm (js, browser)` in `ci.yml`). Added with #684, which fixed the three `syscall` constants the `js` port does not define |
 
 **Not on the pull-request path** — validated on a nightly schedule instead:
 `riscv64`, `loong64`, `ppc64le` and `s390x`, under QEMU
 (`arch-qemu-nightly.yml`) and natively on real hardware (`native-arch.yml`: the
 GCC Compile Farm, plus an IBM LinuxONE s390x host).
 
-**`GOOS=js GOARCH=wasm` (the browser) has no CI lane and does not currently
-build** — see *What does not work yet*.
+Every target named above is built by a lane on the pull-request path, including
+the browser one: an earlier version of this file said `GOOS=js GOARCH=wasm` had
+no lane and did not build, which stopped being true at #684 and stayed in the
+README afterwards.
 
 ## Try it in one command
 
