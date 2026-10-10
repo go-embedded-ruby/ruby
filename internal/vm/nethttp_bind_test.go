@@ -296,8 +296,17 @@ func TestNetHTTPErrors(t *testing.T) {
 		{`begin; Net::HTTP.post_form(URI("http://x/")); rescue ArgumentError; puts "formarity"; end`, "formarity"},
 		// #request with no argument.
 		{`begin; Net::HTTP.new("x",1).request; rescue ArgumentError; puts "reqarity"; end`, "reqarity"},
-		// A refused connection surfaces as SocketError.
-		{fmt.Sprintf(`begin; Net::HTTP.get(URI("http://%s/")); rescue SocketError; puts "refused"; end`, refused), "refused"},
+		// A refused connection surfaces as Errno::ECONNREFUSED, which is what MRI
+		// 4.0.7 raises and what the ordinary retry idiom rescues. This case read
+		// `rescue SocketError` until #772: a test that pins the gap shut, green
+		// exactly while the defect lives, so fixing the tool turned it red.
+		//
+		// Both classes are asserted, and separately: SocketError alone would also
+		// pass if every failure went back to being SocketError, and
+		// Errno::ECONNREFUSED alone would not notice a name failure being given
+		// the same class.
+		{fmt.Sprintf(`begin; Net::HTTP.get(URI("http://%s/")); rescue Errno::ECONNREFUSED; puts "refused"; end`, refused), "refused"},
+		{`begin; Net::HTTP.get(URI("http://no-such-host.invalid/")); rescue Socket::ResolutionError; puts "noname"; end`, "noname"},
 		// A non-HTTP response surfaces as Net::HTTPBadResponse.
 		{fmt.Sprintf(`begin; Net::HTTP.get(URI("http://%s/")); rescue Net::HTTPBadResponse; puts "badresp"; end`, bad.Addr().String()), "badresp"},
 	}
@@ -970,6 +979,11 @@ p h.proxy_pass`)
 // TestNetHTTPDialXferError covers nethttpDialXfer's proxy dial-error arms (both the
 // plain-http and the CONNECT-tunnel dial) against a refused proxy endpoint, via a
 // started instance so the persistent dial path is taken.
+//
+// All three arms rescue Errno::ECONNREFUSED since #772. They read
+// `rescue SocketError`, which was green exactly while every way of failing to
+// reach a peer arrived as one class -- so the fix turned them red, and the
+// right answer was to assert MRI's class rather than to loosen them.
 func TestNetHTTPDialXferError(t *testing.T) {
 	ln, _ := net.Listen("tcp", "127.0.0.1:0")
 	refused := ln.Addr().(*net.TCPAddr)
@@ -979,7 +993,7 @@ func TestNetHTTPDialXferError(t *testing.T) {
 	// Plain-http proxy dial refused.
 	got := runSrc(t, fmt.Sprintf(`require "net/http"
 h = Net::HTTP.new("backend", 80, "127.0.0.1", %s)
-begin; h.get("/"); rescue SocketError; puts "httpdial"; end`, port))
+begin; h.get("/"); rescue Errno::ECONNREFUSED; puts "httpdial"; end`, port))
 	if got != "httpdial" {
 		t.Fatalf("proxy http dial = %q, want httpdial", got)
 	}
@@ -987,14 +1001,14 @@ begin; h.get("/"); rescue SocketError; puts "httpdial"; end`, port))
 	got = runSrc(t, fmt.Sprintf(`require "net/http"
 h = Net::HTTP.new("backend", 443, "127.0.0.1", %s)
 h.use_ssl = true
-begin; h.get("/"); rescue SocketError; puts "connectdial"; end`, port))
+begin; h.get("/"); rescue Errno::ECONNREFUSED; puts "connectdial"; end`, port))
 	if got != "connectdial" {
 		t.Fatalf("proxy connect dial = %q, want connectdial", got)
 	}
 	// Direct (non-proxy) started-instance dial refused (persistent open-error arm).
 	got = runSrc(t, fmt.Sprintf(`require "net/http"
 h = Net::HTTP.new("127.0.0.1", %s)
-begin; h.start { h.get("/") }; rescue SocketError; puts "directdial"; end`, port))
+begin; h.start { h.get("/") }; rescue Errno::ECONNREFUSED; puts "directdial"; end`, port))
 	if got != "directdial" {
 		t.Fatalf("direct started dial = %q, want directdial", got)
 	}

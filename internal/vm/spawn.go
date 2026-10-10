@@ -452,6 +452,20 @@ func (vm *VM) runForkBlock(blk *Proc) (code int) {
 				code = s.code
 				return
 			}
+			// A SystemExit raised inside the block is the CHILD asking to stop,
+			// and under a real fork it stops only the child. Letting it through
+			// ended the WHOLE program at the fork call: measured on #774,
+			// `fork { exit 7 }` never reached the line after the fork and the
+			// process exited 7, where MRI runs on and reports status 7 through
+			// Process.wait2.
+			//
+			// Catching it here is what the in-process model means rather than a
+			// departure from it: the block IS the child, so the child's exit is
+			// this function returning the status it asked for.
+			if rerr, ok := r.(RubyError); ok && vm.classIsA(rerr.Class, "SystemExit") {
+				code = int(vm.exitStatusOf(rerr.Obj))
+				return
+			}
 			panic(r)
 		}
 	}()

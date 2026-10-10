@@ -725,7 +725,12 @@ func nethttpNetConn(s streamIO) net.Conn {
 
 // raiseTransportErr maps a transport error to the MRI exception: an i/o timeout
 // during open/read/write raises Net::OpenTimeout / Net::ReadTimeout /
-// Net::WriteTimeout; anything else raises SocketError.
+// Net::WriteTimeout.
+//
+// Anything else goes through raiseDialErr, which keeps the errno Go carried
+// instead of flattening every failure into SocketError. Net::HTTP against a
+// shut port is the shape #772 was filed on: MRI raises Errno::ECONNREFUSED
+// there, and the ordinary retry idiom rescues exactly that class.
 func (vm *VM) raiseTransportErr(err error, phase string) {
 	if ne, ok := err.(net.Error); ok && ne.Timeout() {
 		switch phase {
@@ -737,7 +742,10 @@ func (vm *VM) raiseTransportErr(err error, phase string) {
 			raise("Net::ReadTimeout", "execution expired")
 		}
 	}
-	raise("SocketError", "%s", err.Error())
+	// No connect(2) suffix here: the phase is not always a connect, and Go's
+	// text already names the address (`dial tcp 127.0.0.1:1: …`). A message
+	// naming a call that did not happen is worse than a plain one.
+	raiseDialErr(err, "")
 }
 
 // basicAuthHeader builds an HTTP Basic credential value for Proxy-Authorization.
