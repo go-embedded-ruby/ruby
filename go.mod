@@ -1,6 +1,6 @@
 module github.com/go-embedded-ruby/ruby
 
-go 1.27.1
+go 1.27.2
 
 require (
 	github.com/alicebob/miniredis/v2 v2.39.0
@@ -428,7 +428,7 @@ require (
 	golang.org/x/exp v0.0.0-20260218203240-3dfff04db8fa // indirect
 	golang.org/x/image v0.46.0 // indirect
 	golang.org/x/mod v0.41.0 // indirect
-	golang.org/x/net v0.59.0 // indirect
+	golang.org/x/net v0.60.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect
 	golang.org/x/telemetry v0.0.0-20260908163034-4bcc4b2ee518 // indirect
 	golang.org/x/term v0.46.0 // indirect
