@@ -34,14 +34,34 @@ func TestReadmeGoBadgeMatchesTheModuleFloor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading README.md: %v", err)
 	}
-	// The badge is shields.io with the `+` URL-encoded: go-1.27.1%2B
-	badge := regexp.MustCompile(`badge/go-(\d+\.\d+(?:\.\d+)?)%2B`).FindSubmatch(readme)
-	if badge == nil {
-		t.Fatalf("README.md has no Go version badge; expected one claiming %s", floor)
-	}
-	if got := string(badge[1]); got != floor {
-		t.Errorf("README Go badge claims %s, go.mod requires %s\n  update the badge to go-%s%%2B",
-			got, floor, floor)
+	// A badge that READS go.mod cannot go stale, so it is not checked for a
+	// value: the answer to a number that rots is to stop restating it, not to
+	// keep correcting it. shields.io's github/go-mod/go-version endpoint renders
+	// the directive directly -- verified against this repository, where it shows
+	// "Go: v1.27.1" -- which takes the badge out of the maintenance loop.
+	//
+	// What turned that from a preference into a fix: on 2026-10-10 Renovate
+	// FORCE-PUSHED its branch over a commit that had corrected the literal badge
+	// and gone green on every lane, reinstating 1.27.1 against a 1.27.2
+	// directive. A number a human has to retype is a number that comes back.
+	dynamic := regexp.MustCompile(`img\.shields\.io/github/go-mod/go-version/`).Match(readme)
+	literalBadge := regexp.MustCompile(`badge/go-(\d+\.\d+(?:\.\d+)?)%2B`).FindSubmatch(readme)
+	switch {
+	case dynamic:
+		// Nothing to compare against. Guard the replacement instead: a literal
+		// badge left beside the dynamic one would be a second, rottable copy.
+		if literalBadge != nil {
+			t.Errorf("README has BOTH a dynamic Go badge and a literal one claiming %s; "+
+				"the literal one can go stale, which is the thing the dynamic one removes",
+				literalBadge[1])
+		}
+	case literalBadge == nil:
+		t.Fatalf("README.md has no Go version badge, literal or dynamic; expected one claiming %s", floor)
+	default:
+		if got := string(literalBadge[1]); got != floor {
+			t.Errorf("README Go badge claims %s, go.mod requires %s\n  update the badge to go-%s%%2B",
+				got, floor, floor)
+		}
 	}
 
 	// The badge is not the only place the README states the floor, and a guard
@@ -64,8 +84,21 @@ func TestReadmeGoBadgeMatchesTheModuleFloor(t *testing.T) {
 				m[1], strings.TrimSpace(m[0]), floor)
 		}
 	}
-	if found < 2 {
-		t.Errorf("found %d statements of the Go minimum in README.md, expected at least 2 "+
-			"(the badge and the prose requirement); if one was removed on purpose, lower this", found)
+	// How many hand-written statements must remain depends on whether the badge
+	// is still one of them. With a dynamic badge there is exactly one copy left
+	// to keep honest, and demanding two would force someone to add a second
+	// rottable number back -- which is the opposite of the point.
+	//
+	// The floor is 1 either way, never 0: a README that states the minimum
+	// NOWHERE in prose would pass a check for "no wrong statement" by saying
+	// nothing, and a reader deciding whether they can depend on the module needs
+	// the number on the page.
+	want := 2
+	if dynamic {
+		want = 1
+	}
+	if found < want {
+		t.Errorf("found %d statement(s) of the Go minimum in README.md, expected at least %d "+
+			"(dynamic badge: %v); if one was removed on purpose, lower this", found, want, dynamic)
 	}
 }
