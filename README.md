@@ -718,7 +718,7 @@ unreleased work.)
 
 ## Quick start
 
-Requires **Go 1.27.1+**. From a checkout:
+Requires **Go 1.27.2+**. From a checkout:
 
 ```console
 $ go build -o rbgo ./cmd/rbgo          # CGO_ENABLED=0 is the default here
