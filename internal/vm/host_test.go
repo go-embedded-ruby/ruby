@@ -2,7 +2,6 @@ package vm_test
 
 import (
 	"bytes"
-	"strings"
 	"testing"
 
 	"github.com/go-embedded-ruby/ruby/internal/compiler"
@@ -45,26 +44,5 @@ func TestSetConst(t *testing.T) {
 	}
 	if out != "HI\n" {
 		t.Fatalf("got %q, want %q", out, "HI\n")
-	}
-}
-
-// TestNativeFaultBecomesRubyError covers the embedding safety net: a native
-// binding that indexes past a missing argument raises a Go runtime fault, which
-// callNative converts into a rescuable Ruby ArgumentError rather than crashing
-// the host. NDArray.arange needs (start, stop); one argument trips it.
-func TestNativeFaultBecomesRubyError(t *testing.T) {
-	_, err := runProg(t, `NDArray.arange(6)`, nil)
-	if err == nil {
-		t.Fatal("expected an error, got none")
-	}
-	if re, ok := err.(vm.RubyError); !ok || re.Class != "ArgumentError" {
-		t.Fatalf("got %#v, want an ArgumentError", err)
-	}
-	if !strings.Contains(err.Error(), "index out of range") {
-		t.Fatalf("error %q should describe the underlying fault", err.Error())
-	}
-	// Rescuable from Ruby, and the VM keeps running afterwards.
-	if got := eval(t, `p (begin; NDArray.arange(6); rescue ArgumentError; "caught"; end)`); got != "\"caught\"\n" {
-		t.Fatalf("rescue got %q, want %q", got, "\"caught\"\n")
 	}
 }

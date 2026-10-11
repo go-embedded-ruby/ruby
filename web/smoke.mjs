@@ -92,6 +92,20 @@ check("no error from the Errno snippet", errno.error, "");
 const raised = globalThis.rbgoEval('begin; File.open("/nope/nope"); rescue => e; puts e.class; end');
 check("a rescued open of a missing path names its class", raised.output, "Errno::ENOENT\n");
 
+// The go-ndarray playground runs NDArray programs here (Go | Ruby | NumPy), so the
+// binding is exercised in the JS host too: slicing with an ArithmeticSequence, a
+// keepdims reduction, and NumPy's repr. Expected values are NumPy's:
+// np.arange(6.).reshape(2, 3)[:, ::-1] and .sum(1, keepdims=True).
+const ndarray = globalThis.rbgoEval(
+  'm = NDArray.arange(6).reshape(2, 3); p m[true, (-1..) % -1]; p m.sum(1, keepdims: true).shape',
+);
+check(
+  "an NDArray program prints NumPy's repr",
+  ndarray.output,
+  "array([[2., 1., 0.],\n       [5., 4., 3.]])\n[2, 1]\n",
+);
+check("no error from the NDArray snippet", ndarray.error, "");
+
 // A syntax error must come back as an error string, not a crash.
 const bad = globalThis.rbgoEval("1 +");
 check("a syntax error is reported, not fatal", bad.error !== "", true);

@@ -17,8 +17,7 @@ no libruby.
 examples ([what that counts](#runtime-conformance--rubyspec)) — a large and growing
 subset of the language, and **not** a drop-in replacement for CRuby. Read
 [What does not work yet](#what-does-not-work-yet) before you depend on it; the
-embedding API is currently **one function**, and the browser WebAssembly target
-does not build today.
+embedding API is currently **one function**.
 
 This repository is the interpreter: a compiler that lowers Ruby to bytecode, and
 a stack VM (mruby/YARV lineage) that runs it. The Ruby **front-end** (lexer,
@@ -496,13 +495,22 @@ JRuby**):
   reference object), `instance_variable_get`/`set`.
 - **Math:** the `Math` module (`sqrt`/`cbrt`/`exp`/`log`/`log2`/`log10`, the
   trig and hyperbolic functions, `atan2`/`hypot`/`pow`) with `Math::PI`/`Math::E`.
-- **NDArray:** a NumPy-style n-dimensional array — `zeros`/`ones`/`full`/`arange`/
-  `from`, element-wise `+ - * /` with scalar broadcasting, ufuncs
-  (`sqrt`/`exp`/`log`/`sin`/`cos`/`abs`), reductions (`sum`/`mean`/`max`/`min`/
-  `prod`/`argmax`/`argmin`), `matmul`/`dot`, `transpose`/`reshape`/`flatten`,
-  `shape`/`to_a`/`[]` — binding the pure-Go
+- **NDArray:** a NumPy-style n-dimensional array (float64), binding the pure-Go
   [go-ndarray](https://github.com/go-ndarray/ndarray) library, **no cgo / no
-  NumPy**.
+  NumPy** — the API the go-ndarray playground emits for its Ruby column. Creation
+  `zeros`/`ones`/`full`/`arange`/`linspace`/`eye`/`from`; views `reshape` (with
+  `-1`)/`transpose`/`T`/`flatten`/`squeeze`/`expand_dims`, and `dup`/`copy` (a
+  copy of the data); NumPy basic indexing through `a[...]` — an Integer, `true`
+  for `:`, a Range (`1...3`, `1..`, `...3`; inclusive ranges too) or an
+  ArithmeticSequence (`(0..) % 2`, `(-1..) % -1` for `::-1`); element-wise
+  `+ - * / **` with broadcasting (a number on either side),
+  `sqrt`/`exp`/`log`/`sin`/`cos`/`abs`/`square`/`clip`,
+  `NDArray.maximum`/`minimum`; reductions `sum`/`mean`/`max`/`min`/`prod`/
+  `argmax`/`argmin` (whole array, or `(axis, keepdims: true)`) and `cumsum`;
+  `matmul`/`dot`/`NDArray.outer`, `NDArray.concatenate`/`stack` (`axis:`);
+  `shape`/`ndim`/`size`/`to_a` (flat), and `p a` prints NumPy's repr
+  (`array([[0., 1.], ...])`). Every argument is checked: a wrong count or type
+  raises `ArgumentError`/`TypeError`, an index or axis out of range `IndexError`.
 - **Image:** a scikit-image-style image processor — `Image.new`/`load`/`save`,
   pixel `get`/`set`, filters (`gaussian_blur`/`box_blur`/`median`/`sharpen`),
   edges (`sobel`/`prewitt`/`scharr`/`laplacian`/`canny`), morphology
@@ -615,11 +623,11 @@ throughput tracks the underlying driver rather than the interpreter:
   `eval`/`require` calls (if any) would raise in the closed binary, since there
   is no front-end left to compile source at runtime.
 
-- **WebAssembly:** the **WASI** target (`GOOS=wasip1 GOARCH=wasm`) builds and runs,
-  and is gated in CI. The **browser** target (`GOOS=js GOARCH=wasm`) does **not**
-  currently build — the playground under `cmd/wasm`, the `JS` bridge and
-  `rbgo build --closed --target wasm` are all blocked behind one compile error in
-  `internal/vm`. See [WebAssembly](#webassembly) and *What does not work yet*.
+- **WebAssembly:** both targets build and are gated in CI: **WASI**
+  (`GOOS=wasip1 GOARCH=wasm`) is built and run under wazero, and the **browser**
+  target (`GOOS=js GOARCH=wasm`, the playground under `cmd/wasm` and the `JS`
+  bridge) is built and run in node by `web/smoke.mjs`. See
+  [WebAssembly](#webassembly).
 
 ### What does not work yet
 
@@ -689,7 +697,7 @@ Otherwise:
 | **linux, macOS, windows** | the full suite under `-race`. The **100 % coverage gate** is enforced on linux and macOS only — a few POSIX-only paths (opening `/dev/null` as a character device) are unreachable on windows, so its coverage is structurally below 100 % |
 | **amd64, arm64** | `go test ./...` on native runners |
 | **wasip1/wasm** | built with `CGO_ENABLED=0 GOOS=wasip1 GOARCH=wasm` and **run** under [wazero](https://wazero.io), a pure-Go runtime — verified here: `wazero run rbgo.wasm -e 'puts (1..10).sum'` prints `55` |
-| **js/wasm (browser)** | `CGO_ENABLED=0 GOOS=js GOARCH=wasm go build ./...` plus `go vet` over `./cmd/wasm ./cmd/rbgo ./internal/vm` (`wasm (js, browser)` in `ci.yml`). Added with #684, which fixed the three `syscall` constants the `js` port does not define |
+| **js/wasm (browser)** | `CGO_ENABLED=0 GOOS=js GOARCH=wasm go build ./...` plus `go vet` over `./cmd/wasm ./cmd/rbgo ./internal/vm`, then the playground module is **run** in node by `web/smoke.mjs` (`wasm (js, browser)` in `ci.yml`). Added with #684, which fixed the three `syscall` constants the `js` port does not define |
 
 **Not on the pull-request path** — validated on a nightly schedule instead:
 `riscv64`, `loong64`, `ppc64le` and `s390x`, under QEMU
@@ -884,10 +892,16 @@ $ wazero run rbgo.wasm -e 'puts (1..10).sum'
 55
 ```
 
-**The browser target (`GOOS=js GOARCH=wasm`) does not currently build** — see
-*What does not work yet*. The playground under `./cmd/wasm`, the `JS` bridge and
-`rbgo build --closed --target wasm` are all blocked behind that compile error, so
-treat the browser story as unavailable until it is fixed.
+**The browser target (`GOOS=js GOARCH=wasm`) builds and is gated in CI** (since
+#684). The `wasm (js, browser)` lane builds `./...` for js/wasm, builds the
+playground module from `./cmd/wasm`, and runs it in node with Go's own
+`wasm_exec.js` (`web/smoke.mjs`), asserting that Ruby — including an `NDArray`
+program — actually ran:
+
+```console
+$ CGO_ENABLED=0 GOOS=js GOARCH=wasm go build -o web/rbgo.wasm ./cmd/wasm
+$ node web/smoke.mjs web/rbgo.wasm
+```
 
 On any wasm target the gem backends that need real sockets or OS facilities are
 compiled out (`grpc`, `nats`, `kafka`, `mysql2`, `mongo`/`bson`, `arrow`,

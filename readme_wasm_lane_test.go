@@ -30,6 +30,9 @@ import (
 // already here: the README says a target does not build, while ci.yml builds it.
 func TestReadmeDoesNotContradictTheWasmLane(t *testing.T) {
 	readme := readFile(t, "README.md")
+	// flat is the README with Markdown bold markers dropped and every run of
+	// whitespace (line breaks included) collapsed to one space.
+	flat := strings.Join(strings.Fields(strings.ReplaceAll(readme, "**", "")), " ")
 	ci := readFile(t, ".github/workflows/ci.yml")
 
 	// Is the browser target gated? Match the build command rather than the lane
@@ -50,10 +53,17 @@ func TestReadmeDoesNotContradictTheWasmLane(t *testing.T) {
 			"ci.yml builds GOOS=js GOARCH=wasm on every pull request"},
 		{"The browser WebAssembly target does not currently build",
 			"ci.yml builds GOOS=js GOARCH=wasm on every pull request"},
+		// The wording that outlived #684 in three more places (the intro, "Supported
+		// today" and the WebAssembly section), across line breaks and bold markers --
+		// which is why the README is compared in its flattened form below.
+		{"browser WebAssembly target does not build today",
+			"ci.yml builds GOOS=js GOARCH=wasm on every pull request"},
+		{"(`GOOS=js GOARCH=wasm`) does not currently build",
+			"ci.yml builds GOOS=js GOARCH=wasm on every pull request"},
 		{"no CI lane catches it, because only the",
 			"the js/wasm lane catches exactly this"},
 	} {
-		if strings.Contains(readme, claim.phrase) {
+		if strings.Contains(flat, claim.phrase) {
 			t.Errorf("README.md claims %q, but %s.\n"+
 				"Either the claim is stale and should go, or the lane should, "+
 				"but the repository must not ship both.", claim.phrase, claim.why)
