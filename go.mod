@@ -11,12 +11,12 @@ require (
 	github.com/go-composites/bag v0.0.0-20261001005725-fcf324b93f95
 	github.com/go-composites/result v0.0.0-20260927170344-f2c7344faeef
 	github.com/go-composites/time v0.0.0-20260929013028-aa3c57ae1371
-	github.com/go-fft/fft v0.1.14
+	github.com/go-fft/fft v0.23.0
 	github.com/go-images/images v0.0.0-20260927173152-87444e36aac4
 	github.com/go-kramdown/kramdown v0.2.0
 	github.com/go-liquid/liquid v0.1.1
 	github.com/go-mustache/mustache v0.1.0
-	github.com/go-ndarray/ndarray v0.3.0
+	github.com/go-ndarray/ndarray v0.11.0
 	github.com/go-nokogiri/nokogiri v0.1.0
 	github.com/go-rouge/rouge v0.3.0
 	github.com/go-ruby-aasm/aasm v0.0.0-20260717061120-cec0976ec205

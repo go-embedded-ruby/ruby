@@ -51,7 +51,6 @@ internal/vm/io.go	inspectStr	83.3%
 internal/vm/ipaddr.go	ToS	0.0%
 internal/vm/matrix.go	ToS	0.0%
 internal/vm/matrix.go	ToS#2	0.0%
-internal/vm/ndarray.go	ToS	0.0%
 internal/vm/nethttp.go	registerNetHTTP	96.0%
 internal/vm/object_model.go	ToS	0.0%
 internal/vm/object_model.go	classOf	99.5%
