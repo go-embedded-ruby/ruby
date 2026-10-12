@@ -166,9 +166,15 @@ func (errStub) Error() string { return "boom" }
 // Match#handler / Match#route where a matched route carries no handler value.
 func TestGrapeRouteHandlerNil(t *testing.T) {
 	r := &GrapeRoute{rt: grape.NewRoute("GET", "/x", nil), handler: nil}
-	// handler is nil -> the accessor returns Ruby nil, not a Go nil interface.
+	// Assert it, rather than skipping when it is not so. This read
+	//
+	//	if r.handler != nil { t.Skip("handler set") }
+	//
+	// which cannot fire -- handler is set to nil on the line above -- so the
+	// test read as conditional when it is not, and a future change that DID
+	// leave a handler here would have gone quiet instead of red (#687).
 	if r.handler != nil {
-		t.Skip("handler set")
+		t.Fatalf("handler = %v, want nil: the literal above sets it to nil", r.handler)
 	}
 	m := &GrapeMatch{} // no route, no handler
 	if m.route != nil || m.handler != nil {
