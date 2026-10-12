@@ -22,6 +22,7 @@ import (
 	stdtime "time"
 	"weak"
 
+	"github.com/go-ndarray/ndarray/random"
 	timecop "github.com/go-ruby-timecop/timecop"
 
 	"github.com/go-embedded-ruby/ruby/internal/bytecode"
@@ -575,6 +576,8 @@ type VM struct {
 	cInteger, cFloat, cString, cSymbol *RClass
 	cComplex, cRational                *RClass
 	cNDArray, cImage                   *RClass
+	cContDist, cDiscDist               *RClass           // Stats::Continuous and Stats::Discrete (the frozen distributions of go-statistics)
+	statsRNG                           *random.Generator // the stream Stats #rvs draws from when no seed: is given
 	cSet                               *RClass
 	cPStore                            *RClass // the PStore class (require "pstore"), backed by go-ruby-pstore
 	cPStoreError                       *RClass // PStore::Error

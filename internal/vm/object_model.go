@@ -1213,6 +1213,10 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.cRational
 	case *NDArray:
 		return vm.cNDArray
+	case *RContDist:
+		return vm.cContDist
+	case *RDiscDist:
+		return vm.cDiscDist
 	case *WeakMapObj:
 		return x.cls
 	case *WeakKeyMapObj:
