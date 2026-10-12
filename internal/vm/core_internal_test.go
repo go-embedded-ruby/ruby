@@ -113,6 +113,10 @@ func TestRaiseBuildUnavailableFormatsTheNameVerbatim(t *testing.T) {
 	}
 }
 
+// CoreBuild exposes coreBuild to the external vm_test package (see
+// core_external_test.go); it exists only in the test binary.
+var CoreBuild = coreBuild
+
 // skipOnCore skips a test that measures something the rbgo_core build leaves
 // out on purpose. The default build's lanes still run it.
 func skipOnCore(t *testing.T, why string) {

@@ -156,6 +156,7 @@ puts(d > 0.0 && d < 30.0)
 // time.Unix(sec, 0), so freezing at an instant carrying a sub-second silently
 // moved the clock back to the start of that second.
 func TestTimecopFreezeKeepsSubSecond(t *testing.T) {
+	skipOnCore(t, "timecop is not part of core")
 	withPinnedNow(func() {
 		const src = `
 require "timecop"
