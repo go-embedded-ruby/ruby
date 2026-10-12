@@ -601,75 +601,75 @@ type VM struct {
 	// Time.now already used), so a program that never requires "timecop" is
 	// unaffected. require "timecop" installs the Ruby Timecop module (timecop.go),
 	// whose freeze / travel / scale push mock-time frames onto this clock.
-	clock                *timecop.Clock
-	cFileStat            *RClass
-	cBigDecimal          *RClass
-	cBenchmarkTms        *RClass // Benchmark::Tms (require "benchmark"), backed by go-ruby-benchmark
-	cBenchmarkReport     *RClass // Benchmark::Report (require "benchmark")
-	cBenchmarkJob        *RClass // Benchmark::Job (require "benchmark")
-	cDate                *RClass
-	cDateTime            *RClass
-	cBag                 *RClass
-	cStringScanner       *RClass
-	cOptionParser        *RClass
-	cURI                 *RClass                          // the URI module (require "uri"), backed by go-ruby-uri
-	cURIGeneric          *RClass                          // URI::Generic, the base URI class wrapping a *uri.URI
-	cCSV                 *RClass                          // the CSV class (require "csv"), backed by go-ruby-csv
-	cCSVRow              *RClass                          // CSV::Row, wrapping a *csv.Row
-	cCSVTable            *RClass                          // CSV::Table, wrapping a *csv.Table
-	cLogger              *RClass                          // the Logger class (require "logger"), backed by go-ruby-logger
-	cLoggerFormatter     *RClass                          // Logger::Formatter, wrapping a *Logger wrapper's formatter
-	cLoggerSeverity      *RClass                          // Logger::Severity, the severity-constant module
-	cREXML               *RClass                          // the REXML module (require "rexml/document"), backed by go-ruby-rexml
-	cREXMLDocument       *RClass                          // REXML::Document, wrapping a *rexml.Document
-	cREXMLElement        *RClass                          // REXML::Element, wrapping a *rexml.Element
-	cREXMLElements       *RClass                          // REXML::Elements, the child-navigation proxy
-	cREXMLAttributes     *RClass                          // REXML::Attributes, wrapping a *rexml.Attributes
-	cREXMLText           *RClass                          // REXML::Text, wrapping a *rexml.Text
-	cREXMLComment        *RClass                          // REXML::Comment, wrapping a *rexml.Comment
-	cREXMLCData          *RClass                          // REXML::CData, wrapping a *rexml.CData
-	cREXMLInstruction    *RClass                          // REXML::Instruction, wrapping a *rexml.Instruction
-	cREXMLDocType        *RClass                          // REXML::DocType, wrapping a *rexml.DocType
-	cREXMLPretty         *RClass                          // REXML::Formatters::Pretty serialiser
-	cREXMLXPath          *RClass                          // REXML::XPath module
-	cREXMLParseException *RClass                          // REXML::ParseException < StandardError
-	cSinatraBase         *RClass                          // Sinatra::Base (require "sinatra/base"), backed by go-ruby-sinatra
-	cSinatraCtx          *RClass                          // Sinatra::Base::Context, the self a route/filter block runs against
-	cSinatraSettings     *RClass                          // Sinatra::Base::Settings, the handler's `settings` view
-	sinatraDefaultSecret []byte                           // per-VM fallback session-signing key when no session_secret is set (like MRI Sinatra's random default), generated once
-	cRodaBase            *RClass                          // Roda (require "roda"), the routing-tree app superclass, backed by go-ruby-roda
-	cRodaRequest         *RClass                          // Roda::RodaRequest, the self a route/matcher block runs against
-	cRodaResponse        *RClass                          // Roda::RodaResponse, the mutable response a route block writes into
-	rodaRoutes           map[*RClass]*Proc                // per-Roda-subclass top-level route block (route do |r| … end)
-	cAsyncTask           *RClass                          // Async::Task, one node of the structured-concurrency tree, backed by go-ruby-async
-	wardenStrategies     map[string]*RClass               // Warden::Strategies.add(name){…} registry: label -> anon subclass of Warden::Strategies::Base
-	omniAuthStrategies   map[string]*RClass               // OmniAuth provider registry: name -> strategy class (from OmniAuth::Strategies.add or provider Class)
-	omniAuthProviderOpts map[string]map[string]any        // OmniAuth per-provider option args (provider :name, key: …), surfaced to a strategy as #options
-	ajStack                 []*RObject                         // ActiveJob: instance stack the inline #perform seam reads
-	ajLastResult             object.Value                       // ActiveJob: last #perform return value (perform_now's result)
-	cActionMailerBase        *RClass                            // ActionMailer::Base, the superclass every mailer subclasses (require "action_mailer"), backed by go-ruby-actionmailer
-	cActionMailerDelivery    *RClass                            // ActionMailer::MessageDelivery, the lazy proxy a mailer action returns
-	cActionMailerAttachments *RClass                            // the internal `attachments` proxy class (Mail::AttachmentsList analogue)
-	amDeliveries             *object.Array                      // ActionMailer: the shared ActionMailer::Base.deliveries Array the :test delivery method appends to
-	amRenderer               object.Value                       // ActionMailer: the Ruby renderer the RenderBody seam sends #render to (Action View wiring / test stub)
-	amEnqueuer               object.Value                       // ActionMailer: the Ruby enqueuer the deliver_later seam sends #enqueue to (Active Job wiring / test stub)
-	cACChannelBase           *RClass                            // ActionCable::Channel::Base, the superclass a subscription's channel subclass extends, backed by go-ruby-actioncable
-	acServer                 object.Value                       // memoized ActionCable.server singleton (an ActionCable::Server over an in-process async adapter)
-	cHanamiRouter            *RClass                            // Hanami::Router (require "hanami/router"), backed by go-ruby-hanami; wraps a *hanami.Router
-	cHanamiAction            *RClass                            // Hanami::Action (require "hanami/action"), the action-lifecycle superclass a user subclasses
-	cHanamiRequest           *RClass                            // Hanami::Action::Request, the request handed to a Hanami action's #handle
-	cHanamiResponse          *RClass                            // Hanami::Action::Response, the mutable response a Hanami action's #handle writes into
-	cHanamiFlash             *RClass                            // Hanami::Action::Flash, the two-generation flash store on the request/response
-	cACRouteSet              *RClass                            // ActionDispatch::Routing::RouteSet (require "action_dispatch"), backed by go-ruby-actionpack/routing
-	cACMapper                *RClass                            // ActionDispatch::Routing::Mapper, the self the routes DSL (draw) runs against
-	cACRequest               *RClass                            // ActionDispatch::Request, over a Rack env
-	cACResponse              *RClass                            // ActionDispatch::Response, the mutable Rack response
-	cACParameters            *RClass                            // ActionController::Parameters (strong parameters)
-	cACControllerBase        *RClass                            // ActionController::Base (require "action_controller"), the controller superclass a user subclasses
-	cMinitestSpec            *RClass                            // Minitest::Spec, the spec-DSL subclass of Minitest::Test
-	minitestRunnables        []*RClass                          // Minitest::Test subclasses registered via the inherited hook, in definition order (the autorun run set)
-	minitestCurInstance      object.Value                       // the test instance currently running (backs bare must_*/wont_* and _)
-	minitestAutorunDone      bool                               // guards the require "minitest/autorun" at_exit hook against a double run
+	clock                    *timecop.Clock
+	cFileStat                *RClass
+	cBigDecimal              *RClass
+	cBenchmarkTms            *RClass // Benchmark::Tms (require "benchmark"), backed by go-ruby-benchmark
+	cBenchmarkReport         *RClass // Benchmark::Report (require "benchmark")
+	cBenchmarkJob            *RClass // Benchmark::Job (require "benchmark")
+	cDate                    *RClass
+	cDateTime                *RClass
+	cBag                     *RClass
+	cStringScanner           *RClass
+	cOptionParser            *RClass
+	cURI                     *RClass                   // the URI module (require "uri"), backed by go-ruby-uri
+	cURIGeneric              *RClass                   // URI::Generic, the base URI class wrapping a *uri.URI
+	cCSV                     *RClass                   // the CSV class (require "csv"), backed by go-ruby-csv
+	cCSVRow                  *RClass                   // CSV::Row, wrapping a *csv.Row
+	cCSVTable                *RClass                   // CSV::Table, wrapping a *csv.Table
+	cLogger                  *RClass                   // the Logger class (require "logger"), backed by go-ruby-logger
+	cLoggerFormatter         *RClass                   // Logger::Formatter, wrapping a *Logger wrapper's formatter
+	cLoggerSeverity          *RClass                   // Logger::Severity, the severity-constant module
+	cREXML                   *RClass                   // the REXML module (require "rexml/document"), backed by go-ruby-rexml
+	cREXMLDocument           *RClass                   // REXML::Document, wrapping a *rexml.Document
+	cREXMLElement            *RClass                   // REXML::Element, wrapping a *rexml.Element
+	cREXMLElements           *RClass                   // REXML::Elements, the child-navigation proxy
+	cREXMLAttributes         *RClass                   // REXML::Attributes, wrapping a *rexml.Attributes
+	cREXMLText               *RClass                   // REXML::Text, wrapping a *rexml.Text
+	cREXMLComment            *RClass                   // REXML::Comment, wrapping a *rexml.Comment
+	cREXMLCData              *RClass                   // REXML::CData, wrapping a *rexml.CData
+	cREXMLInstruction        *RClass                   // REXML::Instruction, wrapping a *rexml.Instruction
+	cREXMLDocType            *RClass                   // REXML::DocType, wrapping a *rexml.DocType
+	cREXMLPretty             *RClass                   // REXML::Formatters::Pretty serialiser
+	cREXMLXPath              *RClass                   // REXML::XPath module
+	cREXMLParseException     *RClass                   // REXML::ParseException < StandardError
+	cSinatraBase             *RClass                   // Sinatra::Base (require "sinatra/base"), backed by go-ruby-sinatra
+	cSinatraCtx              *RClass                   // Sinatra::Base::Context, the self a route/filter block runs against
+	cSinatraSettings         *RClass                   // Sinatra::Base::Settings, the handler's `settings` view
+	sinatraDefaultSecret     []byte                    // per-VM fallback session-signing key when no session_secret is set (like MRI Sinatra's random default), generated once
+	cRodaBase                *RClass                   // Roda (require "roda"), the routing-tree app superclass, backed by go-ruby-roda
+	cRodaRequest             *RClass                   // Roda::RodaRequest, the self a route/matcher block runs against
+	cRodaResponse            *RClass                   // Roda::RodaResponse, the mutable response a route block writes into
+	rodaRoutes               map[*RClass]*Proc         // per-Roda-subclass top-level route block (route do |r| … end)
+	cAsyncTask               *RClass                   // Async::Task, one node of the structured-concurrency tree, backed by go-ruby-async
+	wardenStrategies         map[string]*RClass        // Warden::Strategies.add(name){…} registry: label -> anon subclass of Warden::Strategies::Base
+	omniAuthStrategies       map[string]*RClass        // OmniAuth provider registry: name -> strategy class (from OmniAuth::Strategies.add or provider Class)
+	omniAuthProviderOpts     map[string]map[string]any // OmniAuth per-provider option args (provider :name, key: …), surfaced to a strategy as #options
+	ajStack                  []*RObject                // ActiveJob: instance stack the inline #perform seam reads
+	ajLastResult             object.Value              // ActiveJob: last #perform return value (perform_now's result)
+	cActionMailerBase        *RClass                   // ActionMailer::Base, the superclass every mailer subclasses (require "action_mailer"), backed by go-ruby-actionmailer
+	cActionMailerDelivery    *RClass                   // ActionMailer::MessageDelivery, the lazy proxy a mailer action returns
+	cActionMailerAttachments *RClass                   // the internal `attachments` proxy class (Mail::AttachmentsList analogue)
+	amDeliveries             *object.Array             // ActionMailer: the shared ActionMailer::Base.deliveries Array the :test delivery method appends to
+	amRenderer               object.Value              // ActionMailer: the Ruby renderer the RenderBody seam sends #render to (Action View wiring / test stub)
+	amEnqueuer               object.Value              // ActionMailer: the Ruby enqueuer the deliver_later seam sends #enqueue to (Active Job wiring / test stub)
+	cACChannelBase           *RClass                   // ActionCable::Channel::Base, the superclass a subscription's channel subclass extends, backed by go-ruby-actioncable
+	acServer                 object.Value              // memoized ActionCable.server singleton (an ActionCable::Server over an in-process async adapter)
+	cHanamiRouter            *RClass                   // Hanami::Router (require "hanami/router"), backed by go-ruby-hanami; wraps a *hanami.Router
+	cHanamiAction            *RClass                   // Hanami::Action (require "hanami/action"), the action-lifecycle superclass a user subclasses
+	cHanamiRequest           *RClass                   // Hanami::Action::Request, the request handed to a Hanami action's #handle
+	cHanamiResponse          *RClass                   // Hanami::Action::Response, the mutable response a Hanami action's #handle writes into
+	cHanamiFlash             *RClass                   // Hanami::Action::Flash, the two-generation flash store on the request/response
+	cACRouteSet              *RClass                   // ActionDispatch::Routing::RouteSet (require "action_dispatch"), backed by go-ruby-actionpack/routing
+	cACMapper                *RClass                   // ActionDispatch::Routing::Mapper, the self the routes DSL (draw) runs against
+	cACRequest               *RClass                   // ActionDispatch::Request, over a Rack env
+	cACResponse              *RClass                   // ActionDispatch::Response, the mutable Rack response
+	cACParameters            *RClass                   // ActionController::Parameters (strong parameters)
+	cACControllerBase        *RClass                   // ActionController::Base (require "action_controller"), the controller superclass a user subclasses
+	cMinitestSpec            *RClass                   // Minitest::Spec, the spec-DSL subclass of Minitest::Test
+	minitestRunnables        []*RClass                 // Minitest::Test subclasses registered via the inherited hook, in definition order (the autorun run set)
+	minitestCurInstance      object.Value              // the test instance currently running (backs bare must_*/wont_* and _)
+	minitestAutorunDone      bool                      // guards the require "minitest/autorun" at_exit hook against a double run
 	cOpenSSLDigest           *RClass
 	cArray, cHash, cRange    *RClass
 	// basicOps records what each specialised operator resolved to at the end of

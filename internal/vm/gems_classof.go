@@ -9,6 +9,7 @@ package vm
 import (
 	rake "github.com/go-ruby-rake/rake"
 
+	"github.com/go-embedded-ruby/ruby/internal/bytecode"
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
 
@@ -762,6 +763,75 @@ func (vm *VM) classOfGem(v object.Value) (*RClass, bool) {
 		return x.cls, true
 	}
 	return nil, false
+}
+
+// gemArith is the operator fast path for IPAddr: ip + n / ip - n shift the
+// address by a whole-number offset (the bitwise & | ~ combinators dispatch as
+// methods), mirroring MRI's IPAddr#+ / IPAddr#-.
+func gemArith(op bytecode.Op, a, b object.Value) (object.Value, bool) {
+	if ai, ok := a.(*IPAddr); ok {
+		return ipaddrOp(op, ai, b), true
+	}
+	return nil, false
+}
+
+// gemDispatchesArith reports the gem values whose arithmetic operator is a
+// Ruby method that needs a live VM, so binaryOp sends it rather than falling
+// into the numeric coercion path:
+//   - a URI (only + is defined, resolving a reference; the binding's merge
+//     needs the VM to wrap the result);
+//   - a Money (+ - * over the go-ruby-money library, raising
+//     Money::DifferentCurrencyError on a currency mismatch);
+//   - a Google::Protobuf::RepeatedField (+ is a new list: the receiver's
+//     elements followed by the other list's);
+//   - an ActiveSupport::SafeBuffer (+ is a new html-safe buffer with the right
+//     operand escaped-unless-safe, so a view can build `f.label + f.text_field`).
+func gemDispatchesArith(a object.Value) bool {
+	switch a.(type) {
+	case *URI, *Money, *ProtobufRepeatedField, *SafeBufferVal:
+		return true
+	}
+	return false
+}
+
+// gemNegate is unary minus for Money: it negates the amount via go-ruby-money.
+func gemNegate(v object.Value) (object.Value, bool) {
+	if n, ok := v.(*Money); ok {
+		return &Money{m: n.m.Neg()}, true
+	}
+	return nil, false
+}
+
+// gemValueEqual is value equality for IPAddr and URI.
+func gemValueEqual(a, b object.Value) (bool, bool) {
+	switch av := a.(type) {
+	case *IPAddr:
+		bv, ok := b.(*IPAddr)
+		return ok && av.ip.Eql(bv.ip), true
+	case *URI:
+		return uriEqual(av, b), true
+	}
+	return false, false
+}
+
+// gemHasCustomEq reports the gem value types whose == compares by value, so it
+// must be dispatched rather than fall to pointer identity:
+//   - BCrypt::Password (compares a candidate secret against the stored hash);
+//   - Money (fractional amount and currency) and Money::Currency (by id);
+//   - Dry::Struct (attributes, via go-ruby-dry-struct's Struct.Eql);
+//   - Google::Protobuf messages and their RepeatedField / Map containers
+//     (proto.Equal / element-wise, through go-ruby-protobuf);
+//   - SemanticPuppet::Version (SemVer precedence, via go-ruby-semantic-puppet);
+//   - Rails::StringInquirer and Rails::EnvironmentInquirer (the wrapped
+//     string: env == "production").
+func gemHasCustomEq(v object.Value) bool {
+	switch v.(type) {
+	case *BCryptPassword, *Money, *Currency, *DryStruct,
+		*ProtobufMessage, *ProtobufRepeatedField, *ProtobufMap,
+		*SemVerObj, *StringInquirerVal, *RailsEnvVal:
+		return true
+	}
+	return false
 }
 
 // ivarStoreOfGem is ivarStoreOf's half for the gem value types that carry their

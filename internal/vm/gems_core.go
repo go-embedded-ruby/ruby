@@ -11,6 +11,37 @@
 
 package vm
 
+import (
+	"github.com/go-embedded-ruby/ruby/internal/bytecode"
+	"github.com/go-embedded-ruby/ruby/internal/object"
+)
+
+// The gem seams of arith.go and digest_bind.go (gems_classof.go): no gem
+// value exists on the core build, so each answers "not mine".
+func gemArith(op bytecode.Op, a, b object.Value) (object.Value, bool) {
+	_, _, _ = op, a, b
+	return nil, false
+}
+func gemDispatchesArith(a object.Value) bool        { _ = a; return false }
+func gemNegate(v object.Value) (object.Value, bool) { _ = v; return nil, false }
+func gemValueEqual(a, b object.Value) (bool, bool)  { _, _ = a, b; return false, false }
+func gemHasCustomEq(v object.Value) bool            { _ = v; return false }
+
+// gemState holds no gem state on the core build (gems_state.go).
+type gemState struct{}
+
+// classOfGem: no gem value type exists on the core build (gems_classof.go).
+func (vm *VM) classOfGem(v object.Value) (*RClass, bool) { _, _ = vm, v; return nil, false }
+
+// ivarStoreOfGem: no gem value carries instance variables on the core build.
+func ivarStoreOfGem(self object.Value) (ivarStore, bool) { _ = self; return ivarStore{}, false }
+
+// The binding seams bindings_native.go / bindings_wasm.go fill on the default
+// build: none of their value types can be constructed on the core build.
+func (vm *VM) classOfExtBinding(v object.Value) (*RClass, bool) { _, _ = vm, v; return nil, false }
+func valueEqualExtBinding(a, b object.Value) (bool, bool)       { _, _ = a, b; return false, false }
+func hasCustomEqExtBinding(v object.Value) bool                 { _ = v; return false }
+
 func (vm *VM) registerImageGem()            { _ = vm }
 func (vm *VM) registerNetworkGems()         { _ = vm }
 func (vm *VM) registerTimecopGem()          { _ = vm }
