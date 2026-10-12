@@ -94,6 +94,7 @@ func (vm *VM) bootstrap() {
 	vm.registerMath()
 	vm.registerFFT()
 	vm.registerSpecial()
+	vm.registerStats()
 	vm.registerNDArray()
 	vm.registerArrayEdges()
 	// Image (go-images) is the first of the gems the rbgo_core build leaves out
