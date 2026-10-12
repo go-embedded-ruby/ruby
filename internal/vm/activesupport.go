@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+//go:build !rbgo_core
+
 package vm
 
 import (
@@ -854,12 +856,3 @@ func hashArg(v object.Value) *object.Hash {
 	return h
 }
 
-// hashArgOrRaise returns v as a *Hash or raises the "wrong argument type X
-// (expected Hash)" TypeError that Hash.ruby2_keywords_hash(?) reports.
-func hashArgOrRaise(vm *VM, v object.Value) *object.Hash {
-	h, ok := v.(*object.Hash)
-	if !ok {
-		raise("TypeError", "wrong argument type %s (expected Hash)", vm.classOf(v).name)
-	}
-	return h
-}

@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+//go:build !rbgo_core
+
 package vm
 
 import (
@@ -329,11 +331,3 @@ func acAnyArgs(args []object.Value) []any {
 	return out
 }
 
-// lastHashOrNil returns the trailing keyword-options Hash of an argument list,
-// or nil when the last argument is not a Hash.
-func lastHashOrNil(args []object.Value) *object.Hash {
-	if h, ok := lastHash(args); ok {
-		return h
-	}
-	return nil
-}

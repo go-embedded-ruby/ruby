@@ -26,19 +26,13 @@ import "github.com/go-embedded-ruby/ruby/internal/object"
 var closedUnavailableFeatures = []string{"rubocop"}
 
 // raiseClosedUnavailable raises the LoadError a closed-world build produces when a
-// program requires one of the gems compiled out of it. It clears the just-set
-// loaded marker first (require.go marks a provided feature loaded before invoking
-// its hook), so a retried require re-raises rather than silently returning false.
+// program requires one of the gems compiled out of it.
 //
-// This is deliberately the same SHAPE as raiseWasmUnavailable in
-// backends_unavailable.go — same class, same MRI "cannot load such file" wording,
-// same marker reset, differing only in the reason named. The two are not merged
-// into one helper taking the reason as an argument because that would mean editing
-// backends_unavailable.go, which is not this change's to touch;
-// TestClosedAndWasmUnavailableAgreeOnShape pins them to one another so the pair
-// cannot drift apart while they stay separate. A third condition should collapse
-// all three.
+// It used to be a second copy of raiseWasmUnavailable's body, kept the same SHAPE
+// by TestClosedAndWasmUnavailableAgreeOnShape, with a note that a third condition
+// should collapse all three. The rbgo_core build was that third condition: all
+// three now call raiseBuildUnavailable (core.go) and differ only in the build they
+// name. The shape test stays, as the proof the collapse changed no message.
 func (vm *VM) raiseClosedUnavailable(feature string) object.Value {
-	delete(vm.loaded, "feature:"+feature)
-	return raise("LoadError", "cannot load such file -- %s (not available in the closed-world build)", feature)
+	return vm.raiseBuildUnavailable(feature, "the closed-world build")
 }

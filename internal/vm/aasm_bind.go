@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+//go:build !rbgo_core
+
 package vm
 
 import (
@@ -173,16 +175,6 @@ func (vm *VM) aasmErrToRuby(err error) object.Value {
 		return vm.buildException(re.re.Class, re.re.Message)
 	}
 	return vm.buildException("AASM::Error", err.Error())
-}
-
-// buildException constructs a Ruby exception object of the named class (falling
-// back to RuntimeError when unknown) with the given message.
-func (vm *VM) buildException(class, msg string) object.Value {
-	cls, ok := vm.consts[class].(*RClass)
-	if !ok {
-		cls = vm.consts["RuntimeError"].(*RClass)
-	}
-	return vm.send(cls, "new", []object.Value{object.NewString(msg)}, nil)
 }
 
 // aasmGuard binds a guard spec to obj: it runs the Ruby predicate under the GVL

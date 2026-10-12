@@ -2136,6 +2136,13 @@ end
 # caller-supplied binding, so the template sees the caller's locals (the same
 # approach MRI takes). The ERB class and ERB::Util are created natively (erb.go);
 # this reopens ERB to add the interpreter-bound public API.
+#
+# This reopen, and the Slim, Haml and OptionParser ones below, each run only when
+# the native class exists. The rbgo_core build (core.go) registers none of the
+# four, and reopening them there would define a half class whose methods call a
+# native __compile that is not there. The default build defines all four before
+# the prelude runs, so there the guard is always true and changes nothing.
+if defined?(::ERB)
 class ERB
 
   attr_reader :src, :encoding
@@ -2186,6 +2193,7 @@ class ERB
     binding
   end
 end
+end # defined?(::ERB)
 
 # ---------------------------------------------------------------------------
 # Slim (require "slim"): the Slim template engine (the `slim` gem). Slim compiles
@@ -2200,6 +2208,7 @@ end
 # source. Slim::Template / Slim::Engine are created natively; this reopens
 # Slim::Template to add the public compile-to-eval API.
 # ---------------------------------------------------------------------------
+if defined?(::Slim) # absent from the rbgo_core build; see the note above ERB
 module Slim
   module Helpers
     # Safe wraps a value the compiled source marked HTML-safe (an "attr==expr"
@@ -2298,6 +2307,7 @@ module Slim
   # fixed it printed "already initialized constant Slim::Engine" on EVERY run,
   # a warning MRI never emits.
 end
+end # defined?(::Slim)
 
 # ---------------------------------------------------------------------------
 # Haml (require "haml"): the Haml template engine (the `haml` gem), the same
@@ -2308,6 +2318,7 @@ end
 # below (the go-ruby-haml reference implementations). Haml::Template / Haml::Engine
 # are created natively; this reopens Haml::Template to add the public API.
 # ---------------------------------------------------------------------------
+if defined?(::Haml) # absent from the rbgo_core build; see the note above ERB
 module Haml
   module Util
     # escape_html mirrors Haml::Util.escape_html: the five-character HTML entity
@@ -2385,6 +2396,7 @@ module Haml
   # Haml::Engine: as with Slim above, haml.go's registerHaml already binds it to
   # this Template class, so assigning it here only warned.
 end
+end # defined?(::Haml)
 
 # ---------------------------------------------------------------------------
 # OptionParser (optparse): a command-line option parser matching MRI's surface —
@@ -2408,6 +2420,7 @@ end
 # constructible OptionParser::InvalidArgument.new(...) form) that programs and
 # tests touch directly, which the interpreter-independent library does not model.
 # This reopens the native OptionParser class to add them.
+if defined?(::OptionParser) # absent from the rbgo_core build; see the note above ERB
 class OptionParser
   class ParseError < StandardError
     attr_reader :args
@@ -2452,6 +2465,7 @@ class OptionParser
   Switch = Struct.new(:short, :long, :arg, :mandatory, :optional, :negatable,
                       :conv, :desc, :block)
 end
+end # defined?(::OptionParser)
 
 # OptParse: optparse.go's registerOptionParser already binds both OptParse and
 # OptionParser::OptParse to this class, so assigning it here only warned.

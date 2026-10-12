@@ -8,8 +8,6 @@ import (
 	"strings"
 	"sync"
 
-	rake "github.com/go-ruby-rake/rake"
-
 	"github.com/go-embedded-ruby/ruby/internal/bytecode"
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
@@ -1215,108 +1213,22 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.cRational
 	case *NDArray:
 		return vm.cNDArray
-	case *Image:
-		return vm.cImage
 	case *WeakMapObj:
 		return x.cls
 	case *WeakKeyMapObj:
 		return x.cls
 	case *StringScanner:
 		return vm.cStringScanner
-	case *OptionParser:
-		return vm.cOptionParser
-	case *URI:
-		// A URI wrapper carries its own Ruby class (URI::Generic or a scheme
-		// subclass such as URI::HTTP), so it reports that class for `class` /
-		// `is_a?` while every instance method lives on URI::Generic.
-		return x.cls
-	case *ALDirectoryObj:
-		return x.cls
-	case *ALConnectionObj:
-		return x.cls
-	case *ALModelObj:
-		return x.cls
-	case *ALRecordObj:
-		return x.cls
-	case *LDAPConn:
-		// The Net::LDAP binding builds for every target (its go-ldap transport is
-		// pure-Go net code that compiles for wasm), so its value types carry their
-		// class here in the shared switch rather than in classOfExtBinding.
-		return x.cls
-	case *LDAPEntry:
-		return x.cls
-	case *LDAPFilter:
-		return x.cls
-	case *LDAPResult:
-		return x.cls
 	case *CSVRow:
 		// A CSV::Row wrapper reports CSV::Row; its instance methods (field/[]/
 		// to_a/to_h/headers/…) live on that class.
 		return vm.cCSVRow
 	case *CSVTable:
 		return vm.cCSVTable
-	case *RackRequest:
-		// A Rack::Request wrapper reports the class stamped on it at construction.
-		return x.cls
-	case *RackResponse:
-		return x.cls
-	case *friendlyIDScope:
-		// The scope object Model.friendly returns; its #find lives on
-		// FriendlyId::FinderMethods (stamped on the scope at construction).
-		return x.cls
-	case *SinatraCtx:
-		// The self a Sinatra route/filter block runs against.
-		return x.cls
-	case *SinatraSettings:
-		return x.cls
-	case *RodaReq:
-		// The self a Roda route/matcher block runs against (Roda::RodaRequest).
-		return x.cls
-	case *RodaResp:
-		return x.cls
-	case *AsyncTask:
-		return x.cls
-	case *AsyncBarrier:
-		return x.cls
-	case *AsyncSemaphore:
-		return x.cls
-	case *AsyncCondition:
-		return x.cls
-	case *AsyncNotification:
-		return x.cls
-	case *AsyncQueue:
-		return x.cls
-	case *AsyncLimitedQueue:
-		return x.cls
-	case *AsyncWaiter:
-		return x.cls
-	case *REXMLDocument:
-		return vm.cREXMLDocument
-	case *REXMLElement:
-		return vm.cREXMLElement
-	case *REXMLElements:
-		return vm.cREXMLElements
-	case *REXMLAttributes:
-		return vm.cREXMLAttributes
-	case *REXMLText:
-		return vm.cREXMLText
-	case *REXMLComment:
-		return vm.cREXMLComment
-	case *REXMLCData:
-		return vm.cREXMLCData
-	case *REXMLInstruction:
-		return vm.cREXMLInstruction
-	case *REXMLDocType:
-		return vm.cREXMLDocType
 	case *csvSink:
 		// The writer CSV.generate yields to its block: it reports CSV so its << /
 		// push methods (defined on the CSV class) dispatch.
 		return vm.cCSV
-	case *rolifyRole:
-		// A rolify role wrapper (user.roles / resource.applied_roles) reports the
-		// Rolify::Role class stamped on it, whose name/resource_type/resource_id/id
-		// methods read the wrapped role.
-		return x.cls
 	case *Logger:
 		// A Logger wrapper reports Logger; its instance methods (add/info/<</…)
 		// live on that class.
@@ -1325,459 +1237,14 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		// A standalone Logger::Formatter (Logger::Formatter.new) reports
 		// Logger::Formatter, whose #call renders one line through the library.
 		return vm.cLoggerFormatter
-	case *GetoptLong:
-		return vm.cGetoptLong
 	case *Set:
 		return vm.cSet
-	case *PStore:
-		return vm.cPStore
-	case *Jbuilder:
-		// A Jbuilder builder reports Jbuilder so its method_missing DSL and bang
-		// methods (defined on that class) dispatch.
-		return vm.consts["Jbuilder"].(*RClass)
-	case *FactoryBotProxy:
-		// The self a factory/trait/transient/nested-factory block runs against; its
-		// method_missing + DSL methods live on FactoryBot::DefinitionProxy.
-		return vm.consts["FactoryBot::DefinitionProxy"].(*RClass)
-	case *FactoryBotTopProxy:
-		// The self a FactoryBot.define block runs against (factory/sequence).
-		return vm.consts["FactoryBot::Syntax::Default::DSL"].(*RClass)
-	case *FactoryBotEvaluator:
-		// The self a dynamic attribute block / callback reads siblings through.
-		return vm.consts["FactoryBot::Evaluator"].(*RClass)
-	case *FacterFact:
-		// The handle Facter[]/Facter.fact returns; #value/#name live on it.
-		return vm.consts["Facter::Util::Fact"].(*RClass)
-	case *FacterResolution:
-		// The self a Facter.add block configures (setcode/confine/has_weight).
-		return vm.consts["Facter::Util::Resolution"].(*RClass)
-	case *HieraObj:
-		// A Hiera instance (require "hiera"); #lookup lives on the Hiera class.
-		return vm.consts["Hiera"].(*RClass)
-	case *PuppetCatalog:
-		// A compiled catalog (require "puppet"); Puppet::Resource::Catalog methods.
-		return vm.consts["Puppet::Resource::Catalog"].(*RClass)
-	case *PuppetResource:
-		// One catalog resource; Puppet::Resource methods.
-		return vm.consts["Puppet::Resource"].(*RClass)
-	case *PraType:
-		// A registered resource type (require "puppet/resource_api");
-		// #validate/#attributes/#namevars/#apply live on it.
-		return vm.consts["Puppet::ResourceApi::TypeDefinition"].(*RClass)
-	case *SemVerObj:
-		// A SemanticPuppet::Version (require "semantic_puppet").
-		return vm.consts["SemanticPuppet::Version"].(*RClass)
-	case *SemVerRange:
-		// A SemanticPuppet::VersionRange (require "semantic_puppet").
-		return vm.consts["SemanticPuppet::VersionRange"].(*RClass)
-	case *AugeasObj:
-		// An Augeas config-tree handle (require "augeas").
-		return vm.consts["Augeas"].(*RClass)
-	case *HoconConfig:
-		// A Hocon::Config (require "hocon"); typed path accessors live on it.
-		return vm.consts["Hocon::Config"].(*RClass)
-	case *DryType:
-		return vm.consts["Dry::Types::Type"].(*RClass)
-	case *DryResult:
-		return vm.consts["Dry::Types::Result"].(*RClass)
-	case *DryStruct:
-		return x.cls
-	case *DrySchema:
-		return vm.consts["Dry::Schema::Params"].(*RClass)
-	case *DrySchemaBuilder:
-		return vm.consts["Dry::Schema::DSL"].(*RClass)
-	case *DryKey:
-		return vm.consts["Dry::Schema::Key"].(*RClass)
-	case *DryContract:
-		return x.cls
-	case *DryValidationResult:
-		return vm.consts["Dry::Validation::Result"].(*RClass)
-	case *DryRuleCtx:
-		return vm.consts["Dry::Validation::Rule"].(*RClass)
-	case *DryRuleKey:
-		return vm.consts["Dry::Validation::RuleKey"].(*RClass)
-	case *OAuth2Client:
-		return vm.consts["OAuth2::Client"].(*RClass)
-	case *OAuth2Strategy:
-		return vm.consts[x.className].(*RClass)
-	case *OAuth2AccessToken:
-		return vm.consts["OAuth2::AccessToken"].(*RClass)
-	case *OAuth2Response:
-		return vm.consts["OAuth2::Response"].(*RClass)
-	case *OAuth2Request:
-		return vm.consts["OAuth2::Request"].(*RClass)
-	case *OIDCProviderMetadata:
-		return vm.consts["OpenIDConnect::ProviderMetadata"].(*RClass)
-	case *OIDCKeySet:
-		return vm.consts["OpenIDConnect::KeySet"].(*RClass)
-	case *OIDCVerifier:
-		return vm.consts["OpenIDConnect::Verifier"].(*RClass)
-	case *OIDCClaims:
-		return vm.consts["OpenIDConnect::IDTokenClaims"].(*RClass)
-	case *OIDCClient:
-		return vm.consts["OpenIDConnect::Client"].(*RClass)
-	case *OIDCTokens:
-		return vm.consts["OpenIDConnect::Tokens"].(*RClass)
-	case *OIDCUserInfo:
-		return vm.consts["OpenIDConnect::UserInfo"].(*RClass)
-	case *KramdownDoc:
-		// A Kramdown::Document reports Kramdown::Document so its #to_html renders
-		// the held source through the library.
-		return vm.consts["Kramdown::Document"].(*RClass)
-	case *I18nBackend:
-		// The handle I18n.backend returns reports I18n::Backend::Simple so its
-		// store_translations / available_locales dispatch.
-		return vm.consts["I18n::Backend::Simple"].(*RClass)
-	case *ZeitwerkLoader:
-		// A Zeitwerk::Loader.new / .for_gem handle reports Zeitwerk::Loader so its
-		// push_dir / setup / eager_load / … instance methods dispatch.
-		return vm.consts["Zeitwerk::Loader"].(*RClass)
-	case *ZeitwerkInflector:
-		// A Zeitwerk::Inflector handle reports Zeitwerk::Inflector so its
-		// camelize / inflect dispatch.
-		return vm.consts["Zeitwerk::Inflector"].(*RClass)
-	case *RSSRss:
-		return vm.consts["RSS::Rss"].(*RClass)
-	case *RSSChannel:
-		return vm.consts["RSS::Rss::Channel"].(*RClass)
-	case *RSSItem:
-		return vm.consts["RSS::Rss::Channel::Item"].(*RClass)
-	case *RSSImage:
-		return vm.consts["RSS::Rss::Channel::Image"].(*RClass)
-	case *RSSGuid:
-		return vm.consts["RSS::Rss::Channel::Item::Guid"].(*RClass)
-	case *RSSRDF:
-		return vm.consts["RSS::RDF"].(*RClass)
-	case *RSSRDFChannel:
-		return vm.consts["RSS::RDF::Channel"].(*RClass)
-	case *RSSRDFItem:
-		return vm.consts["RSS::RDF::Item"].(*RClass)
-	case *RSSRDFImage:
-		return vm.consts["RSS::RDF::Image"].(*RClass)
-	case *RSSRDFTextinput:
-		return vm.consts["RSS::RDF::Textinput"].(*RClass)
-	case *RSSAtomFeed:
-		return vm.consts["RSS::Atom::Feed"].(*RClass)
-	case *RSSAtomEntry:
-		return vm.consts["RSS::Atom::Feed::Entry"].(*RClass)
-	case *RSSAtomLink:
-		return vm.consts["RSS::Atom::Link"].(*RClass)
-	case *RSSAtomPerson:
-		return vm.consts["RSS::Atom::Person"].(*RClass)
-	case *RSSAtomCategory:
-		return vm.consts["RSS::Atom::Category"].(*RClass)
-	case *RQRCode:
-		// An RQRCode::QRCode reports RQRCode::QRCode so its renderer methods
-		// (as_svg / as_ansi / as_html / to_s / checked? / to_a) dispatch.
-		return vm.consts["RQRCode::QRCode"].(*RClass)
-	case *ImagesImage:
-		// An Images::Image reports Images::Image so its processing + scikit-image
-		// methods (resize / crop / rotate / convert / blur / edges / at / to_blob)
-		// dispatch.
-		return vm.consts["Images::Image"].(*RClass)
-	case *ImagesCanvas:
-		// An Images::Canvas reports Images::Canvas so its chunky_png-style pixel,
-		// drawing and PNG-output methods dispatch.
-		return vm.consts["Images::Canvas"].(*RClass)
-	case *OpentypeFont:
-		// A parsed font reports Opentype::Font so its num_glyphs / glyph_index /
-		// axes / named_instances / face methods dispatch.
-		return vm.consts["Opentype::Font"].(*RClass)
-	case *OpentypeFace:
-		// A sized face reports Opentype::Face so its measure / advance / kern /
-		// metrics / glyph_info / set_hinting / set_variation methods dispatch.
-		return vm.consts["Opentype::Face"].(*RClass)
-	case *TuiWidget:
-		// A Tui::Widget handle reports Tui::Widget so its mutators, composition
-		// verbs and callback-wiring instance methods dispatch.
-		return vm.consts["Tui::Widget"].(*RClass)
-	case *MvvmObservable:
-		// An Mvvm::Observable handle reports Mvvm::Observable so its get / set /
-		// subscribe / unsubscribe instance methods dispatch.
-		return vm.consts["Mvvm::Observable"].(*RClass)
-	case *MvvmCommand:
-		// An Mvvm::Command handle reports Mvvm::Command so its can_execute /
-		// execute / set_can_execute / raise_can_execute_changed methods dispatch.
-		return vm.consts["Mvvm::Command"].(*RClass)
-	case *MvvmList:
-		// An Mvvm::ObservableList handle reports Mvvm::ObservableList so its
-		// add / insert / remove_at / set / move / clear / get / size / slice /
-		// observe / unobserve instance methods dispatch.
-		return vm.consts["Mvvm::ObservableList"].(*RClass)
-	case *XmlMarkup:
-		// A Builder::XmlMarkup emitter reports Builder::XmlMarkup so its
-		// method_missing element DSL and special methods dispatch.
-		return vm.consts["Builder::XmlMarkup"].(*RClass)
-	case *SimpleCovResult:
-		return x.cls
-	case *SimpleCovSourceFile:
-		return x.cls
-	case *SAMLSettings:
-		return x.cls
-	case *SAMLAuthrequest:
-		return x.cls
-	case *SAMLResponse:
-		return x.cls
-	case *SAMLMetadata:
-		return x.cls
-	case *SAMLIdpMetadataParser:
-		return x.cls
-	case *SAMLLogoutrequest:
-		return x.cls
-	case *SAMLSloLogoutresponse:
-		return x.cls
-	case *WebAuthnRelyingParty:
-		return x.cls
-	case *WebAuthnPublicKey:
-		return x.cls
-	case *WebAuthnCredential:
-		return x.cls
-	case *WebAuthnCreateOptions:
-		return x.cls
-	case *WebAuthnGetOptions:
-		return x.cls
-	case *ACMEClient:
-		return x.cls
-	case *ACMEOrder:
-		return x.cls
-	case *ACMEAuthorization:
-		return x.cls
-	case *ACMEChallenge:
-		return x.cls
-	case *ACMECSR:
-		return x.cls
-	case *VaultClient:
-		return x.cls
-	case *VaultLogical:
-		return x.cls
-	case *VaultKVv1:
-		return x.cls
-	case *VaultKVv2:
-		return x.cls
-	case *VaultTransit:
-		return x.cls
-	case *VaultSys:
-		return x.cls
-	case *VaultAuth:
-		return x.cls
-	case *VaultTokenAuth:
-		return x.cls
-	case *VaultAppRole:
-		return x.cls
-	case *VaultUserpass:
-		return x.cls
-	case *VaultSecret:
-		return x.cls
-	case *HTTPartyResponse:
-		return vm.consts["HTTParty::Response"].(*RClass)
-	case *RConnectionPool:
-		return x.cls
-	case *RConnectionPoolWrapper:
-		return x.cls
-	case *ConcurrentAtomicRef:
-		return x.cls
-	case *ConcurrentAtomicFixnum:
-		return x.cls
-	case *ConcurrentAtomicBool:
-		return x.cls
-	case *ConcurrentMap:
-		return x.cls
-	case *ConcurrentFuture:
-		return x.cls
-	case *ConcurrentPromise:
-		return x.cls
-	case *ConcurrentPool:
-		return x.cls
-	case *ConcurrentLatch:
-		return x.cls
-	case *ConcurrentSemaphore:
-		return x.cls
-	case *ConcurrentBarrier:
-		return x.cls
-	case *ASInflections:
-		return vm.consts["ActiveSupport::Inflector::Inflections"].(*RClass)
-	case *ErubiEngine:
-		return x.cls
-	case *SafeBufferVal:
-		return x.cls
-	case *ActionViewBase:
-		return x.cls
-	case *AVPartialIter:
-		return x.cls
-	case *FormBuilderVal:
-		return x.cls
-	case *HTTPrbClient:
-		return vm.consts["HTTP::Client"].(*RClass)
-	case *HTTPrbResponse:
-		return vm.consts["HTTP::Response"].(*RClass)
-	case *HTTPrbStatus:
-		return vm.consts["HTTP::Response::Status"].(*RClass)
-	case *ExconConnection:
-		return vm.consts["Excon::Connection"].(*RClass)
-	case *ExconResponse:
-		return vm.consts["Excon::Response"].(*RClass)
-	case *TyphoeusRequest:
-		return vm.consts["Typhoeus::Request"].(*RClass)
-	case *TyphoeusResponse:
-		return vm.consts["Typhoeus::Response"].(*RClass)
-	case *TyphoeusHydra:
-		return vm.consts["Typhoeus::Hydra"].(*RClass)
-	case *IMAPObj:
-		return x.cls
-	case *sftpSession:
-		return x.cls
-	case *sftpDir:
-		return x.cls
-	case *sftpFileFactory:
-		return x.cls
-	case *sftpFile:
-		return x.cls
-	case *sftpAttrs:
-		return x.cls
-	case *sftpName:
-		return x.cls
-	case *RedisObj:
-		return x.cls
-	case *RedisBatch:
-		return x.cls
-	case *PTVersion:
-		return vm.consts["PaperTrail::Version"].(*RClass)
-	case *PTProxy:
-		return vm.consts["PaperTrail::RecordTrail"].(*RClass)
-	case *PTRequest:
-		return vm.consts["PaperTrail::Request"].(*RClass)
-	case *POP3Obj:
-		return x.cls
-	case *POPMailObj:
-		return x.cls
-	case *ftpObj:
-		return x.cls
-	case *ftpMLSxEntry:
-		return x.cls
-	case *PGConnObj:
-		return x.cls
-	case *PGResultObj:
-		return x.cls
-	case *SMTPObj:
-		return x.cls
-	case *SMTPResponseObj:
-		return x.cls
-	case *SMTPStreamObj:
-		return x.cls
-	case *NokogiriDocument:
-		return vm.consts["Nokogiri::XML::Document"].(*RClass)
-	case *NokogiriNode:
-		return vm.consts["Nokogiri::XML::Node"].(*RClass)
-	case *NokogiriNodeSet:
-		return vm.consts["Nokogiri::XML::NodeSet"].(*RClass)
-	case *NokogiriXSLTStylesheet:
-		return vm.consts["Nokogiri::XSLT::Stylesheet"].(*RClass)
-	case *RuboCopRunner:
-		return vm.consts["RuboCop::Runner"].(*RClass)
-	case *RuboCopConfig:
-		return vm.consts["RuboCop::Config"].(*RClass)
-	case *RuboCopOffense:
-		return vm.consts["RuboCop::Cop::Offense"].(*RClass)
-	case *RuboCopLocation:
-		return vm.consts["RuboCop::Cop::Offense::Location"].(*RClass)
-	case *GrapeRouter:
-		return vm.consts["Grape::Router"].(*RClass)
-	case *GrapeRoute:
-		return vm.consts["Grape::Router::Route"].(*RClass)
-	case *GrapeMatch:
-		return vm.consts["Grape::Router::Match"].(*RClass)
-	case *GrapeValidator:
-		return vm.consts["Grape::Validator"].(*RClass)
-	case *GrapeParamsBuilder:
-		return vm.consts["Grape::Validations::ParamsScope::DSL"].(*RClass)
-	case *GrapeFormatter:
-		return vm.consts["Grape::Formatter"].(*RClass)
-	case *ActiveRecordModel:
-		return vm.consts["ActiveRecord::Model"].(*RClass)
-	case *ActiveRecordModelBuilder:
-		return vm.consts["ActiveRecord::Model::DSL"].(*RClass)
-	case *ActiveRecordRelation:
-		return vm.consts["ActiveRecord::Relation"].(*RClass)
-	case *ActiveRecordRecord:
-		return vm.consts["ActiveRecord::Record"].(*RClass)
-	case *ActiveRecordErrors:
-		return vm.consts["ActiveRecord::Errors"].(*RClass)
-	case *KaminariArray:
-		return vm.consts["Kaminari::PaginatableArray"].(*RClass)
-	case *KaminariRelation:
-		return vm.consts["Kaminari::PaginatableRelation"].(*RClass)
-	case *RansackSearch:
-		return vm.consts["Ransack::Search"].(*RClass)
-	case *RansackSort:
-		return vm.consts["Ransack::Sort"].(*RClass)
-	case *ActiveRecordSchemaDSL:
-		return vm.consts["ActiveRecord::Schema::Definition"].(*RClass)
-	case *ActiveRecordTableDSL:
-		return vm.consts["ActiveRecord::Schema::TableDefinition"].(*RClass)
-	case *ASModelName:
-		return vm.consts["ActiveModel::Name"].(*RClass)
-	case *ASModelErrors:
-		return vm.consts["ActiveModel::Errors"].(*RClass)
-	case *ASModelError:
-		return vm.consts["ActiveModel::Error"].(*RClass)
-	case *ActiveJobConfigured:
-		return vm.consts["ActiveJob::ConfiguredJob"].(*RClass)
-	case *ASBlob:
-		return vm.consts["ActiveStorage::Blob"].(*RClass)
-	case *ASAttachment:
-		return vm.consts["ActiveStorage::Attachment"].(*RClass)
-	case *ASService:
-		return vm.consts["ActiveStorage::Service"].(*RClass)
-	case *ASOne:
-		return vm.consts["ActiveStorage::Attached::One"].(*RClass)
-	case *ASMany:
-		return vm.consts["ActiveStorage::Attached::Many"].(*RClass)
-	case *RailtieVal:
-		return x.cls
-	case *EngineVal:
-		return x.cls
-	case *RailsAppVal:
-		return x.cls
-	case *RailsConfigVal:
-		return x.cls
-	case *RailsPathsVal:
-		return x.cls
-	case *RailsPathVal:
-		return x.cls
-	case *RailsRouteSetVal:
-		return x.cls
-	case *RailsInitializerVal:
-		return x.cls
-	case *StringInquirerVal:
-		return x.cls
-	case *RailsEnvVal:
-		return x.cls
-	case *DeviseConfig:
-		return x.cls
-	case *DeviseResource:
-		return x.cls
-	case *DeviseTokenGenerator:
-		return x.cls
-	case *HanamiRouter:
-		return x.cls
-	case *HanamiReq:
-		return x.cls
-	case *HanamiResp:
-		return x.cls
-	case *HanamiFlash:
-		return x.cls
-	case *RSpecMatcher:
-		return vm.consts["RSpec::Matchers::BuiltIn::BaseMatcher"].(*RClass)
-	case *RSpecExpectation:
-		return vm.consts["RSpec::Expectations::ExpectationTarget"].(*RClass)
 	case *PrettyPrint:
 		return vm.cPrettyPrint
 	case *PrettyPrintGroup:
 		return vm.consts["PrettyPrint::Group"].(*RClass)
 	case *SingleLine:
 		return vm.consts["PrettyPrint::SingleLine"].(*RClass)
-	case *IPAddr:
-		return vm.cIPAddr
 	case *Matrix:
 		return vm.cMatrix
 	case *Vector:
@@ -1786,38 +1253,6 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.cSpellChecker
 	case *Time:
 		return vm.cTime
-	case *Timezone:
-		return vm.consts["TZInfo::Timezone"].(*RClass)
-	case *TimezonePeriod:
-		return vm.consts["TZInfo::TimezonePeriod"].(*RClass)
-	case *TimezoneOffset:
-		return vm.consts["TZInfo::TimezoneOffset"].(*RClass)
-	case *Country:
-		return vm.consts["TZInfo::Country"].(*RClass)
-	case *Pagy:
-		return vm.consts["Pagy"].(*RClass)
-	case *Money:
-		return vm.consts["Money"].(*RClass)
-	case *Currency:
-		return vm.consts["Money::Currency"].(*RClass)
-	case *AddressableURI:
-		return vm.consts["Addressable::URI"].(*RClass)
-	case *AddressableTemplate:
-		return vm.consts["Addressable::Template"].(*RClass)
-	case *PublicSuffixDomain:
-		return vm.consts["PublicSuffix::Domain"].(*RClass)
-	case *MIMEType:
-		return vm.consts["MIME::Type"].(*RClass)
-	case *MailMessage:
-		return vm.consts["Mail::Message"].(*RClass)
-	case *MailBody:
-		return vm.consts["Mail::Body"].(*RClass)
-	case *MailField:
-		return vm.consts["Mail::Field"].(*RClass)
-	case *ActionMailerDelivery:
-		return x.cls
-	case *ActionMailerAttachments:
-		return x.cls
 	case *FileStat:
 		return vm.cFileStat
 	case *DirObj:
@@ -1896,8 +1331,6 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return x.cls
 	case *argfObj:
 		return vm.cARGF
-	case *RelineHistory:
-		return x.cls
 	case *tcpSocket:
 		return x.cls
 	case *rawSocket:
@@ -1916,168 +1349,6 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return x.cls
 	case *DigestObj:
 		return x.cls
-	case *BCryptPassword:
-		return x.cls
-	case *naclObj:
-		return x.cls
-	case *AgeX25519Identity:
-		return x.cls
-	case *AgeX25519Recipient:
-		return x.cls
-	case *AgeScryptIdentity:
-		return x.cls
-	case *AgeScryptRecipient:
-		return x.cls
-	case *PrawnDocument:
-		return x.cls
-	case *ProtobufPool:
-		return x.cls
-	case *ProtobufBuilder:
-		return x.cls
-	case *ProtobufMessageBuilder:
-		return x.cls
-	case *ProtobufOneofBuilder:
-		return x.cls
-	case *ProtobufEnumBuilder:
-		return x.cls
-	case *ProtobufDescriptor:
-		return x.cls
-	case *ProtobufEnumDescriptor:
-		return x.cls
-	case *ProtobufFieldDescriptor:
-		return x.cls
-	case *ProtobufMsgClass:
-		return x.cls
-	case *ProtobufMessage:
-		return x.cls
-	case *ProtobufRepeatedField:
-		return x.cls
-	case *ProtobufMap:
-		return x.cls
-	case *GraphQLType:
-		return x.cls
-	case *GraphQLSchema:
-		return x.cls
-	case *GraphQLObjectDSL:
-		return x.cls
-	case *OTelTracerProvider:
-		return x.cls
-	case *OTelTracer:
-		return vm.consts["OpenTelemetry::Trace::Tracer"].(*RClass)
-	case *OTelSpan:
-		return vm.consts["OpenTelemetry::Trace::Span"].(*RClass)
-	case *OTelSpanContext:
-		return vm.consts["OpenTelemetry::Trace::SpanContext"].(*RClass)
-	case *OTelStatus:
-		return vm.consts["OpenTelemetry::Trace::Status"].(*RClass)
-	case *OTelExporter:
-		return vm.consts["OpenTelemetry::SDK::Trace::Export::InMemorySpanExporter"].(*RClass)
-	case *OTelProcessor:
-		return x.cls
-	case *OTelFinishedSpan:
-		return vm.consts["OpenTelemetry::SDK::Trace::SpanData"].(*RClass)
-	case *RDocMarkup:
-		return vm.consts["RDoc::Markup"].(*RClass)
-	case *RDocFormatter:
-		return vm.consts[x.clsName].(*RClass)
-	case *ThorOption:
-		return vm.consts["Thor::Option"].(*RClass)
-	case *ThorOptions:
-		return vm.consts["Thor::Options"].(*RClass)
-	case *ThorCommand:
-		return vm.consts["Thor::Command"].(*RClass)
-	case *ThorBase:
-		return vm.consts["Thor::Base"].(*RClass)
-	case *RakeTaskVal:
-		if _, isFile := x.t.(*rake.FileTask); isFile {
-			return vm.consts["Rake::FileTask"].(*RClass)
-		}
-		return vm.consts["Rake::Task"].(*RClass)
-	case *RakeApplicationVal:
-		return vm.consts["Rake::Application"].(*RClass)
-	case *RakeFileListVal:
-		return vm.consts["Rake::FileList"].(*RClass)
-	case *CapServerVal:
-		return vm.consts["Capistrano::Server"].(*RClass)
-	case *CapSessionVal:
-		return vm.consts["Capistrano::Session"].(*RClass)
-	case *CapTaskVal:
-		return vm.consts["Capistrano::Task"].(*RClass)
-	case *CapBackendVal:
-		return vm.consts["Capistrano::TestBackend"].(*RClass)
-	case *BundlerLockfile:
-		return vm.consts["Bundler::LockfileParser"].(*RClass)
-	case *BundlerSpec:
-		return vm.consts["Bundler::LazySpecification"].(*RClass)
-	case *BundlerDependency:
-		return vm.consts["Bundler::Dependency"].(*RClass)
-	case *BundlerGemfile:
-		return vm.consts["Bundler::Dsl"].(*RClass)
-	case *BundlerIndex:
-		return vm.consts["Bundler::Index"].(*RClass)
-	case *MinitestAssertionsBox:
-		return vm.consts["Minitest::Assertions"].(*RClass)
-	case *MinitestResult:
-		return vm.consts["Minitest::Result"].(*RClass)
-	case *MinitestMock:
-		return vm.consts["Minitest::Mock"].(*RClass)
-	case *FaradayConnection:
-		return vm.consts["Faraday::Connection"].(*RClass)
-	case *FaradayRequest:
-		return vm.consts["Faraday::Request"].(*RClass)
-	case *FaradayResponse:
-		return vm.consts["Faraday::Response"].(*RClass)
-	case *FaradayParams:
-		return vm.consts["Faraday::Utils::ParamsHash"].(*RClass)
-	case *FaradayHeaders:
-		return vm.consts["Faraday::Utils::Headers"].(*RClass)
-	case *CapybaraSession:
-		// A Capybara::Session wrapper reports the class stamped on it at construction.
-		return x.cls
-	case *CapybaraNode:
-		return x.cls
-	case *PumaServer:
-		return vm.consts["Puma::Server"].(*RClass)
-	case *PumaThreadPool:
-		return vm.consts["Puma::ThreadPool"].(*RClass)
-	case *PumaConfiguration:
-		return vm.consts["Puma::Configuration"].(*RClass)
-	case *PumaDSL:
-		return vm.consts["Puma::DSL"].(*RClass)
-	case *WEBrickServer:
-		return vm.consts["WEBrick::HTTPServer"].(*RClass)
-	case *WEBrickRequest:
-		return vm.consts["WEBrick::HTTPRequest"].(*RClass)
-	case *WEBrickResponse:
-		return vm.consts["WEBrick::HTTPResponse"].(*RClass)
-	case *WardenManager:
-		return x.cls
-	case *WardenProxy:
-		return x.cls
-	case *WardenStrategy:
-		return x.cls
-	case *OmniAuthBuilder:
-		return x.cls
-	case *OmniAuthConfig:
-		return x.cls
-	case *OmniAuthMockAuth:
-		return x.cls
-	case *OmniAuthStrategy:
-		return x.cls
-	case *OmniAuthHash:
-		return x.cls
-	case *ACRouteSet:
-		return x.cls
-	case *ACMapper:
-		return x.cls
-	case *ACParams:
-		return x.cls
-	case *ACRequest:
-		return x.cls
-	case *ACResponse:
-		return x.cls
-	case *WebMockStub:
-		return x.cls
 	case *Binding:
 		return vm.consts["Binding"].(*RClass)
 	case *Regexp:
@@ -2091,20 +1362,13 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.cFalseClass
 	case object.Nil:
 		return vm.cNilClass
-	case *ShrineStorage:
-		// A Shrine::Storage::Memory / ::FileSystem backend reports the concrete
-		// class stamped on it so its upload/open/exists?/delete/url dispatch.
-		return x.cls
-	case *ShrineUploader:
-		// A Shrine.new(:key) uploader reports Shrine so its #upload / #storage_key
-		// (defined on the Shrine class) dispatch.
-		return x.cls
-	case *ShrineUploadedFile:
-		return x.cls
-	case *ShrineAttacher:
-		return x.cls
 	case *object.Main:
 		return vm.cObject
+	}
+	// The gem bindings' value types (gems_classof.go; none on the rbgo_core
+	// build), consulted after the core cases miss, like the bindings below.
+	if c, ok := vm.classOfGem(v); ok {
+		return c
 	}
 	// Rare wasm-incompatible binding value types (GRPC/Kafka/Mongo/Arrow/Etcd/…):
 	// consulted only after the common cases above miss, so plain values never pay
@@ -2861,16 +2125,9 @@ func ivarStoreOf(self object.Value, create bool) ivarStore {
 		return ivarStore{tbl: o.ivars}
 	case *object.Main:
 		return ivarStore{tbl: o.IvarTable()}
-	case *SinatraCtx:
-		if o.ivars == nil {
-			o.ivars = map[string]object.Value{}
-		}
-		return ivarStore{tbl: o.ivars}
-	case *ActionViewBase:
-		if o.ivars == nil {
-			o.ivars = map[string]object.Value{}
-		}
-		return ivarStore{tbl: o.ivars}
+	}
+	if st, ok := ivarStoreOfGem(self); ok {
+		return st
 	}
 	// Bound/UnboundMethod carry their ivars in an embedded methodValueState.
 	if b, ok := self.(boxed); ok {

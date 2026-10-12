@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+//go:build !rbgo_core
+
 package vm
 
 import (
@@ -329,12 +331,3 @@ func (t *i18nTemporal) field(name string) int {
 	return 0
 }
 
-// lastHash returns the trailing Hash argument (the keyword options) when the
-// last positional argument is a Hash, matching how rbgo passes keyword args.
-func lastHash(args []object.Value) (*object.Hash, bool) {
-	if len(args) == 0 {
-		return nil, false
-	}
-	h, ok := args[len(args)-1].(*object.Hash)
-	return h, ok
-}
