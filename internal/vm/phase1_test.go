@@ -73,7 +73,9 @@ func TestKernelMethods(t *testing.T) {
 
 func TestValueReprAndTruthy(t *testing.T) {
 	cases := []struct{ src, want string }{
-		{"class E\nend\nputs E.new", "#<E>\n"},    // RObject.ToS
+		// puts dispatches #to_s, and Kernel#to_s is MRI's rb_any_to_s, which
+		// always prints the address (#756). Normalised, since it is not fixed.
+		{"class E\nend\nputs E.new.to_s.gsub(/0x[0-9a-f]+/, \"0xA\")", "#<E:0xA>\n"},
 		{"class E\nend\nputs(!E.new)", "false\n"}, // RObject.Truthy (objects are truthy)
 		{"class K\nend\np K", "K\n"},              // RClass.Inspect
 		{"class K\nend\nputs(!K)", "false\n"},     // RClass.Truthy

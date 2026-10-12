@@ -138,7 +138,17 @@ show "REXMLDoc",  REXML::Document.new("<a><b/></a>")
 show "REXMLElem", REXML::Document.new("<a><b/></a>").root
 show "ARGFclass", ARGF.class
 `
-	const want = `Object=#<Object>
+	// Compared line by line against MRI 4.0.7 on this host: 13 of these 14 are
+	// byte-identical to it. The one that is not is Enum -- rbgo's
+	// Enumerator#to_s answers MRI's *inspect* form, "#<Enumerator: [1, 2]:each>",
+	// where MRI's #to_s inherits Kernel's and answers "#<Enumerator:0x…>". A
+	// divergence of its own, left alone here and recorded rather than quietly
+	// folded into this expectation.
+	//
+	// Object moved to the address form with #756: Kernel#to_s is MRI's
+	// rb_any_to_s, which always prints one. This test already normalised
+	// addresses to 0xA, so it was built for exactly that.
+	const want = `Object=#<Object:0xA>
 Encoding=UTF-8
 Regexp=(?i-mx:ab)
 Time=1970-01-01 00:00:00 UTC

@@ -34,7 +34,8 @@ func (c *RConditionVariable) removeWaiter(t *RThread) {
 }
 
 func (vm *VM) registerConditionVariable() {
-	cCV := newClass("ConditionVariable", vm.cObject)
+	// Qualified name, bare constant: see registerMutex for why (#759 / #756).
+	cCV := newClass("Thread::ConditionVariable", vm.cObject)
 	vm.consts["ConditionVariable"] = cCV
 	vm.consts["Thread"].(*RClass).consts["ConditionVariable"] = cCV
 
