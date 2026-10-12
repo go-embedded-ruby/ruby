@@ -355,3 +355,32 @@ p Stats.norm.class, Stats.poisson(1.0).class`
 		t.Errorf("got\n%s\nwant\n%s", got, want)
 	}
 }
+
+// TestStatsArityIsAlwaysChecked is the same census for Stats: no constructor and
+// no method may convert a Go index-out-of-range into a Ruby error. See
+// TestSpecialArityIsAlwaysChecked for why.
+func TestStatsArityIsAlwaysChecked(t *testing.T) {
+	src := `bad = []
+n = 0
+[[Stats, Stats.methods(false)],
+ [Stats.norm, Stats::Continuous.instance_methods(false)],
+ [Stats.poisson(1.0), Stats::Discrete.instance_methods(false)]].each do |recv, ms|
+  ms.each do |m|
+    n += 1
+    begin
+      recv.send(m)
+    rescue => e
+      bad << m if e.message.include?("runtime error")
+    end
+  end
+end
+puts n
+puts bad.join(" ")`
+	out := strings.SplitN(strings.TrimSpace(eval(t, src)), "\n", 2)
+	if out[0] != "70" {
+		t.Fatalf("examined %s methods, expected 70 (32 distributions + 19 + 19) -- the census did not walk", out[0])
+	}
+	if len(out) > 1 && strings.TrimSpace(out[1]) != "" {
+		t.Errorf("these Stats methods leak a Go runtime fault when called with no arguments: %s", out[1])
+	}
+}

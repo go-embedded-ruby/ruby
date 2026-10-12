@@ -216,3 +216,68 @@ func evalFloat(t *testing.T, expr string) float64 {
 	}
 	return f
 }
+
+// TestSpecialCoversEveryFunction makes the claim "all 67 of the module's
+// exported functions" answerable, and pins the one place where the count of Go
+// functions and the count of Ruby methods differ: scipy spells the Riemann and
+// Hurwitz zeta as ONE name with an optional second argument, so the module's
+// Zeta and HurwitzZeta meet in #zeta and 67 functions become 66 methods.
+//
+// Without this, a function added to the module and forgotten here would go
+// unnoticed, and so would a name quietly dropped.
+func TestSpecialCoversEveryFunction(t *testing.T) {
+	want := []string{
+		"beta", "betainc", "betaincc", "betainccinv", "betaincinv", "betaln",
+		"binom", "comb", "digamma", "ellipe", "ellipk", "ellipkm1", "erf",
+		"erfc", "erfcinv", "erfcx", "erfinv", "expit", "factorial",
+		"factorial2", "gamma", "gammainc", "gammaincc", "gammainccinv",
+		"gammaincinv", "gammaln", "gammasgn", "i0", "i0e", "i1", "i1e", "in",
+		"iv", "ive", "j0", "j1", "jn", "jn_zeros", "jv", "k0", "k0e", "k1",
+		"k1e", "kn", "kv", "kve", "log_expit", "log_factorial", "log_ndtr",
+		"log_softmax", "loggamma_sign", "logit", "logsumexp", "ndtr", "ndtri",
+		"perm", "polygamma", "softmax", "softplus", "xlog1py", "xlogy", "y0",
+		"y1", "yn", "yv", "zeta",
+	}
+	if len(want) != 66 {
+		t.Fatalf("this test's own list holds %d names, not the 66 it claims", len(want))
+	}
+	got := strings.Fields(strings.TrimSpace(eval(t, `puts Special.methods(false).map(&:to_s).sort.join(" ")`)))
+	if len(got) != len(want) {
+		t.Fatalf("Special defines %d methods, want %d:\ngot  %v\nwant %v", len(got), len(want), got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("method %d: got %q want %q", i, got[i], want[i])
+		}
+	}
+}
+
+// TestSpecialArityIsAlwaysChecked is the control for the defect this binding was
+// careful not to repeat: FFT's methods index args[0] with no arity check, so
+// FFT.fft() answers "runtime error: index out of range" -- a Go fault converted
+// into a Ruby error -- where MRI says "wrong number of arguments".
+//
+// Every Special method is called with NO arguments, and none may answer that.
+// It is a census rather than a list, so a method added later is covered without
+// being named.
+func TestSpecialArityIsAlwaysChecked(t *testing.T) {
+	src := `bad = []
+n = 0
+Special.methods(false).each do |m|
+  n += 1
+  begin
+    Special.send(m)
+  rescue => e
+    bad << m if e.message.include?("runtime error")
+  end
+end
+puts n
+puts bad.join(" ")`
+	out := strings.SplitN(strings.TrimSpace(eval(t, src)), "\n", 2)
+	if out[0] != "66" {
+		t.Fatalf("examined %s methods, expected 66 -- the census did not walk the module", out[0])
+	}
+	if len(out) > 1 && strings.TrimSpace(out[1]) != "" {
+		t.Errorf("these Special methods leak a Go runtime fault when called with no arguments: %s", out[1])
+	}
+}
