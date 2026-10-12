@@ -855,4 +855,3 @@ func hashArg(v object.Value) *object.Hash {
 	}
 	return h
 }
-
