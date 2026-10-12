@@ -41,8 +41,11 @@ h = H.new; h[:x] = 9; p [h.fetch_or(:x), h.fetch_or(:y), h.keys, h]`, "[9, :none
 
 		// Object identity / equal? keep operating on the wrapper, not the value.
 		{`class S < String; end; a = S.new("x"); p [a.equal?(a), a.equal?(S.new("x"))]`, "[true, false]\n"},
-		// A plain object (no wrapped value) still renders as #<Class>.
-		{`class Plain; end; p Plain.new.to_s`, "\"#<Plain>\"\n"},
+		// A plain object (no wrapped value) renders as MRI's rb_any_to_s does,
+		// WITH the address (#756). The address is normalised because it is not
+		// fixed; the shape is MRI 4.0.7's, measured. This read `"#<Plain>"`,
+		// which was green only while rbgo omitted it.
+		{`class Plain; end; p Plain.new.to_s.gsub(/0x[0-9a-f]+/, "0xA")`, "\"#<Plain:0xA>\"\n"},
 		// As a Hash key, a String-subclass instance hashes/compares as its content.
 		{`class S < String; end; h = {}; h[S.new("a")] = 1; p [h["a"], h[S.new("a")], h.keys.first.class]`, "[1, 1, S]\n"},
 		{`class S < String; end; p({"k" => 1}[S.new("k")])`, "1\n"},

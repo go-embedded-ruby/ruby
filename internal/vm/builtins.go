@@ -1052,7 +1052,51 @@ func (vm *VM) bootstrap() {
 	vm.cObject.define("class", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return vm.classOf(self)
 	})
-	vm.cObject.define("to_s", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	// Kernel#to_s is MRI's rb_any_to_s, and rb_any_to_s ALWAYS prints the
+	// address: `Object.new.to_s` is "#<Object:0x…>", not "#<Object>". rbgo
+	// printed the short form, so #to_s and #inspect disagreed with each other
+	// inside rbgo while #inspect agreed with MRI (#756).
+	//
+	// The fix is here rather than in (*RObject).ToS for two reasons. The Go
+	// method has no VM and so cannot reach refID at all; and it has 707 callers
+	// in this package, where Kernel#to_s has exactly the reach MRI gives
+	// rb_any_to_s. That reach was measured rather than assumed: of 24 core types
+	// probed for `method(:to_s).owner`, exactly two answer Kernel -- Object and
+	// Thread::Mutex -- and MRI answers Kernel for the same two and no others.
+	// Everything else, including a subclass of String or Array, defines or
+	// inherits its own.
+	//
+	// It covers `puts obj` and "#{obj}" as well, because both dispatch #to_s:
+	// a user-defined `to_s` wins for all three in rbgo exactly as in MRI, so
+	// fixing the method fixes every path instead of creating a new disagreement
+	// between them.
+	vm.cObject.define("to_s", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		// A PLAIN Ruby object gets MRI's rb_any_to_s, which always prints the
+		// address: `Object.new.to_s` is "#<Object:0x…>", not "#<Object>". rbgo
+		// printed the short form, so #to_s and #inspect disagreed with each
+		// other inside rbgo while #inspect agreed with MRI (#756).
+		//
+		// ⚠ ONLY a plain *RObject, and that narrowness is the whole design.
+		// Reaching Kernel#to_s does NOT mean "this object has no meaningful
+		// to_s" here, the way it does in MRI: rbgo implements many objects'
+		// #to_s as the GO method ToS() rather than by registering a Ruby #to_s,
+		// so those types arrive here relying on the delegation below.
+		//
+		// A version of this that applied the identity form to everything that
+		// reached Kernel#to_s broke 78 tests, and they were right to break:
+		// Capistrano::Server#to_s must be its hostname ("db1"),
+		// Capistrano::Task#to_s its name ("solo"), Net::SMTP::Response#to_s its
+		// status line, OpenIDConnect::ProviderMetadata#to_s its summary -- and
+		// the top-level self must be "main", which is what irb's prompt is built
+		// from. Each of those is a Go ToS() doing real work.
+		//
+		// A built-in value subclass (`class MyStr < String`) carries its value
+		// in o.builtin and renders as that value, so it is excluded too -- it
+		// does not in fact arrive here, since it inherits String#to_s in both
+		// engines, but the guard states the rule rather than relying on that.
+		if o, ok := self.(*RObject); ok && object.IsNil(o.builtin) {
+			return object.NewString(vm.objectIdentityRepr(self))
+		}
 		return object.NewString(self.ToS())
 	})
 	// nil, true, false and Range each own their #to_s in MRI, and reported
