@@ -113,6 +113,15 @@ func TestRaiseBuildUnavailableFormatsTheNameVerbatim(t *testing.T) {
 	}
 }
 
+// skipOnCore skips a test that measures something the rbgo_core build leaves
+// out on purpose. The default build's lanes still run it.
+func skipOnCore(t *testing.T, why string) {
+	t.Helper()
+	if coreBuild {
+		t.Skip("not on the rbgo_core build: " + why)
+	}
+}
+
 // rubyQuote returns s as a double-quoted Ruby string literal.
 func rubyQuote(s string) string {
 	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`, `#`, `\#`).Replace(s) + `"`

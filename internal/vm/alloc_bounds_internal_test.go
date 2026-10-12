@@ -160,6 +160,9 @@ p OpenSSL::Random.random_bytes(8).bytesize`, "8\n"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			if strings.HasPrefix(c.name, "openssl_") {
+				skipOnCore(t, "OpenSSL is not part of core")
+			}
 			if got := eval(t, c.src); got != c.want {
 				t.Errorf("src=%q\n got=%q\nwant=%q", c.src, got, c.want)
 			}
