@@ -53,7 +53,6 @@ internal/vm/matrix.go	ToS	0.0%
 internal/vm/matrix.go	ToS#2	0.0%
 internal/vm/nethttp.go	registerNetHTTP	96.0%
 internal/vm/object_model.go	ToS	0.0%
-internal/vm/object_model.go	classOf	99.5%
 internal/vm/object_model.go	defaultNegation	88.9%
 internal/vm/object_model.go	objSingleton	80.0%
 internal/vm/regexp.go	ToS#2	0.0%
