@@ -93,6 +93,7 @@ func (vm *VM) bootstrap() {
 	registerNumericComplexCompat(vm, cNumeric)
 	vm.registerMath()
 	vm.registerFFT()
+	vm.registerSpecial()
 	vm.registerNDArray()
 	vm.registerArrayEdges()
 	// Image (go-images) is the first of the gems the rbgo_core build leaves out
