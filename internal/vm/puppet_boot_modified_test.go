@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+//go:build !rbgo_core
+
 package vm
 
 // Coverage for the NEW branches the Puppet-boot stdlib batch added to several

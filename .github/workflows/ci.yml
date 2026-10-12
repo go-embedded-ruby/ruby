@@ -192,6 +192,55 @@ jobs:
       - name: Run Ruby in a real JS host (node + Go's wasm_exec.js)
         run: node web/smoke.mjs web/rbgo.wasm
 
+  # The rbgo_core build (README: "The rbgo_core build"): the language and the
+  # numeric stack, no gem. It is what the go-ndarray playground loads, and it is
+  # a build tag, so nothing else compiles it: without this lane a gem binding
+  # that a core file starts calling directly would break it unnoticed, or pull
+  # the gem back into the binary. The lane vets and tests it natively, builds the
+  # browser module, refuses one that grew or links a gem again, and runs it.
+  core:
+    name: rbgo_core (core build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: 1.27.2
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - run: go version && node --version
+      - name: Vet the core build (native and js/wasm)
+        run: |
+          go vet -tags rbgo_core ./...
+          CGO_ENABLED=0 GOOS=js GOARCH=wasm go vet -tags rbgo_core ./cmd/wasm ./internal/vm
+      - name: Test the core build
+        run: go test -tags rbgo_core -timeout=60m ./internal/vm ./cmd/wasm
+      - name: Build the core playground module
+        run: CGO_ENABLED=0 GOOS=js GOARCH=wasm go build -tags rbgo_core -ldflags='-s -w' -o web/rbgo-core.wasm ./cmd/wasm
+      - name: No gem is linked, and the module stays small
+        shell: bash
+        run: |
+          set -euo pipefail
+          # 23.1 MB when this lane was added; the bound leaves room for growth in
+          # the interpreter itself, not for a gem coming back (the smallest heavy
+          # one alone, go-rouge, is 1.1 MB of code plus its data).
+          size=$(wc -c < web/rbgo-core.wasm)
+          echo "rbgo-core.wasm: $size bytes"
+          if [ "$size" -gt 27000000 ]; then
+            echo "::error::the rbgo_core module is $size bytes, over the 27000000 bound"
+            exit 1
+          fi
+          mods=$(CGO_ENABLED=0 GOOS=js GOARCH=wasm go list -tags rbgo_core -deps -f '{{with .Module}}{{.Path}}{{end}}' ./cmd/wasm | sort -u)
+          bad=$(echo "$mods" | grep -E 'google.golang.org/protobuf|go-scss|go-rouge|go-opentype|go-widgets|go-images|go-kramdown|go-nokogiri|go-ruby-(rails|railties|actionpack|activerecord|rack|sinatra|yaml|uri|erb|optparse)/' || true)
+          if [ -n "$bad" ]; then
+            echo "::error::the rbgo_core build links gem modules:"
+            echo "$bad"
+            exit 1
+          fi
+      - name: Run the core module in a real JS host
+        run: node web/smoke.mjs web/rbgo-core.wasm --core
+
   # The RBGO_BUILD_IT lane. Three integration tests in cmd/rbgo drive `rbgo build`
   # end to end — native, --closed, and --closed --target wasm — and every one of
   # them was behind `if os.Getenv("RBGO_BUILD_IT") == ""` with no workflow anywhere

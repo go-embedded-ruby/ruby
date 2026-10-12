@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-//go:build wasm
+//go:build wasm && !rbgo_core
 
 // This file is the GOOS=js GOARCH=wasm counterpart of the database / search / KV
 // bindings whose Go drivers do not compile for wasm — SQLite3 (modernc.org/libc),

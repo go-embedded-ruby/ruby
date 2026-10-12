@@ -698,6 +698,7 @@ Otherwise:
 | **amd64, arm64** | `go test ./...` on native runners |
 | **wasip1/wasm** | built with `CGO_ENABLED=0 GOOS=wasip1 GOARCH=wasm` and **run** under [wazero](https://wazero.io), a pure-Go runtime — verified here: `wazero run rbgo.wasm -e 'puts (1..10).sum'` prints `55` |
 | **js/wasm (browser)** | `CGO_ENABLED=0 GOOS=js GOARCH=wasm go build ./...` plus `go vet` over `./cmd/wasm ./cmd/rbgo ./internal/vm`, then the playground module is **run** in node by `web/smoke.mjs` (`wasm (js, browser)` in `ci.yml`). Added with #684, which fixed the three `syscall` constants the `js` port does not define |
+| **rbgo_core** | `go vet` and the `internal/vm` suite with `-tags rbgo_core`, then the core playground module is built for js/wasm, its size bounded, and **run** in node by `web/smoke.mjs --core` (`rbgo_core (core build)` in `ci.yml`). See [the `rbgo_core` build](#the-rbgo_core-build-the-language-and-the-numeric-stack-no-gems) |
 
 **Not on the pull-request path** — validated on a nightly schedule instead:
 `riscv64`, `loong64`, `ppc64le` and `s390x`, under QEMU
@@ -907,6 +908,48 @@ On any wasm target the gem backends that need real sockets or OS facilities are
 compiled out (`grpc`, `nats`, `kafka`, `mysql2`, `mongo`/`bson`, `arrow`,
 `parquet`, `openstack`, `sidekiq`, `resque`, …); `require` of one raises a clean
 Ruby `LoadError` rather than failing to link.
+
+### The `rbgo_core` build: the language and the numeric stack, no gems
+
+`-tags rbgo_core` builds an interpreter that keeps the Ruby language and its
+numeric stack and leaves every gem binding out. It is the build for a page that
+runs Ruby in the browser — the go-ndarray playground loads it — and it works on
+every target, natively too:
+
+```console
+$ CGO_ENABLED=0 GOOS=js GOARCH=wasm go build -tags rbgo_core -ldflags='-s -w' -o web/rbgo.wasm ./cmd/wasm
+$ node web/smoke.mjs web/rbgo.wasm --core
+```
+
+| `cmd/wasm` (js/wasm) | default | `rbgo_core` |
+| --- | ---: | ---: |
+| unstripped | 102.6 MB | 23.7 MB |
+| stripped (`-ldflags='-s -w'`) | 99.9 MB | 23.1 MB |
+| stripped, `gzip -9` | 22.3 MB | 5.7 MB |
+| Go modules in the build (`go list -deps`) | 253 | 44, no gem |
+
+**What core is** (`internal/vm/core.go` holds the same list as `coreFeatures`):
+
+| | in core | out of core |
+| --- | --- | --- |
+| the language | every core class and module MRI defines without a `require`: Object, Kernel, Comparable, Enumerable, the numeric tower, String, Symbol, Array, Hash, Range, Struct, Data, Proc, Method, Binding, Regexp, Encoding, the whole Exception tree, Time, Random, Marshal, File/IO/Dir/Process/Signal/ENV, Thread/Fiber, ObjectSpace, GC, Enumerator, TracePoint, … | — |
+| preloaded by MRI | `set`, `rubygems` (Gem), `did_you_mean`, `pp`/`prettyprint` | — |
+| numeric stack | Math, `cmath`, `bigdecimal`, `prime`, `matrix`, `securerandom`, **NDArray** (go-ndarray), **FFT** (go-fft), rbgo's `bag` | Image (go-images) |
+| small standard libraries | `json`, `date`, `csv`, `digest`, `base64`, `strscan`, `tsort`, `abbrev`, `benchmark`, `scanf`, `logger`, `forwardable`, `delegate`, `singleton`, `ostruct`, `pathname`, `tempfile`, `tmpdir`, `fileutils`, `find`, `etc`, `timeout`, `monitor`, `observer`, `stringio`, `English`, `rbconfig`, `objspace`, `fiber`, `fcntl`, `io/nonblock`, `unicode_normalize` | the ones that need a network, a terminal, a server or a document toolchain: `openssl`, `socket`, `net/*`, `resolv`, `ipaddr`, `uri`, `yaml`, `erb`, `cgi`, `rexml`, `rss`, `rdoc`, `irb`, `reline`, `ripper`, `optparse`, `getoptlong`, `open3`, `syslog`, `shellwords`, `zlib`, `pstore` |
+| gems | — | every third-party gem: Rails and its frameworks, Rack/Sinatra/Hanami/Roda, the database, queue and cloud clients, the template engines, Nokogiri, Prawn, Sass, Rouge, Kramdown, the go-widgets bindings, RSpec/Minitest, Puppet, … |
+
+On the core build a `require` of anything outside core raises
+`LoadError: cannot load such file -- rails (not available in the rbgo_core build)`.
+It raises before `$LOAD_PATH` is searched, so a `rails.rb` lying on the load
+path is not run in its place, and the gem leaves nothing behind: `Rails`,
+`ERB` and the rest stay undefined. Without the tag nothing changes.
+
+How it is cut: a gem binding's file carries `//go:build !rbgo_core`, and the
+registrations, `classOf` cases, equality hooks and per-VM state that core code
+used to reach directly go through seams (`internal/vm/gems*.go`). Not calling a
+gem's register function was not enough: Go links the `init` of every package a
+compiled file imports, so the first attempt, which only skipped the calls, still
+weighed 64 MB.
 ## Layout
 
 ```

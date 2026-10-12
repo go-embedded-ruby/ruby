@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-//go:build js && wasm
+//go:build js && wasm && !rbgo_core
 
 // This file is the GOOS=js GOARCH=wasm half of the server-gem seam. The gems it
 // covers (see serverGemFeatures in servergems.go) are pointless in a browser:

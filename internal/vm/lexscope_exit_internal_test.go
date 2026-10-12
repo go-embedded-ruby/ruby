@@ -183,6 +183,7 @@ func TestEncodingDefaults(t *testing.T) {
 // TestOpenSSLVersionConstants covers the OpenSSL version-identification
 // constants Puppet's log_runtime_environment reads.
 func TestOpenSSLVersionConstants(t *testing.T) {
+	skipOnCore(t, "OpenSSL is not part of core")
 	cases := []struct{ src, want string }{
 		{`p OpenSSL::VERSION`, "\"4.0.0\"\n"},
 		{`p OpenSSL::OPENSSL_VERSION.is_a?(String)`, "true\n"},

@@ -157,6 +157,7 @@ func TestDefinedOperatorReceiverKind(t *testing.T) {
 // VM-internal predicate (distinct from defined?'s) that Object#try and the
 // library bindings use to ask whether a receiver answers a name.
 func TestRespondsToOperatorFastPath(t *testing.T) {
+	skipOnCore(t, "it calls ActiveSupport's Object#try, not part of core")
 	if got, want := eval(t, `p 1.try(:+, 2)`), "3\n"; got != want {
 		t.Errorf("got=%q want=%q", got, want)
 	}
