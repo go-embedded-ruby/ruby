@@ -1217,6 +1217,8 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.cContDist
 	case *RDiscDist:
 		return vm.cDiscDist
+	case *GoObject:
+		return x.cls
 	case *WeakMapObj:
 		return x.cls
 	case *WeakKeyMapObj:
@@ -1587,7 +1589,9 @@ func (vm *VM) callNative(m *Method, self object.Value, args []object.Value, blk 
 	// set for THIS call would still be standing when the native yields to a block
 	// or dispatches a method of its own, and would be read by the wrong frame.
 	// Together with exec's consume-and-clear this bounds the field's lifetime to
-	// exactly one dispatch. See VM.sendNoKW.
+	// exactly one dispatch. See VM.sendNoKW. Its value is kept for the one
+	// reader that wants it, a host-defined method (VM.NativeNoKW, embed.go).
+	vm.nativeNoKW = vm.sendNoKW
 	vm.sendNoKW = false
 	// The same bound for the VCALL verdict: a native body that dispatches a send
 	// of its own (Object#send, a coercion protocol, an Enumerable yielding into
