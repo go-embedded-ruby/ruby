@@ -222,13 +222,37 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # 23.1 MB when this lane was added; the bound leaves room for growth in
-          # the interpreter itself, not for a gem coming back (the smallest heavy
-          # one alone, go-rouge, is 1.1 MB of code plus its data).
+          # 23.1 MB when this lane was added, 27.4 MB once Special, Stats,
+          # Integrate and Optimize arrived (#819). The bound moved with that, and
+          # the cost is attributed rather than absorbed -- each module added to
+          # origin/main alone, js/wasm, -s -w, 2026-10-17:
+          #
+          #     Special      +631_646   15.0%    go-numerics/special
+          #     Stats      +2_416_448   57.3%    go-statistics/stats
+          #     Integrate    +238_387    5.6%    go-numerics/integrate
+          #     Optimize     +933_406   22.1%    go-numerics/optimize
+          #                 ---------
+          #                +4_219_887           23_173_500 -> 27_393_387
+          #
+          # Stats is more than half of it, which is what 36 distributions and
+          # 27_599 lines of Go cost; the four bindings themselves are ~1_500
+          # lines. The bound leaves room for growth in the interpreter itself,
+          # not for a gem coming back -- and note that a gem is caught by the
+          # module-path check BELOW, by name and exactly. This number only has
+          # to notice growth nobody intended, so it sits ~1.6 MB above the
+          # measurement rather than at a round multiple of it.
+          #
+          # Two sessions measured this independently and agree on the ranking and
+          # the total but not to the byte: a second run of "Special added to main
+          # alone" gave +590_200 against the +631_646 above, 7% apart, from a
+          # baseline that itself differed by 411 bytes between two worktrees of
+          # the same commit. So read the SHARES as measured and the exact bytes
+          # as one run's: what is solid is that Stats is over half, Special is
+          # under a fifth, and the four together are ~4.2 MB.
           size=$(wc -c < web/rbgo-core.wasm)
           echo "rbgo-core.wasm: $size bytes"
-          if [ "$size" -gt 27000000 ]; then
-            echo "::error::the rbgo_core module is $size bytes, over the 27000000 bound"
+          if [ "$size" -gt 29000000 ]; then
+            echo "::error::the rbgo_core module is $size bytes, over the 29000000 bound"
             exit 1
           fi
           mods=$(CGO_ENABLED=0 GOOS=js GOARCH=wasm go list -tags rbgo_core -deps -f '{{with .Module}}{{.Path}}{{end}}' ./cmd/wasm | sort -u)
