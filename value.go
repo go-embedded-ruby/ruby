@@ -137,6 +137,15 @@ func (v Value) Call(name string, args ...any) (Value, error) {
 	return in.wrap(r), nil
 }
 
+// ValueOf converts a Go value to Ruby, as Set does, without assigning it.
+func (in *Interp) ValueOf(x any) (Value, error) {
+	r, err := in.toRuby(x)
+	if err != nil {
+		return Value{}, err
+	}
+	return in.wrap(r), nil
+}
+
 func (in *Interp) toRubyAll(args []any) ([]object.Value, error) {
 	out := make([]object.Value, len(args))
 	for i, a := range args {

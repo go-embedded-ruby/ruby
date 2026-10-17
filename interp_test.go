@@ -334,9 +334,17 @@ func TestValue(t *testing.T) {
 	if got := mustEval(t, in, "class HasS; def to_s = 'custom'; end; HasS.new").String(); got != "custom" {
 		t.Fatalf("to_s = %q", got)
 	}
+	other := ruby.New()
+	ov, _ := other.Eval("1", "o.rb", 1)
 	s := mustEval(t, in, `"abc"`)
 	if s.String() != "abc" || s.Inspect() != `"abc"` || s.IsNil() || s.ClassName() != "String" {
 		t.Fatal("String value")
+	}
+	if v, err := in.ValueOf([]int{1, 2}); err != nil || v.Inspect() != "[1, 2]" {
+		t.Fatalf("ValueOf = %v %v", v, err)
+	}
+	if _, err := in.ValueOf(ov); err == nil {
+		t.Fatal("ValueOf accepted another interpreter's Value")
 	}
 	r, err := s.Call("center", 7, "*")
 	if err != nil || r.Go() != "**abc**" {
@@ -345,8 +353,6 @@ func TestValue(t *testing.T) {
 	if _, err := s.Call("nope"); err == nil {
 		t.Fatal("Call of a missing method succeeded")
 	}
-	other := ruby.New()
-	ov, _ := other.Eval("1", "o.rb", 1)
 	if _, err := s.Call("+", ov); err == nil {
 		t.Fatal("Call accepted another interpreter's Value")
 	}
