@@ -985,10 +985,16 @@ $ node web/smoke.mjs web/rbgo.wasm --core
 
 | `cmd/wasm` (js/wasm) | default | `rbgo_core` |
 | --- | ---: | ---: |
-| unstripped | 102.6 MB | 23.7 MB |
-| stripped (`-ldflags='-s -w'`) | 99.9 MB | 23.1 MB |
-| stripped, `gzip -9` | 22.3 MB | 5.7 MB |
-| Go modules in the build (`go list -deps`) | 253 | 44, no gem |
+| unstripped | 107.3 MB | 28.1 MB |
+| stripped (`-ldflags='-s -w'`) | 104.5 MB | 27.4 MB |
+| stripped, `gzip -9` | 22.2 MB | 6.4 MB |
+| Go modules in the build (`go list -deps`) | 256 | 47, no gem |
+
+Measured 2026-10-17 with go1.27.2. The core column grew from 23.1 MB when
+the lane was added: `Special`, `Stats`, `Integrate` and `Optimize` cost
+**+4.2 MB** between them, of which `Stats` alone is 2.4 MB (36 distributions,
+27,599 lines of Go) — the per-module attribution is in `ci.yml` beside the
+bound it moved, so the figure is answerable rather than absorbed.
 
 **What core is** (`internal/vm/core.go` holds the same list as `coreFeatures`):
 
