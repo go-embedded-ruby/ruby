@@ -101,7 +101,9 @@ Beyond the `go-ruby-*` family, the scientific / container stack binds the
 pure-Go [go-ndarray](https://github.com/go-ndarray/ndarray),
 [go-fft](https://github.com/go-fft/fft), [go-images](https://github.com/go-images/images),
 [go-numerics/special](https://github.com/go-numerics/special),
-[go-statistics/stats](https://github.com/go-statistics/stats)
+[go-statistics/stats](https://github.com/go-statistics/stats),
+[go-numerics/integrate](https://github.com/go-numerics/integrate),
+[go-numerics/optimize](https://github.com/go-numerics/optimize)
 and [go-composites](https://github.com/go-composites) libraries the same way (see
 *Supported today* below), and the pure-Go [go-widgets](https://github.com/go-widgets)
 UI toolkit is bound through three adapters: `require "widgets"` (pixel-blitting
@@ -563,6 +565,27 @@ JRuby**):
   `NDArray` with one. The per-point methods are ufuncs too, over a Float or an
   `NDArray`. A parameter outside its domain is refused at construction with
   `ArgumentError`, where scipy raises `ValueError`.
+- **Integrate:** an `Integrate` module — scipy.integrate's quadrature from
+  [go-numerics/integrate](https://github.com/go-numerics/integrate), with **no
+  cgo / no SciPy**: adaptive `quad` (finite or infinite limits, `points:` for a
+  known kink, `epsabs:`/`epsrel:`/`limit:`), the fixed rules `fixed_quad` and
+  `romberg` (`tol:`/`rtol:`/`divmax:`), the sampled rules `trapezoid`/`simpson`/
+  `romb`/`cumulative_trapezoid` (`x:` or `dx:`, `initial:`), the multiple
+  integrals `dblquad` and `nquad`, and `gauss_legendre` for a rule's nodes and
+  weights. The integrand is a **block**, which also takes `&f` for a Proc or
+  lambda; `dblquad`'s inner limits may be numbers or callables.
+- **Optimize:** an `Optimize` module — scipy.optimize's root finders and
+  minimisers from [go-numerics/optimize](https://github.com/go-numerics/optimize),
+  with **no cgo / no SciPy**: the bracketing finders
+  `brentq`/`brenth`/`bisect`/`ridder` and `newton` (secant, Newton–Raphson with
+  `fprime:`, Halley with `fprime2:`), `minimize_scalar`
+  (`method:` `brent`/`golden`/`bounded`, `bracket:`, `bounds:`) and `fminbound`,
+  `minimize` over several variables (`method:` `BFGS`/`CG`/`Nelder-Mead`/
+  `Powell`/`L-BFGS-B`, with `bounds:`), `curve_fit`, `approx_fprime` and
+  `bracket`. Return shapes are scipy's: one number answers a Float, a tuple an
+  Array (`curve_fit` is scipy's `(popt, pcov)`), and an `OptimizeResult` or
+  `RootResults` a Hash with symbol keys — which `full_output: true` asks a root
+  finder for.
 - **Set:** Ruby's `Set` — `new`/`[]`, `add`(`<<`)/`add?`/`delete`/`merge`/`clear`,
   `include?`/`member?`/`size`/`length`/`count`/`empty?`, `subset?`/`superset?`,
   `union`(`|`)/`intersection`(`&`)/`difference`(`-`), `each`/`to_a`/`to_set`.
@@ -973,7 +996,7 @@ $ node web/smoke.mjs web/rbgo.wasm --core
 | --- | --- | --- |
 | the language | every core class and module MRI defines without a `require`: Object, Kernel, Comparable, Enumerable, the numeric tower, String, Symbol, Array, Hash, Range, Struct, Data, Proc, Method, Binding, Regexp, Encoding, the whole Exception tree, Time, Random, Marshal, File/IO/Dir/Process/Signal/ENV, Thread/Fiber, ObjectSpace, GC, Enumerator, TracePoint, … | — |
 | preloaded by MRI | `set`, `rubygems` (Gem), `did_you_mean`, `pp`/`prettyprint` | — |
-| numeric stack | Math, `cmath`, `bigdecimal`, `prime`, `matrix`, `securerandom`, **NDArray** (go-ndarray), **FFT** (go-fft), **Special** (go-numerics/special), **Stats** (go-statistics/stats), rbgo's `bag` | Image (go-images) |
+| numeric stack | Math, `cmath`, `bigdecimal`, `prime`, `matrix`, `securerandom`, **NDArray** (go-ndarray), **FFT** (go-fft), **Special** (go-numerics/special), **Stats** (go-statistics/stats), **Integrate** + **Optimize** (go-numerics), rbgo's `bag` | Image (go-images) |
 | small standard libraries | `json`, `date`, `csv`, `digest`, `base64`, `strscan`, `tsort`, `abbrev`, `benchmark`, `scanf`, `logger`, `forwardable`, `delegate`, `singleton`, `ostruct`, `pathname`, `tempfile`, `tmpdir`, `fileutils`, `find`, `etc`, `timeout`, `monitor`, `observer`, `stringio`, `English`, `rbconfig`, `objspace`, `fiber`, `fcntl`, `io/nonblock`, `unicode_normalize` | the ones that need a network, a terminal, a server or a document toolchain: `openssl`, `socket`, `net/*`, `resolv`, `ipaddr`, `uri`, `yaml`, `erb`, `cgi`, `rexml`, `rss`, `rdoc`, `irb`, `reline`, `ripper`, `optparse`, `getoptlong`, `open3`, `syslog`, `shellwords`, `zlib`, `pstore` |
 | gems | — | every third-party gem: Rails and its frameworks, Rack/Sinatra/Hanami/Roda, the database, queue and cloud clients, the template engines, Nokogiri, Prawn, Sass, Rouge, Kramdown, the go-widgets bindings, RSpec/Minitest, Puppet, … |
 

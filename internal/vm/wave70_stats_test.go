@@ -384,3 +384,25 @@ puts bad.join(" ")`
 		t.Errorf("these Stats methods leak a Go runtime fault when called with no arguments: %s", out[1])
 	}
 }
+
+// TestStatsTruthyAndRvsLimit covers the two things nothing else reaches.
+//
+// A distribution is an object, so it is truthy -- object.Value requires
+// Truthy() of both wrapper types and only a boolean context calls it. And #rvs
+// checks its own sizes, but go-ndarray refuses a shape whose product is too
+// large BEFORE allocating anything, which is the one error #rvs can answer
+// that is not a negative dimension. Both were recorded as untested by the
+// per-function coverage gate, which is what asked for this test.
+func TestStatsTruthyAndRvsLimit(t *testing.T) {
+	src := `p [(!Stats.norm), (Stats.norm ? 1 : 0), (!Stats.poisson(1.0)), (Stats.poisson(1.0) ? 1 : 0)]
+begin
+  Stats.norm.rvs(2 ** 40, 2 ** 40)
+  puts "NO ERROR"
+rescue ArgumentError => e
+  puts e.message.include?("too big")
+end`
+	const want = "[false, 1, false, 1]\ntrue\n"
+	if got := eval(t, src); got != want {
+		t.Errorf("got\n%q\nwant\n%q", got, want)
+	}
+}

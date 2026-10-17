@@ -18,6 +18,8 @@ require (
 	github.com/go-mustache/mustache v0.1.0
 	github.com/go-ndarray/ndarray v0.12.0
 	github.com/go-nokogiri/nokogiri v0.1.0
+	github.com/go-numerics/integrate v0.1.0
+	github.com/go-numerics/optimize v0.1.0
 	github.com/go-numerics/special v0.1.0
 	github.com/go-rouge/rouge v0.3.0
 	github.com/go-ruby-aasm/aasm v0.0.0-20260717061120-cec0976ec205
@@ -197,6 +199,7 @@ require (
 	github.com/go-ruby-yaml/yaml v0.0.0-20260916104302-910ced2db1c7
 	github.com/go-ruby-zeitwerk/zeitwerk v0.0.0-20260916104335-29169305e951
 	github.com/go-ruby-zlib/zlib v0.0.0-20260927173414-e9d862990b6d
+	github.com/go-statistics/stats v0.1.0
 	github.com/go-webauthn/webauthn v0.18.2
 	github.com/go-xslt/xslt v0.1.0
 	github.com/nats-io/nats-server/v2 v2.15.0
@@ -301,7 +304,6 @@ require (
 	github.com/go-ldap/ldap/v3 v3.4.14 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
-	github.com/go-numerics/optimize v0.1.0 // indirect
 	github.com/go-opentype/fonts v0.10.0 // indirect
 	github.com/go-opentype/opentype v0.13.0 // indirect
 	github.com/go-opentype/shape v0.5.0 // indirect
@@ -316,7 +318,6 @@ require (
 	github.com/go-simd/crc32 v0.0.0-20260903220012-5f164e0e0487 // indirect
 	github.com/go-simd/hex v0.0.0-20260903220024-a8d22a843218 // indirect
 	github.com/go-sql-driver/mysql v1.10.1 // indirect
-	github.com/go-statistics/stats v0.1.0 // indirect
 	github.com/go-typeset/bidi v0.3.0 // indirect
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
 	github.com/go-webauthn/x v0.3.1 // indirect

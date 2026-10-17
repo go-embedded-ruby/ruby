@@ -281,3 +281,35 @@ puts bad.join(" ")`
 		t.Errorf("these Special methods leak a Go runtime fault when called with no arguments: %s", out[1])
 	}
 }
+
+// TestSpecialFactorial2OnAnArray covers #factorial2's element-wise path, which
+// is written out separately because the scalar form takes an int where every
+// other one-argument function takes a float.
+func TestSpecialFactorial2OnAnArray(t *testing.T) {
+	src := `a = Special.factorial2(NDArray.from([6.0, 7.0], [2]))
+p [a.is_a?(NDArray), a[0], a[1]]`
+	// 6!! = 6*4*2 = 48 and 7!! = 7*5*3*1 = 105.
+	const want = "[true, 48.0, 105.0]\n"
+	if got := eval(t, src); got != want {
+		t.Errorf("got %s want %s", got, want)
+	}
+}
+
+// TestSpecialSamplesFromEitherSide: #logsumexp, #softmax and #log_softmax take
+// a whole sample, from a Ruby Array or an NDArray, and must answer the same
+// numbers either way -- the Array path and the NDArray path read the
+// observations through different code.
+func TestSpecialSamplesFromEitherSide(t *testing.T) {
+	src := `xs = [1.0, 2.0, 3.0]
+a = NDArray.from(xs, [3])
+p (Special.logsumexp(xs) - Special.logsumexp(a)).abs < 1e-15
+p (0..2).all? { |i| (Special.softmax(xs)[i] - Special.softmax(a)[i]).abs < 1e-15 }
+p (0..2).all? { |i| (Special.log_softmax(xs)[i] - Special.log_softmax(a)[i]).abs < 1e-15 }
+# a 2-D array is read flat, as scipy's logsumexp over the whole array is
+m = NDArray.from([1.0, 2.0, 3.0, 4.0], [2, 2])
+p (Special.logsumexp(m) - Special.logsumexp([1.0, 2.0, 3.0, 4.0])).abs < 1e-15`
+	const want = "true\ntrue\ntrue\ntrue\n"
+	if got := eval(t, src); got != want {
+		t.Errorf("got\n%s\nwant\n%s", got, want)
+	}
+}

@@ -37,6 +37,10 @@ func TestReadmeListsTheNumericSurfaceThatExists(t *testing.T) {
 		// registered matches the registration calls in that file, with the
 		// Ruby name in group 1.
 		registered *regexp.Regexp
+		// prose lists the backticked words of that entry which are NOT method
+		// names, with the reason beside them. Naming them per module is cheaper
+		// than a rule that would also excuse a real omission.
+		prose []string
 	}{
 		{
 			module:     "Special",
@@ -51,6 +55,22 @@ func TestReadmeListsTheNumericSurfaceThatExists(t *testing.T) {
 			// methods Continuous and Discrete share. All three count, or the
 			// README's method list would be unchecked.
 			registered: regexp.MustCompile(`(?m)^\t(?:cont|disc)\("([a-z_0-9]+)"|\.define\("([a-z_0-9]+)"|^\t\t"([a-z_0-9]+)": +func\(d distCommon\)`),
+			// scipy's PARAMETER names, which the entry explains in prose.
+			prose: []string{"loc", "scale"},
+		},
+		{
+			module:     "Integrate",
+			file:       "internal/vm/integrate.go",
+			registered: regexp.MustCompile(`(?m)^\t(?:def|sampledRule)\("([a-z_0-9]+)"`),
+			// the block-pass idiom, not a method.
+			prose: []string{"&f"},
+		},
+		{
+			module:     "Optimize",
+			file:       "internal/vm/optimize.go",
+			registered: regexp.MustCompile(`(?m)^\t(?:def|bracketing)\("([a-z_0-9]+)"`),
+			// method: VALUES (scipy's own method strings), and the block-pass idiom.
+			prose: []string{"brent", "golden", "bounded", "&f"},
 		},
 	} {
 		t.Run(tc.module, func(t *testing.T) {
@@ -74,12 +94,7 @@ func TestReadmeListsTheNumericSurfaceThatExists(t *testing.T) {
 			// The entry also backticks types and keywords (NDArray, seed:,
 			// ArgumentError, Float); a name is only checked when it looks like
 			// one of these functions, which is to say lower-case.
-			// loc and scale name scipy's PARAMETERS, not methods: the entry
-			// backticks them while explaining the argument order. They are
-			// the only two prose words in these entries that look like a
-			// function name, and naming them here is cheaper than a rule
-			// that would also excuse a real omission.
-			prose := []string{"loc", "scale"}
+			prose := tc.prose
 			for _, n := range doc {
 				if n != strings.ToLower(n) || strings.ContainsAny(n, " :(.") || contains(prose, n) {
 					continue

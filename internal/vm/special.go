@@ -54,15 +54,20 @@ func anyND(args []object.Value) bool {
 	return false
 }
 
-// ndVector reads an argument that is a whole sample rather than one point --
+// realSamples reads an argument that is a whole sample rather than one point --
 // #logsumexp, #softmax, #log_softmax -- accepting an NDArray or a Ruby Array of
-// numbers, so either side of the numeric stack can be fed in.
-func (vm *VM) ndVector(v object.Value) *nd.Array {
+// numbers, so either side of the numeric stack can be fed in, and answers the
+// observations as a []float64.
+func (vm *VM) realSamples(v object.Value) []float64 {
 	if a, ok := v.(*NDArray); ok {
-		return a.a
+		flat := a.a.Flatten()
+		out := make([]float64, flat.Size())
+		for i := range out {
+			out[i] = flat.At(i)
+		}
+		return out
 	}
-	fs := floatSlice(v)
-	return mustArray(nd.FromData(fs, len(fs))).a
+	return floatSlice(v)
 }
 
 // registerSpecial installs the Special module and its scipy.special functions.
@@ -184,11 +189,11 @@ func (vm *VM) registerSpecial() {
 	// answer the same kind they were given.
 	def("logsumexp", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		ndArgc(args, 1, 1)
-		v, err := snd.LogSumExp(vm.ndVector(args[0]))
-		if err != nil {
-			ndRaise(err)
-		}
-		return object.Float(v)
+		// The root function, not the nd one: we already hold the samples as a
+		// []float64, and nd.LogSumExp only converts them back. Its error arm
+		// reports a COMPLEX array, which rbgo cannot make -- NDArray is float64
+		// only -- so going through it would add a branch nothing can reach.
+		return object.Float(special.LogSumExp(vm.realSamples(args[0])))
 	})
 	vector := func(name string, sf func(dst, x []float64) []float64, af func(*nd.Array) (*nd.Array, error)) {
 		def(name, func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
