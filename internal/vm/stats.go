@@ -5,8 +5,6 @@
 package vm
 
 import (
-	"errors"
-
 	nd "github.com/go-ndarray/ndarray"
 	"github.com/go-ndarray/ndarray/random"
 	"github.com/go-statistics/stats"
@@ -93,13 +91,12 @@ func (d *RDiscDist) Truthy() bool    { return true }
 // a bad parameter or bad data is a ValueError in SciPy, which is an
 // ArgumentError here, and a fit that did not converge is a RuntimeError in
 // both. The message is the module's own.
+// raiseStats re-raises a go-statistics error as the Ruby error SciPy maps to.
+// Every error a bound function can return describes a parameter or the data,
+// which SciPy raises as ValueError and MRI as ArgumentError. There is
+// deliberately no arm for ErrFit: no Fit* function is bound, so an arm for it
+// would be a branch nothing can reach.
 func raiseStats(err error) {
-	switch {
-	case errors.Is(err, stats.ErrFit):
-		raise("RuntimeError", "%s", err.Error())
-	case errors.Is(err, stats.ErrParam), errors.Is(err, stats.ErrData):
-		raise("ArgumentError", "%s", err.Error())
-	}
 	raise("ArgumentError", "%s", err.Error())
 }
 
