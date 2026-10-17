@@ -27,7 +27,9 @@ import "github.com/go-embedded-ruby/ruby/internal/object"
 //     ObjectSpace, GC, Warning, Enumerator, TracePoint, …);
 //   - what MRI preloads: set, rubygems (the Gem module), did_you_mean, pp;
 //   - the numeric stack: Math, CMath, BigDecimal, Prime, Matrix, Random,
-//     SecureRandom, NDArray (go-ndarray) and FFT (go-fft);
+//     SecureRandom, NDArray (go-ndarray), FFT (go-fft), Special
+//     (go-numerics/special), Stats (go-statistics/stats), Integrate
+//     (go-numerics/integrate) and Optimize (go-numerics/optimize);
 //   - small, pure-computation standard libraries a program in a page may
 //     plausibly require: json, date, csv, digest, base64, strscan, tsort,
 //     abbrev, benchmark, scanf, logger, forwardable, delegate, singleton,
