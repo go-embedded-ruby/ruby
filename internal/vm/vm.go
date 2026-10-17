@@ -2523,6 +2523,8 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				negArg := pop()
 				if s, ok := negArg.(*object.String); ok { // -"str" is String#-@ (a frozen copy)
 					push(vm.send(s, "-@", nil, nil))
+				} else if g, ok := negArg.(*GoObject); ok { // a host-defined -@ (embed.go)
+					push(vm.send(g, "-@", nil, nil))
 				} else {
 					push(negate(negArg))
 				}

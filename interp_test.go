@@ -591,3 +591,61 @@ p NDArray.arange(4).reshape(2, 2)`
 		t.Fatalf("Run %q, Interp %q", a.String(), out.String())
 	}
 }
+
+type vec2 struct{ x, y float64 }
+
+// The operators of a host class are its methods, as for any Ruby object: the
+// binary ones, unary minus, and == (whose result is kept as it is), with !=
+// its negation unless the class defines its own.
+func TestHostOperators(t *testing.T) {
+	in, _, _ := newInterp(t)
+	c, _ := in.DefineClass("Vec2", nil)
+	c.Bind(&vec2{})
+	c.DefineSingletonMethod("new", func(call *ruby.Call) (any, error) {
+		return &vec2{toF(call.Args[0]), toF(call.Args[1])}, nil
+	})
+	bin := func(name string, f func(a, b *vec2) any) {
+		c.DefineMethod(name, func(call *ruby.Call) (any, error) {
+			return f(call.Self.Go().(*vec2), call.Args[0].Go().(*vec2)), nil
+		})
+	}
+	bin("+", func(a, b *vec2) any { return &vec2{a.x + b.x, a.y + b.y} })
+	bin("-", func(a, b *vec2) any { return &vec2{a.x - b.x, a.y - b.y} })
+	bin("*", func(a, b *vec2) any { return a.x*b.x + a.y*b.y })
+	bin("/", func(a, b *vec2) any { return "div" })
+	bin("%", func(a, b *vec2) any { return "mod" })
+	bin("**", func(a, b *vec2) any { return "pow" })
+	bin("<", func(a, b *vec2) any { return a.x < b.x })
+	bin(">=", func(a, b *vec2) any { return "ge" })
+	bin("==", func(a, b *vec2) any { return []bool{a.x == b.x, a.y == b.y} })
+	c.DefineMethod("-@", func(call *ruby.Call) (any, error) {
+		v := call.Self.Go().(*vec2)
+		return &vec2{-v.x, -v.y}, nil
+	})
+	c.DefineMethod("inspect", func(call *ruby.Call) (any, error) {
+		v := call.Self.Go().(*vec2)
+		return fmt.Sprintf("(%g, %g)", v.x, v.y), nil
+	})
+	mustEval(t, in, "a = Vec2.new(1, 2); b = Vec2.new(1, 5)")
+	for src, want := range map[string]string{
+		"a + b": "(2, 7)", "a - b": "(0, -3)", "a * b": "11.0", "a / b": `"div"`, "a % b": `"mod"`,
+		"a ** b": `"pow"`, "a < b": "false", "a >= b": `"ge"`, "a == b": "[true, false]",
+		"a != b": "false", "-a": "(-1, -2)", "a.equal?(a)": "true",
+	} {
+		if got := mustEval(t, in, src).Inspect(); got != want {
+			t.Errorf("%s = %s, want %s", src, got, want)
+		}
+	}
+	c.DefineMethod("!=", func(call *ruby.Call) (any, error) { return "custom ne", nil })
+	if got := mustEval(t, in, "a != b").Inspect(); got != `"custom ne"` {
+		t.Errorf("custom != = %s", got)
+	}
+	// A class with no == of its own: identity.
+	d, _ := in.DefineClass("Plain", nil)
+	d.Bind(&normal{})
+	in.Set("p1", &normal{0, 1})
+	in.Set("p2", &normal{0, 1})
+	if got := mustEval(t, in, "[p1 == p1, p1 == p2, p1 != p2]").Inspect(); got != "[true, false, true]" {
+		t.Errorf("identity == = %s", got)
+	}
+}

@@ -5,6 +5,7 @@ import (
 
 	nd "github.com/go-ndarray/ndarray"
 
+	"github.com/go-embedded-ruby/ruby/internal/bytecode"
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
 
@@ -289,3 +290,17 @@ func (vm *VM) isKernelOwned(m *Method) bool {
 
 // SetConstIn defines the constant name in a module or class the host defined.
 func (vm *VM) SetConstIn(scope *RClass, name string, v object.Value) { scope.consts[name] = v }
+
+// goObjectOp applies a binary operator to a host object: it is a call of the
+// operator method its class defines (+, -, <, ==, …), whose result is the
+// operator's — so an == that answers a mask Array, as a data frame's does,
+// keeps it. != is !(self == other) unless the class defines != itself.
+func (vm *VM) goObjectOp(op bytecode.Op, g *GoObject, b object.Value) object.Value {
+	name := basicOpName(op)
+	if op == bytecode.OpNeq {
+		if m := lookupMethod(g.cls, "!="); m == nil || vm.isKernelOwned(m) {
+			return object.Bool(!vm.send(g, "==", []object.Value{b}, nil).Truthy())
+		}
+	}
+	return vm.send(g, name, []object.Value{b}, nil)
+}
