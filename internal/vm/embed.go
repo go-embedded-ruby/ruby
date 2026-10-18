@@ -32,6 +32,12 @@ func (vm *VM) TopBinding() *Binding {
 // It leaves the VM clean after an exception, exactly as Run does, so the next
 // evaluation starts with an empty frame stack.
 func (vm *VM) EvalIn(b *Binding, src, file string, line int) (object.Value, error) {
+	if err := parseFault(src); err != nil {
+		// The front end failed on the source instead of reporting a syntax
+		// error: a defect of the parser, which must not take the host with it
+		// (Kernel#eval is protected the same way, by callNative).
+		return nil, RubyError{Class: "SyntaxError", Message: fmt.Sprintf("%s:%d: the Ruby parser failed on this source: %v", file, line, err)}
+	}
 	return vm.Protect(func() object.Value {
 		return vm.bindingEval(b, src, evalLocation{file: file, line: line})
 	})

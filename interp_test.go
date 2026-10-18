@@ -649,3 +649,18 @@ func TestHostOperators(t *testing.T) {
 		t.Errorf("identity == = %s", got)
 	}
 }
+
+// A source the parser crashes on (an unterminated string ending in a
+// backslash, go-ruby-parser v0.13.1) is a SyntaxError, not a crash of the
+// host.
+func TestParserFaultIsContained(t *testing.T) {
+	in, _, _ := newInterp(t)
+	_, err := in.Eval("\"\\", "cell.rb", 3)
+	var e *ruby.Error
+	if !errors.As(err, &e) || e.Class != "SyntaxError" || !strings.Contains(e.Message, "the Ruby parser failed on this source") || e.Line != 3 {
+		t.Fatalf("err = %v", err)
+	}
+	if got := mustEval(t, in, "1 + 1").Inspect(); got != "2" {
+		t.Fatal("the interpreter is unusable after a parser fault")
+	}
+}
