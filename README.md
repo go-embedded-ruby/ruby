@@ -99,7 +99,11 @@ Seven more are bound from **outside** the `go-ruby-*` naming convention, at
 
 Beyond the `go-ruby-*` family, the scientific / container stack binds the
 pure-Go [go-ndarray](https://github.com/go-ndarray/ndarray),
-[go-fft](https://github.com/go-fft/fft), [go-images](https://github.com/go-images/images)
+[go-fft](https://github.com/go-fft/fft), [go-images](https://github.com/go-images/images),
+[go-numerics/special](https://github.com/go-numerics/special),
+[go-statistics/stats](https://github.com/go-statistics/stats),
+[go-numerics/integrate](https://github.com/go-numerics/integrate),
+[go-numerics/optimize](https://github.com/go-numerics/optimize)
 and [go-composites](https://github.com/go-composites) libraries the same way (see
 *Supported today* below), and the pure-Go [go-widgets](https://github.com/go-widgets)
 UI toolkit is bound through three adapters: `require "widgets"` (pixel-blitting
@@ -524,6 +528,70 @@ JRuby**):
   helpers (`psd`/`spectrogram`) — binding the pure-Go
   [go-fft](https://github.com/go-fft/fft) library, a `numpy.fft`-style transform
   with **no cgo / no FFTW**, returning `Complex` spectra.
+- **Special:** a `Special` module — all 67 functions of
+  [go-numerics/special](https://github.com/go-numerics/special), a
+  `scipy.special`-style set with **no cgo / no SciPy**: gamma
+  (`gamma`/`gammaln`/`gammasgn`/`digamma`/`polygamma`/`factorial`/`log_factorial`/
+  `factorial2`/`loggamma_sign`),
+  beta (`beta`/`betaln`/`binom`/`comb`/`perm`), error and normal
+  (`erf`/`erfc`/`erfcx`/`erfinv`/`erfcinv`/`ndtr`/`ndtri`/`log_ndtr`), logistic
+  (`expit`/`logit`/`log_expit`/`softplus`/`xlogy`/`xlog1py`), reductions
+  (`logsumexp`/`softmax`/`log_softmax`), `zeta` (Riemann, or Hurwitz with a
+  second argument), the incomplete gamma and beta functions with their inverses
+  (`gammainc`/`gammaincc`/`gammaincinv`/`gammainccinv`,
+  `betainc`/`betaincc`/`betaincinv`/`betainccinv`), Bessel
+  (`j0`/`j1`/`y0`/`y1`/`i0`/`i1`/`k0`/`k1`, the exponentially scaled
+  `i0e`/`i1e`/`k0e`/`k1e`, arbitrary order `jv`/`yv`/`iv`/`kv`/`ive`/`kve`,
+  integer order `jn`/`yn`/`in`/`kn`, and `jn_zeros`) and the complete elliptic
+  integrals (`ellipk`/`ellipkm1`/`ellipe`). Each is a **ufunc**, as scipy's is:
+  a Float answers a Float, an `NDArray` answers an `NDArray` of the same shape,
+  and a Float mixed with an `NDArray` broadcasts. Most names are scipy's own,
+  taken from the correspondence the Go module measures itself against — which is
+  why `softplus` and `gammaln`, not *log1pexp* and *log_gamma*. **63 of the 67**
+  carry such a pairing; the four that do not are named from a reading of scipy
+  or from the Go function, and say so: `gammasgn` and `kn` exist in scipy but
+  are unpaired in the module, `log_factorial` is scipy's `gammaln(n+1)`,
+  `loggamma_sign` has no scipy counterpart, and **`in` is not a scipy name at
+  all** — scipy cannot have one, `in` being a Python keyword, so `iv(0, x)` is
+  the faithful spelling and `in` answers exactly the same.
+- **Stats:** a `Stats` module — the 32 univariate distributions of
+  [go-statistics/stats](https://github.com/go-statistics/stats), a
+  `scipy.stats`-style set with **no cgo / no SciPy**. Continuous:
+  `norm`/`cauchy`/`expon`/`gumbel_r`/`halfnorm`/`laplace`/`logistic`/`rayleigh`/
+  `uniform`/`chi`/`chi2`/`gamma`/`invgamma`/`lognorm`/`lomax`/`pareto`/`t`/
+  `triang`/`vonmises`/`weibull_min`/`beta`/`f`/`ncx2`/`reciprocal`; discrete:
+  `bernoulli`/`geom`/`poisson`/`zipf`/`binom`/`nbinom`/`randint`/`hypergeom`.
+  Arguments follow scipy's order — the shape parameters, then `loc`, then
+  `scale` (continuous) — each optional with scipy's default. Every distribution
+  answers the same method set, `Stats::Continuous` and `Stats::Discrete`
+  differing only in the density: `pdf`/`logpdf` against `pmf`/`logpmf`, plus
+  `cdf`/`logcdf`/`sf`/`logsf`/`ppf`/`isf`, the moments
+  `mean`/`var`/`std`/`skew`/`kurtosis`/`median`/`entropy`/`moment`,
+  `interval`/`support`, and `rvs(size…, seed:)` — a Float with no size, an
+  `NDArray` with one. The per-point methods are ufuncs too, over a Float or an
+  `NDArray`. A parameter outside its domain is refused at construction with
+  `ArgumentError`, where scipy raises `ValueError`.
+- **Integrate:** an `Integrate` module — scipy.integrate's quadrature from
+  [go-numerics/integrate](https://github.com/go-numerics/integrate), with **no
+  cgo / no SciPy**: adaptive `quad` (finite or infinite limits, `points:` for a
+  known kink, `epsabs:`/`epsrel:`/`limit:`), the fixed rules `fixed_quad` and
+  `romberg` (`tol:`/`rtol:`/`divmax:`), the sampled rules `trapezoid`/`simpson`/
+  `romb`/`cumulative_trapezoid` (`x:` or `dx:`, `initial:`), the multiple
+  integrals `dblquad` and `nquad`, and `gauss_legendre` for a rule's nodes and
+  weights. The integrand is a **block**, which also takes `&f` for a Proc or
+  lambda; `dblquad`'s inner limits may be numbers or callables.
+- **Optimize:** an `Optimize` module — scipy.optimize's root finders and
+  minimisers from [go-numerics/optimize](https://github.com/go-numerics/optimize),
+  with **no cgo / no SciPy**: the bracketing finders
+  `brentq`/`brenth`/`bisect`/`ridder` and `newton` (secant, Newton–Raphson with
+  `fprime:`, Halley with `fprime2:`), `minimize_scalar`
+  (`method:` `brent`/`golden`/`bounded`, `bracket:`, `bounds:`) and `fminbound`,
+  `minimize` over several variables (`method:` `BFGS`/`CG`/`Nelder-Mead`/
+  `Powell`/`L-BFGS-B`, with `bounds:`), `curve_fit`, `approx_fprime` and
+  `bracket`. Return shapes are scipy's: one number answers a Float, a tuple an
+  Array (`curve_fit` is scipy's `(popt, pcov)`), and an `OptimizeResult` or
+  `RootResults` a Hash with symbol keys — which `full_output: true` asks a root
+  finder for.
 - **Set:** Ruby's `Set` — `new`/`[]`, `add`(`<<`)/`add?`/`delete`/`merge`/`clear`,
   `include?`/`member?`/`size`/`length`/`count`/`empty?`, `subset?`/`superset?`,
   `union`(`|`)/`intersection`(`&`)/`difference`(`-`), `each`/`to_a`/`to_set`.
@@ -923,10 +991,17 @@ $ node web/smoke.mjs web/rbgo.wasm --core
 
 | `cmd/wasm` (js/wasm) | default | `rbgo_core` |
 | --- | ---: | ---: |
-| unstripped | 102.6 MB | 23.7 MB |
-| stripped (`-ldflags='-s -w'`) | 99.9 MB | 23.1 MB |
-| stripped, `gzip -9` | 22.3 MB | 5.7 MB |
-| Go modules in the build (`go list -deps`) | 253 | 44, no gem |
+| unstripped | 107.4 MB | 28.2 MB |
+| stripped (`-ldflags='-s -w'`) | 104.5 MB | 27.5 MB |
+| stripped, `gzip -9` | 22.2 MB | 6.4 MB |
+| Go modules in the build (`go list -deps`) | 256 | 47, no gem |
+
+Measured 2026-10-18 with go1.27.2, on go-ndarray v0.12.0 and
+go-numerics/{integrate,optimize} v0.2.0. The core column grew from 23.1 MB
+when the lane was added: `Special`, `Stats`, `Integrate` and `Optimize` cost
+**+4.3 MB** between them, of which `Stats` alone is 2.7 MB (36 distributions,
+27,599 lines of Go) — the per-module attribution is in `ci.yml` beside the
+bound it moved, so the figure is answerable rather than absorbed.
 
 **What core is** (`internal/vm/core.go` holds the same list as `coreFeatures`):
 
@@ -934,7 +1009,7 @@ $ node web/smoke.mjs web/rbgo.wasm --core
 | --- | --- | --- |
 | the language | every core class and module MRI defines without a `require`: Object, Kernel, Comparable, Enumerable, the numeric tower, String, Symbol, Array, Hash, Range, Struct, Data, Proc, Method, Binding, Regexp, Encoding, the whole Exception tree, Time, Random, Marshal, File/IO/Dir/Process/Signal/ENV, Thread/Fiber, ObjectSpace, GC, Enumerator, TracePoint, … | — |
 | preloaded by MRI | `set`, `rubygems` (Gem), `did_you_mean`, `pp`/`prettyprint` | — |
-| numeric stack | Math, `cmath`, `bigdecimal`, `prime`, `matrix`, `securerandom`, **NDArray** (go-ndarray), **FFT** (go-fft), rbgo's `bag` | Image (go-images) |
+| numeric stack | Math, `cmath`, `bigdecimal`, `prime`, `matrix`, `securerandom`, **NDArray** (go-ndarray), **FFT** (go-fft), **Special** (go-numerics/special), **Stats** (go-statistics/stats), **Integrate** + **Optimize** (go-numerics), rbgo's `bag` | Image (go-images) |
 | small standard libraries | `json`, `date`, `csv`, `digest`, `base64`, `strscan`, `tsort`, `abbrev`, `benchmark`, `scanf`, `logger`, `forwardable`, `delegate`, `singleton`, `ostruct`, `pathname`, `tempfile`, `tmpdir`, `fileutils`, `find`, `etc`, `timeout`, `monitor`, `observer`, `stringio`, `English`, `rbconfig`, `objspace`, `fiber`, `fcntl`, `io/nonblock`, `unicode_normalize` | the ones that need a network, a terminal, a server or a document toolchain: `openssl`, `socket`, `net/*`, `resolv`, `ipaddr`, `uri`, `yaml`, `erb`, `cgi`, `rexml`, `rss`, `rdoc`, `irb`, `reline`, `ripper`, `optparse`, `getoptlong`, `open3`, `syslog`, `shellwords`, `zlib`, `pstore` |
 | gems | — | every third-party gem: Rails and its frameworks, Rack/Sinatra/Hanami/Roda, the database, queue and cloud clients, the template engines, Nokogiri, Prawn, Sass, Rouge, Kramdown, the go-widgets bindings, RSpec/Minitest, Puppet, … |
 

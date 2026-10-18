@@ -222,13 +222,58 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # 23.1 MB when this lane was added; the bound leaves room for growth in
-          # the interpreter itself, not for a gem coming back (the smallest heavy
-          # one alone, go-rouge, is 1.1 MB of code plus its data).
+          # 23.1 MB when this lane was added, 27.5 MB once Special, Stats,
+          # Integrate and Optimize arrived (#819): +4_284_384 in all. Measured
+          # 2026-10-18 on one worktree, js/wasm, -s -w, go-ndarray v0.12.0 and
+          # go-numerics/{integrate,optimize} v0.2.0.
+          #
+          # The cost is attributed rather than absorbed, and the two obvious ways
+          # to attribute it DISAGREE -- which is the useful part, so both are here.
+          #
+          #                  one module      added in turn
+          #                  alone           down the branch
+          #     Special        +591_000          +591_000
+          #     Stats        +2_685_365        +2_438_092
+          #     Integrate      +267_470          +266_797
+          #     Optimize     +1_020_511          +987_989
+          #                  ----------        ----------
+          #                  +4_564_346        +4_283_878
+          #
+          # Isolated OVERCOUNTS: the four share go-ndarray, the special/nd layer
+          # and the argument helpers, so each column pays for the same code and
+          # the sum exceeds the real +4_284_384 by 279_962 -- that residual IS
+          # the shared part, which neither method reports on its own. Cumulative
+          # UNDERCOUNTS all but the first, because whoever goes first pays for
+          # the shared code and the rest ride free: Special is identical in both
+          # columns precisely because it goes first, and its sum lands 506 bytes
+          # from the real total. Neither is "the" per-module cost.
+          #
+          # What both agree on, and what to read: Stats ~59% of the growth, which
+          # is what 36 distributions and 27_599 lines of Go cost; Optimize ~22%,
+          # Special ~13%, Integrate ~6%; the four bindings themselves are ~1_500
+          # lines.
+          #
+          # The same two columns measured on go-ndarray v0.11.0 gave a shared
+          # residual of 279_063 against 279_962 here -- 899 bytes apart across a
+          # dependency upgrade, which is the method agreeing with itself. An
+          # earlier revision of this comment presented the cumulative column as
+          # "each module added to origin/main alone". It was not, and a session
+          # that measured Special in isolation could only report the two as 7%
+          # apart; they were two different quantities.
+          #
+          # Note also that the build is NOT byte-reproducible across worktrees:
+          # the same commit gave 23_173_500 in one and 23_172_890 in another, 610
+          # bytes apart. Only same-worktree comparisons mean anything, which is
+          # why every figure above comes from one.
+          #
+          # The bound leaves room for growth in the interpreter itself, not for a
+          # gem coming back -- and a gem is caught by the module-path check BELOW,
+          # by name and exactly. This number only has to notice growth nobody
+          # intended, so it sits ~1.5 MB above the measurement.
           size=$(wc -c < web/rbgo-core.wasm)
           echo "rbgo-core.wasm: $size bytes"
-          if [ "$size" -gt 27000000 ]; then
-            echo "::error::the rbgo_core module is $size bytes, over the 27000000 bound"
+          if [ "$size" -gt 29000000 ]; then
+            echo "::error::the rbgo_core module is $size bytes, over the 29000000 bound"
             exit 1
           fi
           mods=$(CGO_ENABLED=0 GOOS=js GOARCH=wasm go list -tags rbgo_core -deps -f '{{with .Module}}{{.Path}}{{end}}' ./cmd/wasm | sort -u)

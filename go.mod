@@ -18,6 +18,9 @@ require (
 	github.com/go-mustache/mustache v0.1.0
 	github.com/go-ndarray/ndarray v0.12.0
 	github.com/go-nokogiri/nokogiri v0.1.0
+	github.com/go-numerics/integrate v0.2.0
+	github.com/go-numerics/optimize v0.2.0
+	github.com/go-numerics/special v0.1.0
 	github.com/go-rouge/rouge v0.3.0
 	github.com/go-ruby-aasm/aasm v0.0.0-20260717061120-cec0976ec205
 	github.com/go-ruby-abbrev/abbrev v0.0.0-20260916090008-ac08b8471830
@@ -196,6 +199,7 @@ require (
 	github.com/go-ruby-yaml/yaml v0.0.0-20260916104302-910ced2db1c7
 	github.com/go-ruby-zeitwerk/zeitwerk v0.0.0-20260916104335-29169305e951
 	github.com/go-ruby-zlib/zlib v0.0.0-20260927173414-e9d862990b6d
+	github.com/go-statistics/stats v0.1.0
 	github.com/go-webauthn/webauthn v0.18.2
 	github.com/go-xslt/xslt v0.1.0
 	github.com/nats-io/nats-server/v2 v2.15.0
