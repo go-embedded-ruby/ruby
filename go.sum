@@ -295,10 +295,10 @@ github.com/go-ndarray/ndarray v0.12.0 h1:4xfl9ZQo1m0UXopo06KypELg1wUYgQb5kdKaJPZ
 github.com/go-ndarray/ndarray v0.12.0/go.mod h1:ZcgNCBVLXt1FxeZjQWI5Z+k0SSWAT0/wR8slfat/gRA=
 github.com/go-nokogiri/nokogiri v0.1.0 h1:3Q3BewGHK16Bt34ggJeyf9xeIMJyA3dmfbIxARPgR9U=
 github.com/go-nokogiri/nokogiri v0.1.0/go.mod h1:zjghooYIK8Xfg+fL4/OUhROslx51xGsM3JKtB2TI0tg=
-github.com/go-numerics/integrate v0.1.0 h1:m1HxKk9CjH8tPjd6rPNq6tdHEl95BHokGbdniG4qbBY=
-github.com/go-numerics/integrate v0.1.0/go.mod h1:EGBYtIsMIeVcuVcf6LnLx5/p2lCwbAybdGMiHhwoh/c=
-github.com/go-numerics/optimize v0.1.0 h1:SOA+QxTuIjeZSAsd5Dyj433lItnOKWyprCbHQoLxg/c=
-github.com/go-numerics/optimize v0.1.0/go.mod h1:ieZ+/EsbBw/EfHl4W8JryPyCBB8n5a8xKk6lu/xh7zk=
+github.com/go-numerics/integrate v0.2.0 h1:IkJhDimTc7nQETCixEvbbHhtOF36GbANBKJI3mJB3Kw=
+github.com/go-numerics/integrate v0.2.0/go.mod h1:ABjpcWy8ZSOg8j6S+7YRsvMJ2LpVkH4E64/CGet2gCw=
+github.com/go-numerics/optimize v0.2.0 h1:7OO7HlQBCzT4hIMsgmI7T1PQveUwoQJ70xBP84aN7dc=
+github.com/go-numerics/optimize v0.2.0/go.mod h1:EJZo6XNRjuAQcV22re4/kJYr+bYkpKx4IVT2aiG97Pk=
 github.com/go-numerics/special v0.1.0 h1:HcsebTwcNuAhFBP8RuOirO9XVmWJSrxARiOVkyeCfUk=
 github.com/go-numerics/special v0.1.0/go.mod h1:T0QKLvh32lH5Bq9wiTEvtlaFd1vaOKRGrOPgvTeYfdM=
 github.com/go-opentype/fonts v0.10.0 h1:9f7ik795SlBEJjz6iqBE/ZV2PaTauAj537MMWw9t4OQ=

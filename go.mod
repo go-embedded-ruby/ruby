@@ -18,8 +18,8 @@ require (
 	github.com/go-mustache/mustache v0.1.0
 	github.com/go-ndarray/ndarray v0.12.0
 	github.com/go-nokogiri/nokogiri v0.1.0
-	github.com/go-numerics/integrate v0.1.0
-	github.com/go-numerics/optimize v0.1.0
+	github.com/go-numerics/integrate v0.2.0
+	github.com/go-numerics/optimize v0.2.0
 	github.com/go-numerics/special v0.1.0
 	github.com/go-rouge/rouge v0.3.0
 	github.com/go-ruby-aasm/aasm v0.0.0-20260717061120-cec0976ec205
