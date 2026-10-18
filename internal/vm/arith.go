@@ -254,6 +254,9 @@ func (vm *VM) hasCustomNeq(a object.Value) bool {
 // is the BASIC_OP_UNREDEFINED_P guard rbgo was missing -- see
 // basic_op_redefinition.go for what that cost.
 func (vm *VM) binaryOp(op bytecode.Op, a, b object.Value) object.Value {
+	if g, ok := a.(*GoObject); ok {
+		return vm.goObjectOp(op, g, b)
+	}
 	if m := vm.overriddenBasicOp(op, a); m != nil {
 		if m == basicOpRemoved {
 			// The method was removed; raise the NoMethodError a send would.

@@ -895,6 +895,9 @@ type VM struct {
 	// Hash — which is what every path that cannot answer (Object#send, Proc#call,
 	// a define_method body) still gets. GVL-guarded.
 	sendNoKW bool
+	// nativeNoKW is sendNoKW as the running native method's call site set it,
+	// saved by callNative before it clears sendNoKW (see VM.NativeNoKW).
+	nativeNoKW bool
 
 	// sendVCall carries bytecode.FlagSendVCall — "this call site was a BARE
 	// identifier, not a call" — to the dispatch that is about to miss. MRI keeps
@@ -2520,6 +2523,8 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				negArg := pop()
 				if s, ok := negArg.(*object.String); ok { // -"str" is String#-@ (a frozen copy)
 					push(vm.send(s, "-@", nil, nil))
+				} else if g, ok := negArg.(*GoObject); ok { // a host-defined -@ (embed.go)
+					push(vm.send(g, "-@", nil, nil))
 				} else {
 					push(negate(negArg))
 				}

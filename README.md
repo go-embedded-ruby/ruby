@@ -17,7 +17,9 @@ no libruby.
 examples ([what that counts](#runtime-conformance--rubyspec)) — a large and growing
 subset of the language, and **not** a drop-in replacement for CRuby. Read
 [What does not work yet](#what-does-not-work-yet) before you depend on it; the
-embedding API is currently **one function**.
+embedding API is small: `Run` for a one-shot program, and an `Interp` that keeps
+its state between evaluations, exchanges values with Go and lets Go define Ruby
+modules, classes and methods ([Embedding](#embedding-in-a-go-program)).
 
 This repository is the interpreter: a compiler that lowers Ruby to bytecode, and
 a stack VM (mruby/YARV lineage) that runs it. The Ruby **front-end** (lexer,
@@ -842,17 +844,109 @@ $ ./fib
 
 ## Embedding in a Go program
 
-The public API is deliberately tiny — **one function**:
+The public API has two halves: `Run`, which runs one program on a fresh VM, and
+`Interp`, an interpreter that stays alive between evaluations.
 
 ```go
 package ruby // github.com/go-embedded-ruby/ruby
 
 func Run(src string, out io.Writer) error
+
+func New(opts ...Option) *Interp            // WithStdout(w), WithStderr(w)
+func (in *Interp) Eval(src, file string, line int) (Value, error)
+func (in *Interp) Set(name string, v any) error
+func (in *Interp) Get(name string) (any, error)
+func (in *Interp) DefineModule(name string) (*Module, error)
+func (in *Interp) DefineClass(name string, super *Module) (*Module, error)
+func (m *Module) DefineMethod(name string, fn Func)
+func (m *Module) DefineSingletonMethod(name string, fn Func)
+type Func func(c *Call) (any, error)        // c.Self, c.Args, c.Kwargs, c.Block
 ```
 
+Everything else in this repository is under `internal/`, so this is the whole
+embedding surface. The reference is the package documentation (`go doc
+github.com/go-embedded-ruby/ruby`); what follows is what it is for.
+
+### `Interp`: one program, evaluated piece by piece
+
+`Eval` runs source as top-level code and returns the value of its last
+expression. The **top-level local variables persist** from one `Eval` to the
+next, as one binding — so do methods, classes, constants and globals, which live
+in the VM anyway:
+
+```go
+in := ruby.New(ruby.WithStdout(&out))
+in.Eval("x = 40", "cell1.rb", 1)
+v, _ := in.Eval("x + 2", "cell2.rb", 1)
+v.Inspect() // "42"
+```
+
+`file` and `line` are what `__FILE__`, `__LINE__`, backtraces and errors report.
+A Ruby exception — a `SyntaxError` included — comes back as an `*ruby.Error`
+with its `Class`, `Message`, `Backtrace`, and the `File`/`Line` of the innermost
+frame in the evaluated file, so an exception raised deep in a library is placed
+at the line of your source that led to it. `exit` is an `*Error` too
+(`ExitStatus()` reads its status), and the interpreter stays usable after any of
+them. `$stdout` and `$stderr` are separate streams, and `SetStdout`/`SetStderr`
+redirect them between evaluations. An `Interp` is not safe for concurrent use.
+
+### Values
+
+`Set` assigns a top-level local and `Get` reads one, converting:
+
+| Go | Ruby | back to Go |
+| --- | --- | --- |
+| `nil`, `bool` | `nil`, `true`/`false` | the same |
+| `int`…`int64`, `uint`…`uint64` | `Integer` | `int64` |
+| `*big.Int` | `Integer` | `int64`, or `*big.Int` when it does not fit |
+| `float32`, `float64` | `Float` | `float64` |
+| `complex64`, `complex128` | `Complex` | `complex128` |
+| `*big.Rat` | `Rational` | `*big.Rat` |
+| `string`, `[]byte` | `String` | `string` |
+| `ruby.Symbol` | `Symbol` | `ruby.Symbol` |
+| `*ndarray.Array` | `NDArray` — **the same array, no copy** | the same `*ndarray.Array` |
+| slices, arrays | `Array` | `[]any` |
+| maps | `Hash` | `map[any]any` |
+| any other Go value | an opaque object (`GoValue`, or the class `Bind` names) | the very same Go value |
+| `ruby.Value` | itself | — |
+
+A Ruby object with no Go counterpart comes back as a `ruby.Value`, which can be
+inspected, called (`v.Call("method", args...)`) and passed back in.
+
+### Defining Ruby from Go
+
+```go
+stats, _ := in.DefineModule("Stats")
+normal, _ := stats.DefineClass("Normal", nil)
+normal.Bind(&Normal{})                     // a *Normal crossing into Ruby is a Stats::Normal
+normal.DefineSingletonMethod("new", func(c *ruby.Call) (any, error) {
+	loc := c.Kwargs["loc"].Go()              // keyword arguments by name
+	...
+	return &Normal{...}, nil
+})
+normal.DefineMethod("pdf", func(c *ruby.Call) (any, error) {
+	n := c.Self.Go().(*Normal)               // the Go value back
+	...
+})
+stats.DefineSingletonMethod("minimize", func(c *ruby.Call) (any, error) {
+	y, err := c.Block.Call(x)                // call the block from Go
+	if err != nil {
+		return nil, err                        // re-raises the block's exception
+	}
+	...
+})
+```
+
+A `Func` returns its result (converted as above) or an error, which raises:
+`ruby.NewError("ArgumentError", "...")` raises that class, an error that came out
+of Ruby raises the same exception again, anything else is a `RuntimeError`. A
+`break`, `throw` or `return` in a block unwinds through the Go code that called
+it to where Ruby expects it.
+
+### `Run`
+
 `Run` parses, compiles and executes `src` on a **fresh VM**, writing the program's
-output to `out`. Everything else in this repository is under `internal/`, so this
-is the whole embedding surface today.
+output to `out`.
 
 ```console
 $ go get github.com/go-embedded-ruby/ruby@v0.1.0
@@ -902,14 +996,15 @@ The contract, as measured rather than intended:
   whose cwd was its build directory came back with a 13-byte `PATH` and a cwd of
   `/private/tmp`. Because `require_relative` resolves against that same working
   directory (next bullet), one `Run` can also write a file that a later `Run`
-  loads. There is no exported way to hold a VM open, pre-load code into it, call
-  a Ruby method from Go, or pass Go values in.
+  loads. (Holding a VM open, pre-loading code, calling Ruby from Go and passing
+  Go values in is what `Interp` is for.)
 - **A program that exits is reported as success.** `exit`, `exit!` and `abort`
   stop the program and `Run` returns **`nil`**, so an embedder cannot tell
   “finished” from “stopped”: `abort "fatal"` writes `fatal` to `out` and reports
   no error, and `exit 3` loses the 3. Only a Ruby *exception* becomes a Go error.
   The `rbgo` CLI recovers the status through `internal/vm`, which is unreachable
-  from outside, so today there is no way for an embedder to obtain it.
+  from outside, so `Run` cannot report it; `Interp.Eval` returns it as an
+  `*Error` whose `ExitStatus()` holds it.
 - **`require_relative` resolves against the process working directory**, not
   against a script, because `Run` has no file to anchor to. From a different
   working directory the same program fails with
