@@ -545,9 +545,15 @@ JRuby**):
   integer order `jn`/`yn`/`in`/`kn`, and `jn_zeros`) and the complete elliptic
   integrals (`ellipk`/`ellipkm1`/`ellipe`). Each is a **ufunc**, as scipy's is:
   a Float answers a Float, an `NDArray` answers an `NDArray` of the same shape,
-  and a Float mixed with an `NDArray` broadcasts. Names are scipy's own, taken
-  from the correspondence the Go module measures itself against — which is why
-  `softplus` and `gammaln`, not *log1pexp* and *log_gamma*.
+  and a Float mixed with an `NDArray` broadcasts. Most names are scipy's own,
+  taken from the correspondence the Go module measures itself against — which is
+  why `softplus` and `gammaln`, not *log1pexp* and *log_gamma*. **63 of the 67**
+  carry such a pairing; the four that do not are named from a reading of scipy
+  or from the Go function, and say so: `gammasgn` and `kn` exist in scipy but
+  are unpaired in the module, `log_factorial` is scipy's `gammaln(n+1)`,
+  `loggamma_sign` has no scipy counterpart, and **`in` is not a scipy name at
+  all** — scipy cannot have one, `in` being a Python keyword, so `iv(0, x)` is
+  the faithful spelling and `in` answers exactly the same.
 - **Stats:** a `Stats` module — the 32 univariate distributions of
   [go-statistics/stats](https://github.com/go-statistics/stats), a
   `scipy.stats`-style set with **no cgo / no SciPy**. Continuous:

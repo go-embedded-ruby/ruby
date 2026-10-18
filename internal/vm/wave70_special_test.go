@@ -313,3 +313,31 @@ p (Special.logsumexp(m) - Special.logsumexp([1.0, 2.0, 3.0, 4.0])).abs < 1e-15`
 		t.Errorf("got\n%s\nwant\n%s", got, want)
 	}
 }
+
+// TestSpecialNamesWithoutAScipyPairing is the test for the four names the
+// module does not pair with a scipy function, which the module comment calls
+// out as inferred rather than measured. Three of them are only defensible if
+// the relationship they stand on actually holds, so it is asserted:
+//
+//   - #in and #kn wrap Iv and Kv at integer order, and scipy has no `in` at
+//     all (it is a Python keyword), so #iv is the scipy-faithful spelling and
+//     #in has to answer exactly the same. Exactly: these are the same Go call,
+//     so an approximate comparison would hide a wrong conversion.
+//   - #gammasgn is scipy's name for the sign of Gamma, checked against the
+//     sign of Gamma itself on the intervals where it alternates.
+//
+// #loggamma_sign has no scipy counterpart in any spelling and is covered by
+// TestSpecialLogGammaSign.
+func TestSpecialNamesWithoutAScipyPairing(t *testing.T) {
+	src := `xs = [0.0, 0.5, 1.0, 2.5, 10.0]
+p xs.all? { |x| Special.in(0, x) == Special.iv(0.0, x) }
+p xs.all? { |x| Special.in(2, x) == Special.iv(2.0, x) }
+p xs.all? { |x| x.zero? || Special.kn(1, x) == Special.kv(1.0, x) }
+# gammasgn alternates with Gamma's sign on (-3, 0) and is +1 for x > 0.
+p [-2.5, -1.5, -0.5, 0.5, 5.0].map { |x| Special.gammasgn(x) }
+p [-2.5, -1.5, -0.5, 0.5, 5.0].all? { |x| Special.gammasgn(x) == (Special.gamma(x) > 0 ? 1.0 : -1.0) }`
+	const want = "true\ntrue\ntrue\n[-1.0, 1.0, -1.0, 1.0, 1.0]\ntrue\n"
+	if got := eval(t, src); got != want {
+		t.Errorf("got\n%s\nwant\n%s", got, want)
+	}
+}

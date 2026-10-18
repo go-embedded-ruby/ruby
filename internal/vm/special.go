@@ -15,12 +15,32 @@ import (
 // The Special module is a thin, cgo-free binding of github.com/go-numerics/special,
 // giving Ruby scipy.special's function set with no native SciPy dependency.
 //
-// Every name is scipy.special's own, taken from the correspondence the Go module
-// measures itself against (bench/scipy_server.py and testdata/gen/fam_*.py pair
-// each Go function with the scipy function it is compared to in ULPs) rather than
-// transliterated from the Go name -- which is why Log1pExp is #softplus and
-// LogGamma is #gammaln. Two functions have no scipy counterpart and are named
-// after the Go one: #log_factorial and #loggamma_sign.
+// Most names are scipy.special's own, taken from the correspondence the Go
+// module measures itself against: bench/scipy_server.py and
+// testdata/gen/fam_*.py pair each Go function with the scipy function it is
+// compared to in ULPs. That is where #softplus comes from (Log1pExp) and
+// #gammaln (LogGamma), neither of which transliterating the Go name would
+// give.
+//
+// Counted rather than assumed: 63 of the module's 67 functions carry such a
+// pairing. The other FOUR do not, and their Ruby names are a reading of
+// scipy rather than the module's measurement -- which is a weaker claim and
+// is made as one:
+//
+//   #gammasgn        GammaSign. scipy has gammasgn; the module records no
+//                    pairing for it.
+//   #kn              Kn, a wrapper over Kv at integer order. scipy has kn.
+//   #in              In, the same over Iv -- and scipy has NO `in`, since it
+//                    is a Python keyword. The name here is the Go one;
+//                    #iv(0, x) is the scipy-faithful spelling and answers
+//                    the same. Ruby accepts `in` after a dot, verified
+//                    against MRI as well as rbgo.
+//   #loggamma_sign   LogGammaSign, which has no scipy counterpart at all:
+//                    scipy splits it across gammaln and gammasgn.
+//
+// #log_factorial is a fifth of the same kind, named after the Go function
+// because scipy writes it gammaln(n+1) -- which the module's own fixture
+// says in as many words.
 //
 // Each binding is a ufunc, as scipy's is: an argument may be a Float, an Integer
 // or an NDArray, and the answer follows. The scalar path calls the float64
