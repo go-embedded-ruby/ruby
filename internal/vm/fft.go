@@ -129,54 +129,66 @@ func checkShape(n int, shape []int) {
 }
 
 // registerFFT installs the FFT module and its transform functions.
+//
+// Every method declares its arity AT the registration site, and def checks it
+// before the body runs. That is deliberate rather than a check inside each
+// closure: the bodies index args[0..3] directly, so a missing argument used to
+// surface as "runtime error: index out of range" -- a recovered Go panic
+// relabelled ArgumentError -- where MRI says "wrong number of arguments"
+// (#820). Putting the counts in def's signature means a method added later
+// cannot be registered without them.
 func (vm *VM) registerFFT() {
 	mod := newClass("FFT", nil)
 	mod.isModule = true
 	vm.consts["FFT"] = mod
 
-	def := func(name string, fn NativeFn) {
-		mod.smethods[name] = &Method{name: name, owner: mod, native: fn}
+	def := func(name string, min, max int, fn NativeFn) {
+		mod.smethods[name] = &Method{name: name, owner: mod, native: func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+			ndArgc(args, min, max)
+			return fn(vm, self, args, blk)
+		}}
 	}
 
-	def("fft", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+	def("fft", 1, 1, func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		return complexArray(gofft.FFT(complexSlice(args[0])))
 	})
-	def("ifft", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+	def("ifft", 1, 1, func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		return complexArray(gofft.IFFT(complexSlice(args[0])))
 	})
-	def("rfft", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+	def("rfft", 1, 1, func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		return complexArray(gofft.RFFT(floatSlice(args[0])))
 	})
-	def("irfft", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+	def("irfft", 2, 2, func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		n := int(intArg(args[1]))
 		return floatArray(gofft.IRFFT(complexSlice(args[0]), n))
 	})
-	def("fftfreq", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+	// The bin-frequency helpers take numpy's optional sample spacing d.
+	def("fftfreq", 1, 2, func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		return floatArray(gofft.FFTFreq(int(intArg(args[0])), sampleSpacing(args, 1)))
 	})
-	def("rfftfreq", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+	def("rfftfreq", 1, 2, func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		return floatArray(gofft.RFFTFreq(int(intArg(args[0])), sampleSpacing(args, 1)))
 	})
 
 	// N-dimensional transforms over flat row-major data plus an explicit shape.
-	def("fftn", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+	def("fftn", 2, 2, func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		data, shape := complexSlice(args[0]), intSlice(args[1])
 		checkShape(len(data), shape)
 		return complexArray(gofft.FFTN(data, shape))
 	})
-	def("ifftn", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+	def("ifftn", 2, 2, func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		data, shape := complexSlice(args[0]), intSlice(args[1])
 		checkShape(len(data), shape)
 		return complexArray(gofft.IFFTN(data, shape))
 	})
 	// 2-D transforms over flat row-major data of shape rows×cols.
-	def("fft2", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+	def("fft2", 3, 3, func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		data := complexSlice(args[0])
 		rows, cols := int(intArg(args[1])), int(intArg(args[2]))
 		checkShape(len(data), []int{rows, cols})
 		return complexArray(gofft.FFT2(data, [2]int{rows, cols}))
 	})
-	def("ifft2", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+	def("ifft2", 3, 3, func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		data := complexSlice(args[0])
 		rows, cols := int(intArg(args[1])), int(intArg(args[2]))
 		checkShape(len(data), []int{rows, cols})
@@ -185,7 +197,7 @@ func (vm *VM) registerFFT() {
 
 	// Window functions (numpy/scipy conventions): length n → []float64.
 	window := func(name string, f func(int) []float64) {
-		def(name, func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		def(name, 1, 1, func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 			return floatArray(f(int(intArg(args[0]))))
 		})
 	}
@@ -197,10 +209,10 @@ func (vm *VM) registerFFT() {
 
 	// Spectral helpers: one-sided power spectral density and a windowed
 	// spectrogram (an array of per-segment PSD frames).
-	def("psd", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+	def("psd", 1, 2, func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		return floatArray(gofft.PSD(floatSlice(args[0]), sampleSpacing(args, 1)))
 	})
-	def("spectrogram", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+	def("spectrogram", 4, 5, func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		signal := floatSlice(args[0])
 		segment, overlap := int(intArg(args[1])), int(intArg(args[2]))
 		win := floatSlice(args[3])
