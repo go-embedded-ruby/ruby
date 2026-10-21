@@ -609,9 +609,14 @@ JRuby**):
   `year`/`month`/`mday`/`wday`/`yday`/`cwday`, `leap?`, comparisons — binding
   [go-ruby-date](https://github.com/go-ruby-date/date).
 - **BigDecimal:** arbitrary-precision decimal — `+ - * / **`,
-  `sqrt`/`abs`/`ceil`/`floor`/`round`/`pow`, `to_f`/`to_i`, `zero?`, comparisons
-  — binding
+  `abs`/`ceil`/`floor`/`round`/`truncate`/`pow`, the divisions
+  `div`/`divmod`/`modulo`/`remainder`, the parts
+  `frac`/`fix`/`exponent`/`precision`/`sign`/`split`, `to_f`/`to_i`/`to_r`,
+  `zero?`/`nan?`/`finite?`/`infinite?`, comparisons — binding
   [go-ruby-bigdecimal](https://github.com/go-ruby-bigdecimal/bigdecimal).
+  MRI's `BigDecimal#sqrt(n)` is **not bound yet**
+  ([#825](https://github.com/go-embedded-ruby/ruby/issues/825)); this list said
+  it was until 2026-10-20.
 - **Bag:** a multiset / counter (element → multiplicity) — `add`(`<<`)/`delete`,
   `count`/`size`/`distinct`/`most_common`, `union`/`difference`/`intersection`,
   `include?`/`each`/`to_a` — binding
