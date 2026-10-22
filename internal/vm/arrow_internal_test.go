@@ -42,7 +42,9 @@ func TestArrowScalarToRuby(t *testing.T) {
 		{uint64(64), "64"},
 		{uint64(math.MaxInt64) + 1, big64.String()},
 		{uint(65), "65"},
-		{uint(math.MaxInt64) + 1, big64.String()},
+		// math.MaxUint is past MaxInt64 on 64-bit targets (the Bignum branch)
+		// and fits a Fixnum on 32-bit ones, where uint(MaxInt64)+1 overflows.
+		{uint(math.MaxUint), new(big.Int).SetUint64(uint64(math.MaxUint)).String()},
 		{float32(1.5), "1.5"},
 		{float64(2.5), "2.5"},
 		{"hi", "\"hi\""},
