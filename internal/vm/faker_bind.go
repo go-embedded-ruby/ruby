@@ -122,7 +122,7 @@ func fakerIntArg(args []object.Value, n, def int) int {
 	}
 	switch v := args[n].(type) {
 	case object.Integer:
-		return int(v)
+		return clampInt(v)
 	case object.Nil:
 		return def
 	}

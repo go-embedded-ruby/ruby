@@ -69,7 +69,7 @@ func (vm *VM) registerDeviseErrors(mod *RClass) {
 // secure_compare helpers and the shared Devise.config accessor and setup block.
 func (vm *VM) registerDeviseModule(mod *RClass) {
 	mod.smethods["friendly_token"] = &Method{name: "friendly_token", owner: mod, native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		length := int(intArgOr(args, int64(devise.DefaultConfig().FriendlyTokenLength)))
+		length := clampInt(intArgOr(args, int64(devise.DefaultConfig().FriendlyTokenLength)))
 		return object.NewString(devise.FriendlyToken(length))
 	}}
 	mod.smethods["secure_compare"] = &Method{name: "secure_compare", owner: mod, native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
@@ -104,7 +104,7 @@ func (vm *VM) registerDeviseEncryptor(mod *RClass) {
 		}
 		cost := devise.DefaultConfig().Stretches
 		if len(args) > 2 {
-			cost = int(intArg(args[2]))
+			cost = clampInt(intArg(args[2]))
 		}
 		h, err := devise.Encryptor{}.Digest(strArg(args[0]), pepper, cost)
 		deviseCheck(err)
@@ -204,7 +204,7 @@ func (vm *VM) registerDeviseConfigSettings(cls *RClass) {
 		return object.IntValue(int64(self(v).cfg.Stretches))
 	})
 	d("stretches=", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		self(v).cfg.Stretches = int(intArg(args[0]))
+		self(v).cfg.Stretches = clampInt(intArg(args[0]))
 		return args[0]
 	})
 	d("pepper", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -218,7 +218,7 @@ func (vm *VM) registerDeviseConfigSettings(cls *RClass) {
 		return object.IntValue(int64(self(v).cfg.MaximumAttempts))
 	})
 	d("maximum_attempts=", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		self(v).cfg.MaximumAttempts = int(intArg(args[0]))
+		self(v).cfg.MaximumAttempts = clampInt(intArg(args[0]))
 		return args[0]
 	})
 	d("unlock_strategy=", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
@@ -250,11 +250,11 @@ func (vm *VM) registerDeviseConfigSettings(cls *RClass) {
 		return args[0]
 	})
 	d("password_length_min=", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		self(v).cfg.PasswordLengthMin = int(intArg(args[0]))
+		self(v).cfg.PasswordLengthMin = clampInt(intArg(args[0]))
 		return args[0]
 	})
 	d("password_length_max=", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		self(v).cfg.PasswordLengthMax = int(intArg(args[0]))
+		self(v).cfg.PasswordLengthMax = clampInt(intArg(args[0]))
 		return args[0]
 	})
 	d("expire_all_remember_me_on_sign_out=", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {

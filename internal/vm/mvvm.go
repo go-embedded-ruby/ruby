@@ -146,7 +146,7 @@ func mvvmValueToAny(v object.Value) any {
 	case object.Bool:
 		return bool(x)
 	case object.Integer:
-		return int(x)
+		return clampInt(x)
 	case object.Float:
 		return float64(x)
 	case *object.String:

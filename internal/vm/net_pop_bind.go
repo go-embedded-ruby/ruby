@@ -172,7 +172,7 @@ func popStrAt(args []object.Value, i int) string {
 func popIntAt(args []object.Value, i, def int) int {
 	if i < len(args) && !object.IsNil(args[i]) {
 		if n, ok := args[i].(object.Integer); ok {
-			return int(n)
+			return clampInt(n)
 		}
 	}
 	return def

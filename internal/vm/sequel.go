@@ -272,12 +272,12 @@ func (vm *VM) registerSequelDataset(mod *RClass) {
 	})
 	d("limit", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		if len(args) == 2 {
-			return chain(v, self(v).ds.LimitOffset(int(pgIntArg(args[0])), int(pgIntArg(args[1]))))
+			return chain(v, self(v).ds.LimitOffset(clampInt(pgIntArg(args[0])), clampInt(pgIntArg(args[1]))))
 		}
-		return chain(v, self(v).ds.Limit(int(pgIntArg(pgArg0(args)))))
+		return chain(v, self(v).ds.Limit(clampInt(pgIntArg(pgArg0(args)))))
 	})
 	d("offset", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return chain(v, self(v).ds.Offset(int(pgIntArg(pgArg0(args)))))
+		return chain(v, self(v).ds.Offset(clampInt(pgIntArg(pgArg0(args)))))
 	})
 	d("join", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		table, cond := sequelJoinArgs(args)

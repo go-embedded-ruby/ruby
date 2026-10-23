@@ -96,7 +96,7 @@ func mathInt32(x int64) int {
 	if x < math.MinInt32 {
 		raise("RangeError", "integer %d too small to convert to 'int'", x)
 	}
-	return int(x)
+	return clampInt(x)
 }
 
 // mathBignumRange always raises: a Bignum exceeds a machine long, so MRI's

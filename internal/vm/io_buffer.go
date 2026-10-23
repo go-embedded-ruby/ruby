@@ -525,11 +525,11 @@ func (vm *VM) registerIOBuffer() {
 		data := b.live()
 		off := 0
 		if len(args) > 0 {
-			off = int(intArg(args[0]))
+			off = clampInt(intArg(args[0]))
 		}
 		length := len(data) - off
 		if len(args) > 1 {
-			length = int(intArg(args[1]))
+			length = clampInt(intArg(args[1]))
 		}
 		if off < 0 || length < 0 || off+length > len(data) {
 			raise("ArgumentError", "Specified offset+length is bigger than the buffer size!")

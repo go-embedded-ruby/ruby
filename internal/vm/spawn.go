@@ -463,7 +463,7 @@ func (vm *VM) runForkBlock(blk *Proc) (code int) {
 			// departure from it: the block IS the child, so the child's exit is
 			// this function returning the status it asked for.
 			if rerr, ok := r.(RubyError); ok && vm.classIsA(rerr.Class, "SystemExit") {
-				code = int(vm.exitStatusOf(rerr.Obj))
+				code = clampInt(vm.exitStatusOf(rerr.Obj))
 				return
 			}
 			panic(r)
@@ -478,7 +478,7 @@ func (vm *VM) runForkBlock(blk *Proc) (code int) {
 func (vm *VM) recordChild(code int) int64 {
 	vm.childPidSeq++
 	pid := 100000 + vm.childPidSeq
-	vm.children = append(vm.children, childStatus{pid: int(pid), code: code})
+	vm.children = append(vm.children, childStatus{pid: clampInt(pid), code: code})
 	return pid
 }
 
@@ -1076,11 +1076,11 @@ func (vm *VM) reapAny(pid int) (childStatus, bool) {
 func (vm *VM) waitForChild(args []object.Value) (childStatus, bool) {
 	pid := -1
 	if len(args) > 0 && !object.IsNil(args[0]) {
-		pid = int(vm.procToInt(args[0]))
+		pid = clampInt(vm.procToInt(args[0]))
 	}
 	flags := 0
 	if len(args) > 1 && !object.IsNil(args[1]) {
-		flags = int(vm.procToInt(args[1]))
+		flags = clampInt(vm.procToInt(args[1]))
 	}
 	st, ok := vm.reapAny(pid)
 	if !ok {
@@ -1158,7 +1158,7 @@ func (vm *VM) registerProcessWait(mod *RClass, status *RClass) {
 // waitPidArg reads the optional pid argument of a wait-style call.
 func waitPidArg(vm *VM, args []object.Value) int {
 	if len(args) > 0 && !object.IsNil(args[0]) {
-		return int(vm.procToInt(args[0]))
+		return clampInt(vm.procToInt(args[0]))
 	}
 	return -1
 }

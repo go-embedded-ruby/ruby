@@ -121,7 +121,7 @@ func defIOReadExtra(cls *RClass) {
 		o := self.(*IOObj)
 		ioCheckReadable(o)
 		o.pipeRefresh()
-		n := int(intArg(args[0]))
+		n := clampInt(intArg(args[0]))
 		if n < 0 {
 			raise("ArgumentError", "negative length %d given", n)
 		}
@@ -305,8 +305,8 @@ func defIOSeekable(cls *RClass) {
 		// #to_int, then io_setstrbuf coerces the optional buffer with #to_str —
 		// all before the maxlen==0 early return, so a non-String buffer still
 		// raises and a zero-length read leaves the buffer's bytes untouched.
-		n := int(vm.toIntCoerce(args[0]))
-		off := int(vm.toIntCoerce(args[1]))
+		n := clampInt(vm.toIntCoerce(args[0]))
+		off := clampInt(vm.toIntCoerce(args[1]))
 		var buf *object.String
 		if len(args) > 2 {
 			buf = vm.ioBufferArg(args[2])
@@ -338,7 +338,7 @@ func defIOSeekable(cls *RClass) {
 		// stream is checked, so a missing #to_s surfaces as NoMethodError and a
 		// non-Integer offset as the "into Integer" TypeError.
 		data := []byte(vm.objAsString(args[0]))
-		off := int(vm.toIntCoerce(args[1]))
+		off := clampInt(vm.toIntCoerce(args[1]))
 		ioCheckOpen(o)
 		if off < 0 {
 			raise("Errno::EINVAL", "Invalid argument - pwrite")

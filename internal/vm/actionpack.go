@@ -228,7 +228,7 @@ func apStr(v object.Value) string {
 func apInt(v object.Value) int {
 	switch n := v.(type) {
 	case object.Integer:
-		return int(n)
+		return clampInt(n)
 	case object.Float:
 		return int(n)
 	}

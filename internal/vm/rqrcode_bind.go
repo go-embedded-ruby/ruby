@@ -33,9 +33,9 @@ func rqrcodeNew(data string, opt object.Value) *rqrcode.QRCode {
 			case "level":
 				opts = append(opts, rqrcode.WithLevelSymbol(rqrcodeSym(val)))
 			case "size":
-				opts = append(opts, rqrcode.WithSize(int(intArg(val))))
+				opts = append(opts, rqrcode.WithSize(clampInt(intArg(val))))
 			case "max_size":
-				opts = append(opts, rqrcode.WithMaxSize(int(intArg(val))))
+				opts = append(opts, rqrcode.WithMaxSize(clampInt(intArg(val))))
 			case "mode":
 				opts = append(opts, rqrcode.WithModeSymbol(rqrcodeSym(val)))
 			}
@@ -92,13 +92,13 @@ func rqrcodeAsSVG(q *rqrcode.QRCode, opt *object.Hash) string {
 	rqrcodeEachOpt(opt, func(key string, val object.Value) {
 		switch key {
 		case "offset":
-			o.Offset = int(intArg(val))
+			o.Offset = clampInt(intArg(val))
 		case "color":
 			o.Color = rqrcodeStr(val)
 		case "fill":
 			o.Fill = rqrcodeStr(val)
 		case "module_size":
-			o.ModuleSize = int(intArg(val))
+			o.ModuleSize = clampInt(intArg(val))
 		case "shape_rendering":
 			o.ShapeRendering = rqrcodeStr(val)
 		case "use_path":
@@ -126,7 +126,7 @@ func rqrcodeAsANSI(q *rqrcode.QRCode, opt *object.Hash) string {
 		case "fill_character":
 			o.FillCharacter = rqrcodeStr(val)
 		case "quiet_zone_size":
-			o.QuietZoneSize = int(intArg(val))
+			o.QuietZoneSize = clampInt(intArg(val))
 		}
 	})
 	return q.AsANSI(o)
@@ -143,7 +143,7 @@ func rqrcodeToString(q *rqrcode.QRCode, opt *object.Hash) string {
 		case "light":
 			o.Light = rqrcodeStr(val)
 		case "quiet_zone_size":
-			o.QuietZoneSize = int(intArg(val))
+			o.QuietZoneSize = clampInt(intArg(val))
 		}
 	})
 	return q.ToString(o)

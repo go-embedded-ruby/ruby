@@ -210,7 +210,7 @@ func avValue(v object.Value) any {
 	case object.Bool:
 		return bool(x)
 	case object.Integer:
-		return int(x)
+		return clampInt(x)
 	case object.Float:
 		return float64(x)
 	case *object.String:
@@ -325,7 +325,7 @@ func avHashStr(h *object.Hash, key, def string) string {
 func avHashInt(h *object.Hash, key string, def int) int {
 	if v, ok := avHashVal(h, key); ok {
 		if i, ok := v.(object.Integer); ok {
-			return int(i)
+			return clampInt(i)
 		}
 	}
 	return def

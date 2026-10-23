@@ -390,14 +390,14 @@ func (vm *VM) primitiveConvert(c *converterObj, args []object.Value) object.Valu
 
 	offset := len(dst.Bytes())
 	if len(pos) > 2 && pos[2] != object.NilV {
-		offset = int(vm.toIntCoerce(pos[2]))
+		offset = clampInt(vm.toIntCoerce(pos[2]))
 	}
 	if offset > len(dst.Bytes()) {
 		raise("ArgumentError", "too big destination byte offset")
 	}
 	size := -1
 	if len(pos) > 3 && pos[3] != object.NilV {
-		size = int(vm.toIntCoerce(pos[3]))
+		size = clampInt(vm.toIntCoerce(pos[3]))
 	}
 	partial := false
 	if opts != nil {
@@ -611,7 +611,7 @@ func (c *converterObj) invalidMessage(errBytes, readAgain []byte) string {
 func (vm *VM) converterPutback(c *converterObj, args []object.Value) object.Value {
 	n := len(c.readAgain)
 	if len(args) > 0 && args[0] != object.NilV {
-		if k := int(vm.toIntCoerce(args[0])); k < n {
+		if k := clampInt(vm.toIntCoerce(args[0])); k < n {
 			n = k
 		}
 	}

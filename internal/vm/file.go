@@ -90,7 +90,7 @@ func (vm *VM) registerFile() {
 		if len(args) == 3 {
 			// MRI coerces the flags argument with rb_to_int (NUM2INT), so a
 			// non-Integer that answers #to_int is accepted rather than a TypeError.
-			flags = int(coerceInt(vm, args[2]))
+			flags = clampInt(coerceInt(vm, args[2]))
 		}
 		return object.Bool(fnmatch(strArg(args[0]), vm.filePathArg(args[1]), flags))
 	}
@@ -115,7 +115,7 @@ func (vm *VM) registerFile() {
 		}
 		level := 1
 		if len(args) > 1 {
-			level = int(coerceInt(vm, args[1]))
+			level = clampInt(coerceInt(vm, args[1]))
 			if level < 0 {
 				raise("ArgumentError", "negative level: %d", level)
 			}
@@ -405,7 +405,7 @@ func (vm *VM) registerFile() {
 			setUmask(cur) // restore: a no-arg umask is a pure read
 			return object.IntValue(int64(cur))
 		}
-		return object.IntValue(int64(setUmask(int(vm.num2mode(args[0])))))
+		return object.IntValue(int64(setUmask(clampInt(vm.num2mode(args[0])))))
 	})
 	// Access predicates: readable?/writable?/executable? for the current effective
 	// user, plus executable_real? — thin File.stat-and-test wrappers that return
@@ -1040,7 +1040,7 @@ func chownID(v object.Value) int {
 	if v == object.NilV {
 		return -1
 	}
-	return int(intArg(v))
+	return clampInt(intArg(v))
 }
 
 // timeArgUnix marshals a File.utime time argument (a Time, or an Integer/Float

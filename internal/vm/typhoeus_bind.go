@@ -97,7 +97,7 @@ func rubyHashToTyphoeusOptions(h *object.Hash) typhoeus.Options {
 		o.FollowLocation = v.Truthy()
 	}
 	if v, ok := h.Get(object.Symbol("maxredirs")); ok {
-		o.MaxRedirects = int(toInt(v))
+		o.MaxRedirects = clampInt(toInt(v))
 	}
 	return o
 }

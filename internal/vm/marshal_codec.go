@@ -196,7 +196,7 @@ func (d *mDumper) writeInt(b *big.Int) {
 	if b.IsInt64() {
 		if n := b.Int64(); n >= marshalFixnumMin && n <= marshalFixnumMax {
 			d.buf = append(d.buf, 'i')
-			d.writeLong(int(n))
+			d.writeLong(clampInt(n))
 			return
 		}
 	}
@@ -1225,7 +1225,7 @@ func (r *mReader) applyIvar(base object.Value, name string, val object.Value) {
 		// #zone as nil.
 		case "offset":
 			if off, ok := val.(object.Integer); ok {
-				b.setFixedZone("", int(off))
+				b.setFixedZone("", clampInt(off))
 			}
 		case "zone":
 			if s, ok := val.(*object.String); ok {

@@ -239,7 +239,7 @@ func redisOptsFromHash(h *object.Hash, opts *redis.Options) object.Value {
 		conn = v
 	}
 	if v, ok := get("db"); ok {
-		opts.DB = int(redisInt(v))
+		opts.DB = clampInt(redisInt(v))
 	}
 	if v, ok := get("username"); ok {
 		opts.Username = redisStr(v)
@@ -248,7 +248,7 @@ func redisOptsFromHash(h *object.Hash, opts *redis.Options) object.Value {
 		opts.Password = redisStr(v)
 	}
 	if v, ok := get("protocol"); ok {
-		opts.Protocol = int(redisInt(v))
+		opts.Protocol = clampInt(redisInt(v))
 	}
 	return conn
 }

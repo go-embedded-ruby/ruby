@@ -214,7 +214,7 @@ func (vm *VM) bootstrap() {
 			need = -need - 1
 		}
 		if len(args) > 0 {
-			need = int(intArg(args[0]))
+			need = clampInt(intArg(args[0]))
 			// A lambda enforces its arity, so currying it to an arity it cannot
 			// satisfy — fewer than its required positionals, or more than it will
 			// accept when it has no splat — raises, exactly as calling it would. A
@@ -1102,7 +1102,7 @@ func (vm *VM) bootstrap() {
 		if hasBase {
 			// The base itself is coerced with #to_int, and a valid radix is 0
 			// (auto-detect) or 2..36 — anything else is MRI's "invalid radix".
-			base = int(vm.toIntCoerce(args[1]))
+			base = clampInt(vm.toIntCoerce(args[1]))
 			if base != 0 && (base < 2 || base > 36) {
 				return fail("ArgumentError", "invalid radix %d", base)
 			}
@@ -1810,7 +1810,7 @@ func (vm *VM) bootstrap() {
 	classCmpOp := func(want func(int) bool) NativeFn {
 		return func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 			if c, ok := classCmp(self, args[0]).(object.Integer); ok {
-				return object.Bool(want(int(c)))
+				return object.Bool(want(clampInt(c)))
 			}
 			return object.NilV
 		}
@@ -2286,7 +2286,7 @@ func (vm *VM) bootstrap() {
 	vm.cString.defineArgc("sum", -1, func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		bits := 16
 		if len(args) > 0 {
-			bits = int(toInt(args[0]))
+			bits = clampInt(toInt(args[0]))
 		}
 		return object.IntValue(stringSum(strOf(self), bits))
 	})
@@ -2579,7 +2579,7 @@ func (vm *VM) bootstrap() {
 		nChars := utf8.RuneCountInString(s)
 		start := 0
 		if len(args) > 1 { // optional character offset (negative counts from the end)
-			start = int(vm.repeatLong(args[1]))
+			start = clampInt(vm.repeatLong(args[1]))
 			if start < 0 {
 				start += nChars
 			}
@@ -2617,7 +2617,7 @@ func (vm *VM) bootstrap() {
 		nChars := utf8.RuneCountInString(s)
 		limit := nChars
 		if len(args) > 1 { // optional character offset (negative counts from the end)
-			limit = int(vm.repeatLong(args[1]))
+			limit = clampInt(vm.repeatLong(args[1]))
 			if limit < 0 {
 				limit += nChars
 			}
@@ -2692,7 +2692,7 @@ func (vm *VM) bootstrap() {
 		if len(args) > 0 {
 			// The base is coerced through #to_int (MRI's rb_num2long), so a Float
 			// or a #to_int object works and a non-integer raises TypeError.
-			base = int(vm.integerArg(args[0]).Int64())
+			base = clampInt(vm.integerArg(args[0]).Int64())
 		}
 		return stringToInt(strOf(self), base)
 	})
@@ -2990,7 +2990,7 @@ func (vm *VM) bootstrap() {
 		ins := []rune(insStr)
 		r := []rune(s.Str())
 		idx := vm.repeatLong(args[0])
-		at := int(idx)
+		at := clampInt(idx)
 		if at < 0 {
 			at += len(r) + 1
 		}
@@ -3211,7 +3211,7 @@ func (vm *VM) bootstrap() {
 				rng = vm.coerceRangeBounds(rng)
 				beg := 0
 				if _, isNil := rng.Lo.(object.Nil); !isNil {
-					beg = int(intArg(rng.Lo))
+					beg = clampInt(intArg(rng.Lo))
 					if beg < 0 {
 						if beg += len(a); beg < 0 {
 							raise("RangeError", "%s out of range", rng.Inspect())
@@ -3220,7 +3220,7 @@ func (vm *VM) bootstrap() {
 				}
 				end := len(a)
 				if _, isNil := rng.Hi.(object.Nil); !isNil {
-					end = int(intArg(rng.Hi))
+					end = clampInt(intArg(rng.Hi))
 					if end < 0 {
 						end += len(a)
 					}
@@ -3233,7 +3233,7 @@ func (vm *VM) bootstrap() {
 				}
 				continue
 			}
-			appendAt(int(vm.repeatLong(idxV)))
+			appendAt(clampInt(vm.repeatLong(idxV)))
 		}
 		return object.NewArrayFromSlice(out)
 	})
@@ -3372,7 +3372,7 @@ func (vm *VM) bootstrap() {
 			raise("ArgumentError", "wrong number of arguments (given %d, expected 0..1)", len(args))
 		}
 		if len(args) > 0 { // pop(n) removes and returns the last n as an array
-			n := int(vm.toIntCoerce(args[0]))
+			n := clampInt(vm.toIntCoerce(args[0]))
 			if n < 0 {
 				raise("ArgumentError", "negative array size")
 			}
@@ -3398,7 +3398,7 @@ func (vm *VM) bootstrap() {
 			raise("ArgumentError", "wrong number of arguments (given %d, expected 0..1)", len(args))
 		}
 		if len(args) > 0 { // shift(n) removes and returns the first n as an array
-			n := int(vm.toIntCoerce(args[0]))
+			n := clampInt(vm.toIntCoerce(args[0]))
 			if n < 0 {
 				raise("ArgumentError", "negative array size")
 			}
@@ -3440,7 +3440,7 @@ func (vm *VM) bootstrap() {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1+)")
 		}
 		raw := vm.repeatLong(args[0])
-		idx := int(raw)
+		idx := clampInt(raw)
 		ins := args[1:]
 		if len(ins) == 0 {
 			return a
@@ -3541,7 +3541,7 @@ func (vm *VM) bootstrap() {
 		if n := len(a.Elems); n > 0 {
 			k := 1
 			if len(args) > 0 {
-				k = int(vm.repeatLong(args[0]))
+				k = clampInt(vm.repeatLong(args[0]))
 			}
 			k = ((k % n) + n) % n
 			a.Elems = append(append([]object.Value{}, a.Elems[k:]...), a.Elems[:k]...)
@@ -3705,7 +3705,7 @@ func (vm *VM) bootstrap() {
 			}
 			return a.Elems[vm.drawIndex(rng, n)]
 		}
-		count := int(vm.repeatLong(pos[0]))
+		count := clampInt(vm.repeatLong(pos[0]))
 		if count < 0 {
 			raise("ArgumentError", "negative sample number")
 		}
@@ -3739,7 +3739,7 @@ func (vm *VM) bootstrap() {
 		if len(args) == 3 {
 			raw := vm.repeatLong(args[0])
 			start := normIndex(raw, len(a.Elems))
-			length := int(vm.repeatLong(args[1]))
+			length := clampInt(vm.repeatLong(args[1]))
 			if start < 0 {
 				raise("IndexError", "index %d too small for array; minimum: -%d", raw, len(a.Elems))
 			}
@@ -3982,14 +3982,14 @@ func (vm *VM) bootstrap() {
 	vm.cArray.defineArgc("flatten", -1, func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		depth := -1
 		if len(args) > 0 && !object.IsNil(args[0]) {
-			depth = int(vm.repeatLong(args[0])) // #to_int coercion (a nil depth is unbounded)
+			depth = clampInt(vm.repeatLong(args[0])) // #to_int coercion (a nil depth is unbounded)
 		}
 		return object.NewArrayFromSlice(vm.flattenDepth(self.(*object.Array).Elems, depth))
 	})
 	vm.cArray.defineArgc("flatten!", -1, func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		depth := -1
 		if len(args) > 0 && !object.IsNil(args[0]) {
-			depth = int(vm.repeatLong(args[0])) // #to_int coercion (a nil depth is unbounded)
+			depth = clampInt(vm.repeatLong(args[0])) // #to_int coercion (a nil depth is unbounded)
 		}
 		a := self.(*object.Array)
 		vm.checkArrayFrozen(a)
@@ -4042,7 +4042,7 @@ func (vm *VM) bootstrap() {
 		if blk == nil {
 			return enumFor(self, "each_slice", args...)
 		}
-		n := int(intArg(args[0]))
+		n := clampInt(intArg(args[0]))
 		if n <= 0 {
 			raise("ArgumentError", "invalid slice size")
 		}
@@ -4065,7 +4065,7 @@ func (vm *VM) bootstrap() {
 		if blk == nil {
 			return enumFor(self, "each_cons", args...)
 		}
-		n := int(intArg(args[0]))
+		n := clampInt(intArg(args[0]))
 		if n <= 0 {
 			raise("ArgumentError", "invalid size")
 		}
@@ -4167,7 +4167,7 @@ func (vm *VM) bootstrap() {
 		return object.NewArrayFromSlice(out)
 	})
 	vm.cArray.defineArgc("combination", 1, func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
-		k := int(intArg(args[0]))
+		k := clampInt(intArg(args[0]))
 		elems := self.(*object.Array).Elems
 		var combos []object.Value
 		if k >= 0 && k <= len(elems) {
@@ -4211,7 +4211,7 @@ func (vm *VM) bootstrap() {
 				n := len(self.(*object.Array).Elems)
 				kk := n
 				if len(args) > 0 {
-					kk = int(vm.toIntCoerce(args[0]))
+					kk = clampInt(vm.toIntCoerce(args[0]))
 				}
 				return object.NormInt(permutationCountBig(n, kk))
 			}, args...)
@@ -4219,7 +4219,7 @@ func (vm *VM) bootstrap() {
 		elems := self.(*object.Array).Elems
 		k := len(elems)
 		if len(args) > 0 {
-			k = int(vm.toIntCoerce(args[0]))
+			k = clampInt(vm.toIntCoerce(args[0]))
 		}
 		var perms []object.Value
 		if k >= 0 && k <= len(elems) {
@@ -4251,12 +4251,12 @@ func (vm *VM) bootstrap() {
 		return self
 	})
 	vm.cArray.defineArgc("repeated_combination", 1, func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
-		k := int(vm.repeatLong(args[0]))
+		k := clampInt(vm.repeatLong(args[0]))
 		// No block: a lazy Enumerator that re-reads self when iterated (MRI sees
 		// later mutations of the array), with an explicit combinatorial #size.
 		if blk == nil {
 			return enumForSized(self, "repeated_combination", func(vm *VM) object.Value {
-				kk := int(vm.repeatLong(args[0]))
+				kk := clampInt(vm.repeatLong(args[0]))
 				if kk < 0 {
 					return object.IntValue(0)
 				}
@@ -4296,10 +4296,10 @@ func (vm *VM) bootstrap() {
 		return self
 	})
 	vm.cArray.defineArgc("repeated_permutation", 1, func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
-		k := int(vm.repeatLong(args[0]))
+		k := clampInt(vm.repeatLong(args[0]))
 		if blk == nil {
 			return enumForSized(self, "repeated_permutation", func(vm *VM) object.Value {
-				kk := int(vm.repeatLong(args[0]))
+				kk := clampInt(vm.repeatLong(args[0]))
 				if kk < 0 {
 					return object.IntValue(0)
 				}
@@ -4370,7 +4370,7 @@ func (vm *VM) bootstrap() {
 		}
 		shift := 1
 		if len(args) > 0 {
-			shift = int(vm.repeatLong(args[0]))
+			shift = clampInt(vm.repeatLong(args[0]))
 		}
 		shift = ((shift % n) + n) % n
 		out := make([]object.Value, n)
@@ -4471,7 +4471,7 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cArray.defineArgc("take", 1, func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
-		n := int(intArg(args[0]))
+		n := clampInt(intArg(args[0]))
 		if n < 0 {
 			raise("ArgumentError", "attempt to take negative size")
 		}
@@ -4484,7 +4484,7 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cArray.defineArgc("drop", 1, func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
-		n := int(vm.toIntCoerce(args[0]))
+		n := clampInt(vm.toIntCoerce(args[0]))
 		if n < 0 {
 			raise("ArgumentError", "attempt to drop negative size")
 		}
@@ -4635,14 +4635,14 @@ func (vm *VM) bootstrap() {
 	vm.cArray.defineArgc("min_by", -1, func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		a := self.(*object.Array)
 		if blk != nil && len(args) > 0 && !object.IsNil(args[0]) {
-			return vm.arrayByExtremeN(a, blk, int(coerceInt(vm, args[0])), -1)
+			return vm.arrayByExtremeN(a, blk, clampInt(coerceInt(vm, args[0])), -1)
 		}
 		return vm.arrayByExtreme(a, blk, "min_by", -1)
 	})
 	vm.cArray.defineArgc("max_by", -1, func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		a := self.(*object.Array)
 		if blk != nil && len(args) > 0 && !object.IsNil(args[0]) {
-			return vm.arrayByExtremeN(a, blk, int(coerceInt(vm, args[0])), 1)
+			return vm.arrayByExtremeN(a, blk, clampInt(coerceInt(vm, args[0])), 1)
 		}
 		return vm.arrayByExtreme(a, blk, "max_by", 1)
 	})
@@ -5498,7 +5498,7 @@ func (vm *VM) bootstrap() {
 	vm.cHash.defineArgc("flatten", -1, func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		depth := 1
 		if len(args) > 0 {
-			depth = int(intArg(args[0]))
+			depth = clampInt(intArg(args[0]))
 		}
 		h := self.(*object.Hash)
 		pairs := make([]object.Value, 0, len(h.Keys))
@@ -5598,7 +5598,7 @@ func (vm *VM) bootstrap() {
 		}
 		// The count is coerced with #to_int (so a Float truncates and a mock_int
 		// works); a negative count is an error, like Array#first.
-		n := int(vm.toIntCoerce(args[0]))
+		n := clampInt(vm.toIntCoerce(args[0]))
 		if n < 0 {
 			raise("ArgumentError", "negative array size")
 		}
@@ -5687,7 +5687,7 @@ func (vm *VM) bootstrap() {
 			if object.IsNil(r.Lo) {
 				raise("RangeError", "cannot get the minimum of beginless range")
 			}
-			n := int(vm.toIntCoerce(args[0]))
+			n := clampInt(vm.toIntCoerce(args[0]))
 			if n < 0 {
 				raise("ArgumentError", "negative array size")
 			}
@@ -5802,7 +5802,7 @@ func (vm *VM) bootstrap() {
 	// full materialised range, so it is bounded only.
 	vm.cRange.defineArgc("take", 1, func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		r := self.(*object.Range)
-		n := int(intArg(args[0]))
+		n := clampInt(intArg(args[0]))
 		if n < 0 {
 			raise("ArgumentError", "attempt to take negative size")
 		}
@@ -5825,7 +5825,7 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cRange.defineArgc("drop", 1, func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		elems := vm.rangeElemsV(self.(*object.Range))
-		n := int(intArg(args[0]))
+		n := clampInt(intArg(args[0]))
 		if n < 0 {
 			raise("ArgumentError", "attempt to drop negative size")
 		}
@@ -5955,7 +5955,7 @@ func (vm *VM) bootstrap() {
 					}
 				}
 				elems := strRangeElems(loS.Str(), r.Hi.(*object.String).Str(), r.Exclusive)
-				for i := 0; i < len(elems); i += int(n) {
+				for i := 0; i < len(elems); i += clampInt(n) {
 					vm.callBlock(blk, []object.Value{elems[i]})
 				}
 				return r
@@ -6045,7 +6045,7 @@ func (vm *VM) bootstrap() {
 		// (and `rb_usascii_str_new2("0")` for zero), and bignum.c's rb_big2str does
 		// the same, so every Integer#to_s is US-ASCII — core/integer/to_s_spec
 		// asserts it. rbgo tagged the digits UTF-8.
-		return object.NewStringBytesEnc([]byte(bigVal(self).Text(int(base))), "US-ASCII")
+		return object.NewStringBytesEnc([]byte(bigVal(self).Text(clampInt(base))), "US-ASCII")
 	})
 	// Bitwise / shift operators (arbitrary precision via big.Int, so a left shift
 	// promotes to a Bignum and bitwise ops work on Bignums too).
@@ -6824,7 +6824,7 @@ func absSign(a int64) (int64, bool) {
 func floatRound(f float64, args []object.Value, fn func(float64) float64) object.Value {
 	ndigits := 0
 	if len(args) > 0 {
-		ndigits = int(intArg(args[0]))
+		ndigits = clampInt(intArg(args[0]))
 	}
 	pow := math.Pow(10, float64(ndigits))
 	r := fn(f*pow) / pow
@@ -6866,7 +6866,7 @@ func clampCount(n int64, max int) int {
 	if n > int64(max) {
 		return max
 	}
-	return int(n)
+	return clampInt(n)
 }
 
 // arrayIndex normalizes a (possibly negative) index and reports whether it is in
@@ -6879,7 +6879,7 @@ func arrayIndex(a *object.Array, i int64) (int, bool) {
 	if i < 0 || i >= n {
 		return 0, false
 	}
-	return int(i), true
+	return clampInt(i), true
 }
 
 // arrayArefSpan resolves Array#[]/#slice/#slice! arguments to a location in a.
@@ -7018,7 +7018,7 @@ func (vm *VM) drawIndex(rng object.Value, bound int) int {
 	if idx < 0 || idx >= int64(bound) {
 		raise("RangeError", "random number too big %d", idx)
 	}
-	return int(idx)
+	return clampInt(idx)
 }
 
 // fisherYates shuffles s in place using rng (nil = the default generator),
@@ -7044,7 +7044,7 @@ func (vm *VM) arrayArefSpan(a *object.Array, args []object.Value) (start, length
 	}
 	if len(args) == 2 { // a[start, len] — start and length convert via #to_int.
 		s := normIndex(vm.arrayArefLong(args[0]), len(a.Elems))
-		l := int(vm.arrayArefLong(args[1]))
+		l := clampInt(vm.arrayArefLong(args[1]))
 		if s < 0 || s > len(a.Elems) || l < 0 {
 			return 0, 0, true, false
 		}
@@ -7083,7 +7083,7 @@ func (vm *VM) arrayArefLong(v object.Value) int64 {
 // span extends past the array, MRI raises RangeError. Verified against MRI 4.0.6.
 func (vm *VM) arrayArefArithSeq(a *object.Array, e *Enumerator) object.Value {
 	n := len(a.Elems)
-	step := int(vm.repeatLong(e.asStep))
+	step := clampInt(vm.repeatLong(e.asStep))
 	if step == 0 {
 		// A fractional step (e.g. .step(0.5)) truncates to 0; MRI rejects it here.
 		raise("ArgumentError", "slice step cannot be zero")
@@ -7883,7 +7883,7 @@ func stringIndexEnc(s string, args []object.Value, binary bool) object.Value {
 		if start < 0 || start > n || length < 0 {
 			return object.NilV
 		}
-		end := start + int(length)
+		end := start + clampInt(length)
 		if end > n {
 			end = n
 		}
@@ -7930,7 +7930,7 @@ func byteslice(vm *VM, self *object.String, args []object.Value) object.Value {
 		if start < 0 || start > n || length < 0 {
 			return object.NilV
 		}
-		end := start + int(length)
+		end := start + clampInt(length)
 		if end > n {
 			end = n
 		}
@@ -8049,9 +8049,9 @@ func (vm *VM) arraySpliceAssign(a *object.Array, start, length int, value object
 // the upper bound; callers range-check).
 func normIndex(i int64, n int) int {
 	if i < 0 {
-		return int(i) + n
+		return clampInt(i) + n
 	}
-	return int(i)
+	return clampInt(i)
 }
 
 // affixString coerces a String#delete_prefix/#delete_suffix argument to a
@@ -8486,7 +8486,7 @@ func (vm *VM) stringAssignRegexp(s *object.String, re *Regexp, groupArgs []objec
 	vm.lastMatch = m
 	gi := 0
 	if len(groupArgs) > 0 {
-		gi = int(vm.repeatLong(groupArgs[0]))
+		gi = clampInt(vm.repeatLong(groupArgs[0]))
 		ng := md.NGroups()
 		if gi < 0 {
 			gi += ng + 1
@@ -8528,7 +8528,7 @@ func (vm *VM) stringAssignSpan(args []object.Value, n int) (start, length int) {
 	if len(args) == 3 {
 		idx := vm.repeatLong(args[0]) // #to_int is invoked exactly once
 		start = normIndex(idx, n)
-		length = int(vm.repeatLong(args[1]))
+		length = clampInt(vm.repeatLong(args[1]))
 		if start < 0 || start > n {
 			raise("IndexError", "index %d out of string", idx)
 		}
@@ -8619,7 +8619,7 @@ func (vm *VM) stringSliceBangRegexp(s *object.String, re *Regexp, rest []object.
 	if len(rest) > 0 {
 		// The capture index converts via #to_int; a negative index counts back
 		// from the last group; an out-of-range index yields nil (not IndexError).
-		gi = int(vm.repeatLong(rest[0]))
+		gi = clampInt(vm.repeatLong(rest[0]))
 		ng := md.NGroups()
 		if gi < 0 {
 			gi += ng + 1
@@ -8661,7 +8661,7 @@ func (vm *VM) stringSliceBangSubstr(s *object.String, sub string) object.Value {
 func (vm *VM) sliceSpan(args []object.Value, n int) (start, length int, ok bool) {
 	if len(args) == 2 {
 		start = normIndex(vm.repeatLong(args[0]), n)
-		length = int(vm.repeatLong(args[1]))
+		length = clampInt(vm.repeatLong(args[1]))
 		if start < 0 || start > n || length < 0 {
 			return 0, 0, false
 		}
@@ -8969,7 +8969,7 @@ func (vm *VM) spaceship(a, b object.Value) int {
 	if !ok {
 		raise("ArgumentError", "comparison of %s with %s failed", vm.classOf(a).name, vm.classOf(b).name)
 	}
-	return int(n)
+	return clampInt(n)
 }
 
 // sortSlice stably sorts out in place: by <=> when blk is nil, otherwise using
@@ -9008,7 +9008,7 @@ func (vm *VM) blockCmpToZero(r object.Value) int {
 	if !ok {
 		raise("ArgumentError", "comparison of %s with 0 failed", vm.classOf(r).name)
 	}
-	return int(n)
+	return clampInt(n)
 }
 
 // arrayByExtreme implements min_by/max_by: the element whose block key is
@@ -9266,7 +9266,7 @@ func arrayFill(vm *VM, self object.Value, args []object.Value, blk *Proc) object
 	// start / length form. A nil (or absent) start is 0; a nil (or absent) length
 	// fills through to the current end.
 	if len(rest) >= 1 && !object.IsNil(rest[0]) {
-		beg = int(vm.toIntCoerce(rest[0]))
+		beg = clampInt(vm.toIntCoerce(rest[0]))
 		if beg < 0 {
 			if beg += alen; beg < 0 {
 				beg = 0
@@ -9289,7 +9289,7 @@ func (vm *VM) fillLength(v object.Value) int {
 	if _, ok := v.(*object.Bignum); ok {
 		raise("RangeError", "array size too big")
 	}
-	return int(vm.toIntCoerce(v))
+	return clampInt(vm.toIntCoerce(v))
 }
 
 // fillRangeBounds turns a Range into the exclusive [beg, end) index interval for
@@ -9300,7 +9300,7 @@ func (vm *VM) fillRangeBounds(r *object.Range, alen int) (beg, end int) {
 	if object.IsNil(r.Lo) {
 		beg = 0
 	} else {
-		beg = int(vm.toIntCoerce(r.Lo))
+		beg = clampInt(vm.toIntCoerce(r.Lo))
 		if beg < 0 {
 			if beg += alen; beg < 0 {
 				raise("RangeError", "%s out of range", r.Inspect())
@@ -9310,7 +9310,7 @@ func (vm *VM) fillRangeBounds(r *object.Range, alen int) (beg, end int) {
 	if object.IsNil(r.Hi) {
 		return beg, alen
 	}
-	end = int(vm.toIntCoerce(r.Hi))
+	end = clampInt(vm.toIntCoerce(r.Hi))
 	if end < 0 {
 		end += alen
 	}
@@ -10740,7 +10740,7 @@ func (vm *VM) digRest(v object.Value, keys []object.Value) object.Value {
 // string (default " ") to a rune width. Extra padding for center goes right.
 func (vm *VM) padString(self *object.String, args []object.Value, side byte) (string, string) {
 	s := self.Str()
-	width := int(vm.repeatLong(args[0])) // #to_int coercion of the width
+	width := clampInt(vm.repeatLong(args[0])) // #to_int coercion of the width
 	pad := " "
 	enc := self.EncName()
 	if len(args) > 1 {

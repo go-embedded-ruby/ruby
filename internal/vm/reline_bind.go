@@ -46,14 +46,14 @@ func (vm *VM) newRelineHistory(mod *RClass, h *reline.History) *RelineHistory {
 		return self
 	})
 	def("[]", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		s, err := self.(*RelineHistory).h.Get(int(intArg(args[0])))
+		s, err := self.(*RelineHistory).h.Get(clampInt(intArg(args[0])))
 		if err != nil {
 			raiseHistoryError(err)
 		}
 		return object.NewString(s)
 	})
 	def("[]=", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		if err := self.(*RelineHistory).h.Set(int(intArg(args[0])), strArg(args[1])); err != nil {
+		if err := self.(*RelineHistory).h.Set(clampInt(intArg(args[0])), strArg(args[1])); err != nil {
 			raiseHistoryError(err)
 		}
 		return args[1]
@@ -68,7 +68,7 @@ func (vm *VM) newRelineHistory(mod *RClass, h *reline.History) *RelineHistory {
 		return self
 	})
 	def("delete_at", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		s, err := self.(*RelineHistory).h.DeleteAt(int(intArg(args[0])))
+		s, err := self.(*RelineHistory).h.DeleteAt(clampInt(intArg(args[0])))
 		if err != nil {
 			raiseHistoryError(err)
 		}
@@ -97,7 +97,7 @@ func (vm *VM) newRelineHistory(mod *RClass, h *reline.History) *RelineHistory {
 	def("last", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		entries := relineHistEntries(self.(*RelineHistory).h)
 		if len(args) > 0 {
-			n := int(intArg(args[0]))
+			n := clampInt(intArg(args[0]))
 			if n > len(entries) {
 				n = len(entries)
 			}

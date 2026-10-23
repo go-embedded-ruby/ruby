@@ -259,7 +259,7 @@ func (vm *VM) registerRSpecMatcherClass(mod *RClass) {
 		if m.chain == nil || m.chain.respTo == nil {
 			raise("NoMethodError", "undefined method `with' for matcher")
 		}
-		n := int(rspecIntArg(args))
+		n := clampInt(rspecIntArg(args))
 		return &RSpecMatcher{m: rspec.RespondTo(m.chain.respTo.names...).With(n)}
 	})
 	d("arguments", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value { return v })

@@ -157,7 +157,7 @@ func (vm *VM) registerSignal() {
 				return raise("ArgumentError", "wrong number of arguments (given %d, expected 1)", len(args))
 			}
 			n := vm.toIntCoerce(args[0])
-			if name, ok := signalNameOf(int(n)); ok {
+			if name, ok := signalNameOf(clampInt(n)); ok {
 				return object.NewString(name)
 			}
 			return object.NilV
@@ -196,7 +196,7 @@ func (vm *VM) registerSignalException() {
 			if len(args) > 2 {
 				return raise("ArgumentError", "wrong number of arguments (given %d, expected 1..2)", len(args))
 			}
-			signo = int(n)
+			signo = clampInt(n)
 			if signo < 0 || signo > sigMaxNumber {
 				return raise("ArgumentError", "invalid signal number (%d)", signo)
 			}
@@ -269,7 +269,7 @@ func (vm *VM) trapSignm(v object.Value) int {
 		if n < 0 || int64(n) > int64(sigMaxNumber) {
 			raise("ArgumentError", "invalid signal number (%d)", int64(n))
 		}
-		return int(n)
+		return clampInt(n)
 	}
 	return vm.signm2signo(v, true)
 }

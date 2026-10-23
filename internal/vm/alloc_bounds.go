@@ -164,5 +164,5 @@ func randomByteCount(v object.Value) int {
 	if n < 0 {
 		raise("ArgumentError", "negative string size (or size too big)")
 	}
-	return int(n)
+	return clampInt(n)
 }

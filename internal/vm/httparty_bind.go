@@ -141,7 +141,7 @@ func httpartyParseOptions(args []object.Value) httparty.RequestOptions {
 	}
 	if v, ok := httpartyOpt(h, "timeout"); ok {
 		if i, ok := v.(object.Integer); ok {
-			opt.Timeout = int(i)
+			opt.Timeout = clampInt(i)
 		}
 	}
 	if v, ok := httpartyOpt(h, "follow_redirects"); ok {
@@ -218,7 +218,7 @@ func (vm *VM) httpartyIndex(resp *httparty.Response, key object.Value) object.Va
 		}
 	case *object.Array:
 		if i, ok := key.(object.Integer); ok {
-			idx := int(i)
+			idx := clampInt(i)
 			if idx >= 0 && idx < len(parsed.Elems) {
 				return parsed.Elems[idx]
 			}

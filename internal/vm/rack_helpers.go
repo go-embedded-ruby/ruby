@@ -31,7 +31,7 @@ func rackStr(v object.Value) string {
 func rackInt(v object.Value, def int) int {
 	switch n := v.(type) {
 	case object.Integer:
-		return int(n)
+		return clampInt(n)
 	case *object.String:
 		if i, err := strconv.Atoi(n.Str()); err == nil {
 			return i

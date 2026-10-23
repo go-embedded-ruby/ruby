@@ -225,7 +225,7 @@ func (vm *VM) registerPGResult(mod *RClass) {
 
 	// #fname(i) returns column i's name.
 	d("fname", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		name, err := self(v).Fname(int(pgIntArg(pgArg0(args))))
+		name, err := self(v).Fname(clampInt(pgIntArg(pgArg0(args))))
 		if err != nil {
 			raise("PG::Error", "%s", err.Error())
 		}
@@ -242,7 +242,7 @@ func (vm *VM) registerPGResult(mod *RClass) {
 		if len(args) < 2 {
 			raise("ArgumentError", "wrong number of arguments (given %d, expected 2)", len(args))
 		}
-		val, err := self(v).Getvalue(int(pgIntArg(args[0])), int(pgIntArg(args[1])))
+		val, err := self(v).Getvalue(clampInt(pgIntArg(args[0])), clampInt(pgIntArg(args[1])))
 		if err != nil {
 			raise("PG::Error", "%s", err.Error())
 		}
@@ -254,7 +254,7 @@ func (vm *VM) registerPGResult(mod *RClass) {
 		if len(args) < 2 {
 			raise("ArgumentError", "wrong number of arguments (given %d, expected 2)", len(args))
 		}
-		null, err := self(v).Getisnull(int(pgIntArg(args[0])), int(pgIntArg(args[1])))
+		null, err := self(v).Getisnull(clampInt(pgIntArg(args[0])), clampInt(pgIntArg(args[1])))
 		if err != nil {
 			raise("PG::Error", "%s", err.Error())
 		}
@@ -277,7 +277,7 @@ func (vm *VM) registerPGResult(mod *RClass) {
 
 	// #[](i) / #tuple(i) return row i as a Hash keyed by column name.
 	tupleFn := func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		t, err := self(v).Tuple(int(pgIntArg(pgArg0(args))))
+		t, err := self(v).Tuple(clampInt(pgIntArg(pgArg0(args))))
 		if err != nil {
 			raise("PG::Error", "%s", err.Error())
 		}

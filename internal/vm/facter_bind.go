@@ -29,7 +29,7 @@ func facterNameArg(args []object.Value) string {
 // as zero.
 func facterIntArg(v object.Value) int {
 	if i, ok := v.(object.Integer); ok {
-		return int(i)
+		return clampInt(i)
 	}
 	return 0
 }
