@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -55,6 +56,13 @@ func runKeepingError(t *testing.T, src string) (*VM, string, error) {
 // product is never formed. Expectations measured byte-for-byte against the
 // installed ruby 4.0.5.
 func TestRepeatBoundRegimes(t *testing.T) {
+	// "x" * (2**62) passes MRI's LONG_MAX/n test only because LONG_MAX/2**62 is
+	// 1 with a 64-bit long. With a 32-bit int the quotient is 0, so the same
+	// division test (strMaxSize is math.MaxInt) refuses with ArgumentError.
+	strOneByte := "NoMemoryError: failed to allocate memory\n"
+	if strconv.IntSize == 32 {
+		strOneByte = "ArgumentError: argument too big\n"
+	}
 	cases := []struct{ name, src, want string }{
 		// --- Array#*: MRI divides ARY_MAX_SIZE, so all of these are ArgumentError.
 		{"ary_over_maxalloc", `begin; [1] * (2**62); rescue Exception=>e; puts "#{e.class}: #{e.message}"; end`,
@@ -74,7 +82,7 @@ func TestRepeatBoundRegimes(t *testing.T) {
 		// receiver's LENGTH. This asymmetry is MRI's and is reproduced, not
 		// normalised -- see alloc_bounds.go.
 		{"str_one_byte_is_nomemory", `begin; "x" * (2**62); rescue Exception=>e; puts "#{e.class}: #{e.message}"; end`,
-			"NoMemoryError: failed to allocate memory\n"},
+			strOneByte},
 		{"str_two_byte_is_argerror", `begin; "ab" * (2**62); rescue Exception=>e; puts "#{e.class}: #{e.message}"; end`,
 			"ArgumentError: argument too big\n"},
 		{"str_three_byte_is_argerror", `begin; "xyz" * (2**62); rescue Exception=>e; puts "#{e.class}: #{e.message}"; end`,

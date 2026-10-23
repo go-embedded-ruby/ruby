@@ -265,6 +265,12 @@ func (vm *VM) registerMath() {
 	install("ldexp", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		frac := mathFloat(vm, args[0])
 		exp := mathLdexpExp(vm, args[1])
+		// math.Ldexp adds the fraction's own exponent and bias to exp in a Go
+		// int (math/ldexp.go: `exp += e`), which wraps on a 32-bit target when
+		// exp is near a C int's limits: ldexp(0.5, -2**31) came out Infinity.
+		// Any |exp| past 2**16 already under/overflows every float64, so
+		// limiting it there changes no result and leaves room for the sums.
+		exp = int(saturate(int64(exp), -1<<16, 1<<16))
 		return object.Float(math.Ldexp(frac, exp))
 	})
 }

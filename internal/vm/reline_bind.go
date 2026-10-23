@@ -7,7 +7,7 @@
 package vm
 
 import (
-	"strings"
+	"math"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
 	reline "github.com/go-ruby-reline/reline"
@@ -46,14 +46,14 @@ func (vm *VM) newRelineHistory(mod *RClass, h *reline.History) *RelineHistory {
 		return self
 	})
 	def("[]", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		s, err := self.(*RelineHistory).h.Get(clampInt(intArg(args[0])))
+		s, err := self.(*RelineHistory).h.Get(relineIndex(self.(*RelineHistory).h, args[0]))
 		if err != nil {
 			raiseHistoryError(err)
 		}
 		return object.NewString(s)
 	})
 	def("[]=", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		if err := self.(*RelineHistory).h.Set(clampInt(intArg(args[0])), strArg(args[1])); err != nil {
+		if err := self.(*RelineHistory).h.Set(relineIndex(self.(*RelineHistory).h, args[0]), strArg(args[1])); err != nil {
 			raiseHistoryError(err)
 		}
 		return args[1]
@@ -68,7 +68,7 @@ func (vm *VM) newRelineHistory(mod *RClass, h *reline.History) *RelineHistory {
 		return self
 	})
 	def("delete_at", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		s, err := self.(*RelineHistory).h.DeleteAt(clampInt(intArg(args[0])))
+		s, err := self.(*RelineHistory).h.DeleteAt(relineIndex(self.(*RelineHistory).h, args[0]))
 		if err != nil {
 			raiseHistoryError(err)
 		}
@@ -117,6 +117,23 @@ func relineHistSize(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.
 	return object.IntValue(int64(self.(*RelineHistory).h.Size()))
 }
 
+// relineIndex converts a history index for Get/Set/DeleteAt. The library's own
+// check_index range test (index outside a C int => RangeError) compares a Go
+// int, which on a 32-bit target can never be outside a C int once converted;
+// so the test is made here, on the 64-bit value, after the same negative-index
+// adjustment, with the library's message.
+func relineIndex(h *reline.History, v object.Value) int {
+	idx := intArg(v)
+	adj := idx
+	if adj < 0 {
+		adj += int64(h.Size())
+	}
+	if adj < math.MinInt32 || adj > math.MaxInt32 {
+		raise("RangeError", "integer %d too big to convert to 'int'", adj)
+	}
+	return clampInt(idx)
+}
+
 // relineHistEntries snapshots every history entry as Ruby Strings, in order.
 func relineHistEntries(h *reline.History) []object.Value {
 	out := make([]object.Value, 0, h.Size())
@@ -128,12 +145,10 @@ func relineHistEntries(h *reline.History) []object.Value {
 }
 
 // raiseHistoryError surfaces a library HistoryError as the matching MRI
-// exception: the overflow message maps to RangeError, an out-of-bounds index to
-// IndexError (mirroring Reline::History#check_index).
+// exception: an out-of-bounds index is IndexError (mirroring
+// Reline::History#check_index). check_index's other answer, RangeError for an
+// index outside a C int, never comes from the library here: relineIndex raises
+// it first, on the 64-bit value.
 func raiseHistoryError(err error) {
-	msg := err.Error()
-	if strings.HasPrefix(msg, "integer ") {
-		raise("RangeError", "%s", msg)
-	}
-	raise("IndexError", "%s", msg)
+	raise("IndexError", "%s", err.Error())
 }
