@@ -265,7 +265,7 @@ func (vm *VM) registerSQLite3Database(mod *RClass) {
 	d("busy_timeout=", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		ms := 0
 		if len(args) > 0 {
-			ms = int(sqlite3IntArg(args[0]))
+			ms = clampInt(sqlite3IntArg(args[0]))
 		}
 		if err := self(v).BusyTimeout(ms); err != nil {
 			raiseSQLite3Error(err)

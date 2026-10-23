@@ -354,7 +354,7 @@ func (vm *VM) amBuildOptions(h *object.Hash) activemodel.Options {
 // amIntPtr reads an Integer option into a *int, or nil.
 func amIntPtr(v object.Value) *int {
 	if n, ok := v.(object.Integer); ok {
-		i := int(n)
+		i := clampInt(n)
 		return &i
 	}
 	return nil
@@ -368,11 +368,11 @@ func amIntRange(v object.Value) *activemodel.Range {
 	}
 	lo, _ := r.Lo.(object.Integer)
 	hi, _ := r.Hi.(object.Integer)
-	max := int(hi)
+	max := clampInt(hi)
 	if r.Exclusive {
 		max--
 	}
-	return &activemodel.Range{Min: int(lo), Max: max}
+	return &activemodel.Range{Min: clampInt(lo), Max: max}
 }
 
 // amLengthOptions reads a length: options Hash into LengthOptions.

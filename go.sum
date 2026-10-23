@@ -377,8 +377,8 @@ github.com/go-ruby-capybara/capybara v0.0.0-20260910084630-0731c9ea8d6d h1:eDH85
 github.com/go-ruby-capybara/capybara v0.0.0-20260910084630-0731c9ea8d6d/go.mod h1:igWLNrYKtKkssHOzlXm1YFoPH0Yi6LGazOSA4Obo6T0=
 github.com/go-ruby-cgi/cgi v0.0.0-20260916091525-3d328d3ff447 h1:o6V4n2Td46cjbCwPN0pZnUVFfHbC648AnYtMQVU9O60=
 github.com/go-ruby-cgi/cgi v0.0.0-20260916091525-3d328d3ff447/go.mod h1:TAIxiFMAj68dWClzEmDY1vCSNFiPfupD3HRADRXrkZw=
-github.com/go-ruby-chronic/chronic v0.0.0-20260916091614-bd47d560b6f4 h1:Z2aDUPl3f6fQIJ4Y+9KCE16p77dAxJBBJjR3j974A5o=
-github.com/go-ruby-chronic/chronic v0.0.0-20260916091614-bd47d560b6f4/go.mod h1:6H3V0VdtD8NB/WEt+8+bIM0n78g45H8HDAnWNwJByCM=
+github.com/go-ruby-chronic/chronic v0.1.0 h1:3rar6r+rLVFNmyGpTPZvMbjEnnRh9JI2vNI11048A70=
+github.com/go-ruby-chronic/chronic v0.1.0/go.mod h1:hhudekjG06iXIHV99juSwG+aOJ+Jv7dNS7tLzEX8ywg=
 github.com/go-ruby-cmath/cmath v0.0.0-20260916091648-4963ab4145f7 h1:2tUvNHeR8mL8NcJyxTZxaaujvusucfBsnZAQg18D9Zg=
 github.com/go-ruby-cmath/cmath v0.0.0-20260916091648-4963ab4145f7/go.mod h1:djGUM2WR7AdnZqeRg/OQ4xVzmsl8PAWQKILX2n/foas=
 github.com/go-ruby-concurrent-ruby/concurrent-ruby v0.0.0-20260916091840-b820f7a57284 h1:hIdCXEwLLYl+NPKBCbI3aFul6ARXfgEczxlA0hIDOkY=

@@ -104,7 +104,7 @@ func naclBlake2bOpts(rest []object.Value) sodium.Blake2bOptions {
 		return o
 	}
 	if v, ok := h.Get(object.Symbol("digest_size")); ok {
-		o.DigestSize = int(intArg(v))
+		o.DigestSize = clampInt(intArg(v))
 	}
 	if v, ok := h.Get(object.Symbol("key")); ok {
 		o.Key = naclBytes(v)

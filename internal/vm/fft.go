@@ -104,7 +104,7 @@ func intSlice(v object.Value) []int {
 	a := arrayArg(v)
 	out := make([]int, len(a.Elems))
 	for i, e := range a.Elems {
-		out[i] = int(intArg(e))
+		out[i] = clampInt(intArg(e))
 	}
 	return out
 }
@@ -159,15 +159,15 @@ func (vm *VM) registerFFT() {
 		return complexArray(gofft.RFFT(floatSlice(args[0])))
 	})
 	def("irfft", 2, 2, func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		n := int(intArg(args[1]))
+		n := clampInt(intArg(args[1]))
 		return floatArray(gofft.IRFFT(complexSlice(args[0]), n))
 	})
 	// The bin-frequency helpers take numpy's optional sample spacing d.
 	def("fftfreq", 1, 2, func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return floatArray(gofft.FFTFreq(int(intArg(args[0])), sampleSpacing(args, 1)))
+		return floatArray(gofft.FFTFreq(clampInt(intArg(args[0])), sampleSpacing(args, 1)))
 	})
 	def("rfftfreq", 1, 2, func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return floatArray(gofft.RFFTFreq(int(intArg(args[0])), sampleSpacing(args, 1)))
+		return floatArray(gofft.RFFTFreq(clampInt(intArg(args[0])), sampleSpacing(args, 1)))
 	})
 
 	// N-dimensional transforms over flat row-major data plus an explicit shape.
@@ -184,13 +184,13 @@ func (vm *VM) registerFFT() {
 	// 2-D transforms over flat row-major data of shape rows×cols.
 	def("fft2", 3, 3, func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		data := complexSlice(args[0])
-		rows, cols := int(intArg(args[1])), int(intArg(args[2]))
+		rows, cols := clampInt(intArg(args[1])), clampInt(intArg(args[2]))
 		checkShape(len(data), []int{rows, cols})
 		return complexArray(gofft.FFT2(data, [2]int{rows, cols}))
 	})
 	def("ifft2", 3, 3, func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		data := complexSlice(args[0])
-		rows, cols := int(intArg(args[1])), int(intArg(args[2]))
+		rows, cols := clampInt(intArg(args[1])), clampInt(intArg(args[2]))
 		checkShape(len(data), []int{rows, cols})
 		return complexArray(gofft.IFFT2(data, [2]int{rows, cols}))
 	})
@@ -198,7 +198,7 @@ func (vm *VM) registerFFT() {
 	// Window functions (numpy/scipy conventions): length n → []float64.
 	window := func(name string, f func(int) []float64) {
 		def(name, 1, 1, func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-			return floatArray(f(int(intArg(args[0]))))
+			return floatArray(f(clampInt(intArg(args[0]))))
 		})
 	}
 	window("hann", gofft.Hann)
@@ -214,7 +214,7 @@ func (vm *VM) registerFFT() {
 	})
 	def("spectrogram", 4, 5, func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		signal := floatSlice(args[0])
-		segment, overlap := int(intArg(args[1])), int(intArg(args[2]))
+		segment, overlap := clampInt(intArg(args[1])), clampInt(intArg(args[2]))
 		win := floatSlice(args[3])
 		// Validate go-fft's constraints up front so a bad call raises a Ruby
 		// error instead of panicking the VM.

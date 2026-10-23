@@ -163,7 +163,7 @@ func (vm *VM) registerParquetReader(cls *RClass) {
 	})
 	d("read_row_group", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		parquetArity(args, 1, "read_row_group")
-		return parquetTableOK(self(v).r.ReadRowGroup(int(parquetInt(args[0]))))
+		return parquetTableOK(self(v).r.ReadRowGroup(clampInt(parquetInt(args[0]))))
 	})
 	nRows := func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(self(v).r.NumRows())

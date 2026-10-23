@@ -240,10 +240,10 @@ func bleveSearchOpts(rest []object.Value) []libbleve.SearchOption {
 	}
 	var opts []libbleve.SearchOption
 	if v, ok := h.Get(object.Symbol("size")); ok {
-		opts = append(opts, libbleve.Size(int(intArg(v))))
+		opts = append(opts, libbleve.Size(clampInt(intArg(v))))
 	}
 	if v, ok := h.Get(object.Symbol("from")); ok {
-		opts = append(opts, libbleve.From(int(intArg(v))))
+		opts = append(opts, libbleve.From(clampInt(intArg(v))))
 	}
 	if v, ok := h.Get(object.Symbol("fields")); ok {
 		opts = append(opts, libbleve.Fields(bleveStringList(v)...))

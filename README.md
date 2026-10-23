@@ -771,12 +771,13 @@ Otherwise:
 | --- | --- |
 | **linux, macOS, windows** | the full suite under `-race`. The **100 % coverage gate** is enforced on linux and macOS only — a few POSIX-only paths (opening `/dev/null` as a character device) are unreachable on windows, so its coverage is structurally below 100 % |
 | **amd64, arm64** | `go test ./...` on native runners |
+| **386, arm (32-bit)** | `go vet ./...` for `GOARCH=386` and `GOARCH=arm`, then `go test ./...` for `386`, run natively on the amd64 runner (`arch 386 (+ vet arm)` in `ci.yml`). Ruby semantics do not change with the word size: Integer stays a 64-bit Fixnum promoted to Bignum on every target. The `mysql2` tests are skipped there, because their in-process server, `dolthub/go-mysql-server`, does not compile for 32-bit targets; the binding itself does. One limit is the word size's: a buffered IO's position is a Go `int`, so on 32-bit targets it stops at 2**31-1 |
 | **wasip1/wasm** | built with `CGO_ENABLED=0 GOOS=wasip1 GOARCH=wasm` and **run** under [wazero](https://wazero.io), a pure-Go runtime — verified here: `wazero run rbgo.wasm -e 'puts (1..10).sum'` prints `55` |
 | **js/wasm (browser)** | `CGO_ENABLED=0 GOOS=js GOARCH=wasm go build ./...` plus `go vet` over `./cmd/wasm ./cmd/rbgo ./internal/vm`, then the playground module is **run** in node by `web/smoke.mjs` (`wasm (js, browser)` in `ci.yml`). Added with #684, which fixed the three `syscall` constants the `js` port does not define |
 | **rbgo_core** | `go vet` and the `internal/vm` suite with `-tags rbgo_core`, then the core playground module is built for js/wasm, its size bounded, and **run** in node by `web/smoke.mjs --core` (`rbgo_core (core build)` in `ci.yml`). See [the `rbgo_core` build](#the-rbgo_core-build-the-language-and-the-numeric-stack-no-gems) |
 
 **Not on the pull-request path** — validated on a nightly schedule instead:
-`riscv64`, `loong64`, `ppc64le` and `s390x`, under QEMU
+`riscv64`, `loong64`, `ppc64le`, `s390x` and 32-bit `arm`, under QEMU
 (`arch-qemu-nightly.yml`) and natively on real hardware (`native-arch.yml`: the
 GCC Compile Farm, plus an IBM LinuxONE s390x host).
 
@@ -1183,7 +1184,8 @@ SPECDIR=/path/to/ruby-spec CACHE=/path/to/ruby-spec scripts/conformance/rubyspec
 ### CI layering
 
 Per-PR CI is a **fast native gate**: the `-race` + 100 %-coverage suite on
-ubuntu/macos/windows plus native `amd64` and `arm64` lanes. Because rbgo is
+ubuntu/macos/windows plus native `amd64`, `arm64` and 32-bit `386` lanes (32-bit
+`arm` is vetted per PR and run nightly under QEMU). Because rbgo is
 pure-Go (CGO=0, no assembly), the four exotic 64-bit targets
 (`riscv64`/`loong64`/`ppc64le`/`s390x`) are validated **off the per-PR critical
 path** — nightly under QEMU, and on **real hardware via the GCC Compile Farm**

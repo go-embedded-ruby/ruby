@@ -109,6 +109,29 @@ jobs:
           go-version: 1.27.2
       - run: go env GOARCH && go test ./...
 
+  # 32-bit gate: int is 32 bits. 386 runs natively on the amd64 runner (the
+  # kernel executes 32-bit x86 binaries), not under qemu-i386, whose emulation
+  # loses x87/SSE state across preemption. 32-bit arm is vetted here (a cheap
+  # compile of every package and test) and run under qemu in the nightly
+  # (arch-qemu-nightly.yml). The mysql2 tests are 64-bit only: their in-process
+  # server, dolthub/go-mysql-server, does not compile for 32-bit targets.
+  arch-386:
+    name: arch 386 (+ vet arm)
+    runs-on: ubuntu-latest
+    env:
+      CGO_ENABLED: "0"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: 1.27.2
+      - name: Vet (GOARCH=386, GOARCH=arm)
+        run: |
+          GOARCH=386 go vet ./...
+          GOARCH=arm go vet ./...
+      - name: Test (GOARCH=386)
+        run: GOARCH=386 go test -timeout=60m ./...
+
   # WebAssembly (WASI preview 1) gate: the same interpreter compiled for
   # GOOS=wasip1 GOARCH=wasm and RUN under a real wasm runtime. The database /
   # search / KV / heavy-network gem backends are compiled out on wasm (their

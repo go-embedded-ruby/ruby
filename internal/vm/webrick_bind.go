@@ -357,10 +357,10 @@ func webrickStr(v object.Value) string {
 // non-Integer (a port / status / length must be an Integer).
 func webrickInt(v object.Value) int {
 	if n, ok := v.(object.Integer); ok {
-		return int(n)
+		return clampInt(n)
 	}
 	if n, ok := object.BigOf(v); ok {
-		return int(n.Int64())
+		return clampInt(n.Int64())
 	}
 	raise("TypeError", "expected an Integer, got %s", v.Inspect())
 	panic("unreachable")

@@ -369,7 +369,7 @@ func ajRawFromRuby(v object.Value) any {
 // ajInt coerces an Integer argument to an int (a non-Integer reads as 0).
 func ajInt(v object.Value) int {
 	if n, ok := v.(object.Integer); ok {
-		return int(n)
+		return clampInt(n)
 	}
 	return 0
 }

@@ -68,7 +68,7 @@ func (vm *VM) registerRbNaClRandom(mod *RClass) {
 	c.isModule = true
 	mod.consts["Random"] = c
 	smethod(c, "random_bytes", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return naclString(sodium.RandomBytes(int(intArg(args[0]))))
+		return naclString(sodium.RandomBytes(clampInt(intArg(args[0]))))
 	})
 }
 
@@ -294,7 +294,7 @@ func (vm *VM) registerRbNaClPasswordHash(mod *RClass) {
 
 	smethod(c, "scrypt", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		out, err := sodium.Scrypt(naclBytes(args[0]), naclBytes(args[1]),
-			int(intArg(args[2])), int(intArg(args[3])), int(intArg(args[4])), int(intArg(args[5])))
+			clampInt(intArg(args[2])), clampInt(intArg(args[3])), clampInt(intArg(args[4])), clampInt(intArg(args[5])))
 		if err != nil {
 			return raiseSodiumError(err)
 		}

@@ -161,7 +161,7 @@ func (vm *VM) registerMoneyInstance(cls *RClass) {
 		return moneySlice(moneyOf(self).Allocate(moneyInt64Slice(args[0])))
 	})
 	d("split", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return moneySlice(moneyOf(self).Split(int(intArg(args[0]))))
+		return moneySlice(moneyOf(self).Split(clampInt(intArg(args[0]))))
 	})
 
 	// Exchange and formatting.

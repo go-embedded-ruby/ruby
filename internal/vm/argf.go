@@ -451,7 +451,7 @@ func (vm *VM) registerARGF() {
 		return object.IntValue(int64(self(v).lineno))
 	})
 	d("lineno=", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		self(v).lineno = int(intArg(args[0]))
+		self(v).lineno = clampInt(intArg(args[0]))
 		return args[0]
 	})
 

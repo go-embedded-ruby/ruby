@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"testing"
 )
 
@@ -33,8 +34,14 @@ func TestOpeningSomethingThatIsNotARegularFile(t *testing.T) {
 
 	// The case that used to take the machine: open, seek far past any real
 	// file, read the position back.
-	got := eval(t, `f = File.open("/dev/zero"); f.seek(2**33); p f.pos; f.close`)
-	if want := "8589934592\n"; got != want {
+	// A buffered stream's position is a Go int, so on a 32-bit target it stops
+	// at math.MaxInt (a documented limit); 2**30 is "far" there.
+	far, want := "2**33", "8589934592\n"
+	if strconv.IntSize == 32 {
+		far, want = "2**30", "1073741824\n"
+	}
+	got := eval(t, `f = File.open("/dev/zero"); f.seek(`+far+`); p f.pos; f.close`)
+	if got != want {
 		t.Errorf("seeking on /dev/zero gave %q, want %q", got, want)
 	}
 	// Reading sees end-of-file rather than an endless stream of zeros. That is

@@ -160,10 +160,10 @@ func (vm *VM) registerLazy() {
 	d("take_while", chain("take_while"))
 	d("drop_while", chain("drop_while"))
 	d("take", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return self.(*LazyEnum).with(lazyOp{kind: "take", n: int(intArg(args[0]))})
+		return self.(*LazyEnum).with(lazyOp{kind: "take", n: clampInt(intArg(args[0]))})
 	})
 	d("drop", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return self.(*LazyEnum).with(lazyOp{kind: "drop", n: int(intArg(args[0]))})
+		return self.(*LazyEnum).with(lazyOp{kind: "drop", n: clampInt(intArg(args[0]))})
 	})
 	// grep / grep_v take a pattern (matched with #===) and an optional block that
 	// maps the elements that pass the filter.
@@ -211,7 +211,7 @@ func (vm *VM) registerLazy() {
 	d("with_index", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		off := 0
 		if len(args) > 0 && !object.IsNil(args[0]) { // a nil offset means "start at 0"
-			off = int(coerceInt(vm, args[0]))
+			off = clampInt(coerceInt(vm, args[0]))
 		}
 		return self.(*LazyEnum).with(lazyOp{kind: "with_index", n: off, blk: blk})
 	})
@@ -324,7 +324,7 @@ func (vm *VM) registerLazy() {
 			}
 			return got[0]
 		}
-		return object.NewArrayFromSlice(vm.lazyForce(self.(*LazyEnum), int(intArg(args[0]))))
+		return object.NewArrayFromSlice(vm.lazyForce(self.(*LazyEnum), clampInt(intArg(args[0]))))
 	})
 	d("each", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		l := self.(*LazyEnum)

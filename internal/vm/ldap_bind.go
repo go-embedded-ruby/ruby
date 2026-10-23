@@ -139,7 +139,7 @@ func ldapStrOpt(h *object.Hash, key, def string) string {
 // absent.
 func ldapIntOpt(h *object.Hash, key string, def int) int {
 	if v, ok := h.Get(object.Symbol(key)); ok {
-		return int(intArg(v))
+		return clampInt(intArg(v))
 	}
 	return def
 }
@@ -262,7 +262,7 @@ func ldapBoolResult(err error) object.Value {
 func ldapScope(v object.Value) ldap.Scope {
 	switch x := v.(type) {
 	case object.Integer:
-		return ldap.Scope(int(x))
+		return ldap.Scope(clampInt(x))
 	case object.Symbol:
 		switch string(x) {
 		case "base", "base_object":

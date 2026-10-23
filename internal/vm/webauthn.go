@@ -169,7 +169,7 @@ func (vm *VM) registerWebAuthnRelyingParty(cls, credCls, pkCls, createOptsCls, g
 			rp.Algorithms = waStringArray(v)
 		}
 		if v, ok := waHashGet(h, "timeout"); ok && v.Truthy() {
-			rp.Timeout = int(intArg(v))
+			rp.Timeout = clampInt(intArg(v))
 		}
 		return &WebAuthnRelyingParty{cls: cls, rp: rp}
 	})

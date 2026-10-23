@@ -965,9 +965,9 @@ func (vm *VM) ExitingSplit(err error) (ExitDisposition, bool) {
 	}
 	switch {
 	case vm.classIsA(rerr.Class, "SystemExit"):
-		return ExitDisposition{Status: int(vm.exitStatusOf(rerr.Obj))}, true
+		return ExitDisposition{Status: clampInt(vm.exitStatusOf(rerr.Obj))}, true
 	case vm.classIsA(rerr.Class, "SignalException"):
-		signo := int(vm.signoOf(rerr.Obj))
+		signo := clampInt(vm.signoOf(rerr.Obj))
 		// A signal number of 0 is Signal.trap(:EXIT)'s slot and cannot kill
 		// anything; treat it as a plain failure rather than re-raising signal 0,
 		// which kill(2) defines as a liveness probe.

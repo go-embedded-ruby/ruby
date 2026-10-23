@@ -131,7 +131,7 @@ func (vm *VM) registerSizedQueue(cQueue *RClass) {
 		if n <= 0 {
 			raise("ArgumentError", "queue size must be positive")
 		}
-		return &RQueue{max: int(n), class: classOfReceiver(self, cSized)}
+		return &RQueue{max: clampInt(n), class: classOfReceiver(self, cSized)}
 	}}
 	cSized.define("max", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(int64(self.(*RQueue).max))
@@ -142,8 +142,8 @@ func (vm *VM) registerSizedQueue(cQueue *RClass) {
 			raise("ArgumentError", "queue size must be positive")
 		}
 		q := self.(*RQueue)
-		grew := int(n) > q.max
-		q.max = int(n)
+		grew := clampInt(n) > q.max
+		q.max = clampInt(n)
 		// A larger capacity may unblock waiting pushers; a smaller one never drops
 		// items already enqueued beyond the new maximum.
 		if grew {

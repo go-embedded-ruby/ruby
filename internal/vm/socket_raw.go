@@ -112,7 +112,7 @@ func (vm *VM) registerRawSocket(sock *RClass) {
 		typ := socktypeNumber(args[1])
 		proto := 0
 		if len(args) > 2 && !object.IsNil(args[2]) {
-			proto = int(intArg(args[2]))
+			proto = clampInt(intArg(args[2]))
 		}
 		if _, ok := rawSocketNetwork(domain, typ); !ok {
 			raise("SocketError", "unsupported domain/type combination")
@@ -408,7 +408,7 @@ func rawRecvLen(args []object.Value) int {
 	if len(args) == 0 {
 		raise("ArgumentError", "wrong number of arguments (given 0, expected 1..2)")
 	}
-	n := int(intArg(args[0]))
+	n := clampInt(intArg(args[0]))
 	if n < 0 {
 		raise("ArgumentError", "negative length %d given", n)
 	}

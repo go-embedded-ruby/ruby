@@ -52,7 +52,7 @@ func kramdownOptions(opt object.Value) *kramdown.Options {
 			o.HardWrap = val.Truthy()
 		case "footnote_nr":
 			if n, ok := val.(object.Integer); ok {
-				o.FootnoteNr = int(n)
+				o.FootnoteNr = clampInt(n)
 			}
 		}
 	}

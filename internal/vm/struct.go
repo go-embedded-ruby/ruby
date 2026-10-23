@@ -269,7 +269,7 @@ func setupStruct(vm *VM) {
 		vals := structValues(self)
 		switch k := a[0].(type) {
 		case object.Integer:
-			return vals[structIndex(int(k), len(vals))]
+			return vals[structIndex(clampInt(k), len(vals))]
 		case object.Symbol:
 			return vals[structNameIndex(string(k), names)]
 		case *object.String:
@@ -288,7 +288,7 @@ func setupStruct(vm *VM) {
 		names := structDefOf(o.class).names
 		switch k := a[0].(type) {
 		case object.Integer:
-			o.structVals[structIndex(int(k), len(names))] = a[1]
+			o.structVals[structIndex(clampInt(k), len(names))] = a[1]
 		case object.Symbol:
 			o.structVals[structNameIndex(string(k), names)] = a[1]
 		case *object.String:
@@ -371,7 +371,7 @@ func setupStruct(vm *VM) {
 			if !ok {
 				raise("TypeError", "no implicit conversion of %s into Integer", classNameOf(arg))
 			}
-			out = append(out, vals[structIndex(int(i), len(vals))])
+			out = append(out, vals[structIndex(clampInt(i), len(vals))])
 		}
 		return object.NewArrayFromSlice(out)
 	})
@@ -385,7 +385,7 @@ func setupStruct(vm *VM) {
 		var v object.Value
 		switch k := a[0].(type) {
 		case object.Integer:
-			idx := int(k)
+			idx := clampInt(k)
 			if idx < 0 {
 				idx += len(vals)
 			}
@@ -619,7 +619,7 @@ func structRangeValues(rng *object.Range, vals []object.Value) []object.Value {
 	size := len(vals)
 	lo := 0
 	if !object.IsNil(rng.Lo) {
-		lo = int(intArg(rng.Lo))
+		lo = clampInt(intArg(rng.Lo))
 		if lo < 0 {
 			lo += size
 		}
@@ -629,7 +629,7 @@ func structRangeValues(rng *object.Range, vals []object.Value) []object.Value {
 	}
 	hi := size // endless range runs to the last member
 	if !object.IsNil(rng.Hi) {
-		hi = int(intArg(rng.Hi))
+		hi = clampInt(intArg(rng.Hi))
 		if hi < 0 {
 			hi += size
 		}
@@ -663,7 +663,7 @@ func structDeconstructIndex(vm *VM, k object.Value, names []string) (int, bool) 
 	case *object.String:
 		return structFind(key.Str(), names)
 	case object.Integer:
-		return structPos(int(key), len(names))
+		return structPos(clampInt(key), len(names))
 	default:
 		if vm.respondsTo(k, "to_int") {
 			iv := vm.send(k, "to_int", nil, nil)
@@ -671,7 +671,7 @@ func structDeconstructIndex(vm *VM, k object.Value, names []string) (int, bool) 
 			if !ok {
 				raise("TypeError", "can't convert %s into Integer", vm.classOf(k).name)
 			}
-			return structPos(int(i), len(names))
+			return structPos(clampInt(i), len(names))
 		}
 		raise("TypeError", "no implicit conversion of %s into Integer", classNameOf(k))
 		return 0, false

@@ -136,7 +136,7 @@ func (vm *VM) ftpApplyOpts(f *ftpObj, h *object.Hash, port int) (int, string, bo
 	userGiven, passwdGiven := false, false
 	if v, ok := ftpOptHash(h, "port"); ok {
 		if n, ok := v.(object.Integer); ok {
-			port = int(n)
+			port = clampInt(n)
 		}
 	}
 	if v, ok := ftpOptHash(h, "passive"); ok {
@@ -235,7 +235,7 @@ func (vm *VM) registerFTPMethods(ftp *RClass) {
 		ftpArity(a, 1, 2, "connect")
 		port := 21
 		if len(a) >= 2 {
-			port = int(a[1].(object.Integer))
+			port = clampInt(a[1].(object.Integer))
 		}
 		vm.ftpConnect(self(v), strArg(a[0]), port)
 		return object.NilV

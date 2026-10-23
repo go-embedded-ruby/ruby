@@ -261,7 +261,7 @@ func arColOpts(h *object.Hash) []activerecord.ColOpt {
 	}
 	if val, ok := arHashGet(h, "limit"); ok {
 		if n, isInt := val.(object.Integer); isInt {
-			opts = append(opts, activerecord.Limit(int(n)))
+			opts = append(opts, activerecord.Limit(clampInt(n)))
 		}
 	}
 	return opts

@@ -1108,7 +1108,7 @@ func coerceTimeout(v object.Value) object.Value {
 // option-letter form, which returns false, false).
 func regexpEncodingBits(v object.Value) (fixed, no bool) {
 	if bits, ok := v.(object.Integer); ok {
-		return int(bits)&reFixedEncoding != 0, int(bits)&reNoEncoding != 0
+		return clampInt(bits)&reFixedEncoding != 0, clampInt(bits)&reNoEncoding != 0
 	}
 	return false, false
 }
@@ -1124,7 +1124,7 @@ func (vm *VM) regexpOptionFlags(v object.Value) string {
 	case object.Nil:
 		return ""
 	case object.Integer:
-		return flagsFromBits(int(opt))
+		return flagsFromBits(clampInt(opt))
 	case *object.String:
 		return flagsFromLetters(opt.Str())
 	case object.Bool:
@@ -1226,7 +1226,7 @@ func (vm *VM) regexpMatchP(re *Regexp, args []object.Value) object.Value {
 		}
 		// Search from the cursor with the WHOLE subject visible, as
 		// rb_reg_search does — /\A/.match?("hello", 2) is false, not true.
-		md, _ := re.searchFrom(vm, subject, charToByte(subject, int(pos)))
+		md, _ := re.searchFrom(vm, subject, charToByte(subject, clampInt(pos)))
 		return object.Bool(md != nil)
 	}
 	return object.Bool(re.matchString(vm, subject))
@@ -1473,7 +1473,7 @@ func (vm *VM) runMatchFrom(re *Regexp, subject, enc string, pos int64) object.Va
 		vm.lastMatch = object.NilV
 		return object.NilV
 	}
-	byteOff := charToByte(subject, int(pos))
+	byteOff := charToByte(subject, clampInt(pos))
 	md, base := re.searchFrom(vm, subject, byteOff)
 	if md == nil {
 		vm.lastMatch = object.NilV
@@ -1942,7 +1942,7 @@ func (vm *VM) stringSplit(subject, enc string, args []object.Value) object.Value
 	if len(args) >= 2 {
 		// A nil limit is not a default — MRI raises TypeError for split(p, nil) —
 		// so coerceInt handles it (nil has no #to_int) alongside real conversions.
-		limit = int(coerceInt(vm, args[1]))
+		limit = clampInt(coerceInt(vm, args[1]))
 	}
 	if splitOnWhitespace(args) {
 		return splitWhitespace(subject, limit, enc)
@@ -3089,7 +3089,7 @@ func (vm *VM) installRegexp() {
 		if len(args) == 2 { // md[start, length]
 			all := m.allGroups()
 			start := normIndex(intArg(args[0]), len(all))
-			length := int(intArg(args[1]))
+			length := clampInt(intArg(args[1]))
 			if start < 0 || start > len(all) || length < 0 {
 				return object.NilV
 			}
@@ -3179,9 +3179,9 @@ func stringLike(v object.Value) (string, bool) {
 func (m *MatchData) offset(i int64, end bool) object.Value {
 	var b int
 	if end {
-		b = m.md.End(int(i))
+		b = m.md.End(clampInt(i))
 	} else {
-		b = m.md.Begin(int(i))
+		b = m.md.Begin(clampInt(i))
 	}
 	if b < 0 {
 		return object.NilV
@@ -3195,9 +3195,9 @@ func (m *MatchData) offset(i int64, end bool) object.Value {
 func (m *MatchData) byteOffset(i int64, end bool) object.Value {
 	var b int
 	if end {
-		b = m.md.End(int(i))
+		b = m.md.End(clampInt(i))
 	} else {
-		b = m.md.Begin(int(i))
+		b = m.md.Begin(clampInt(i))
 	}
 	if b < 0 {
 		return object.NilV
@@ -3210,7 +3210,7 @@ func (m *MatchData) byteOffset(i int64, end bool) object.Value {
 func (m *MatchData) at(key object.Value) object.Value {
 	switch k := key.(type) {
 	case object.Integer:
-		return m.intGroup(int(k))
+		return m.intGroup(clampInt(k))
 	case *object.String:
 		return m.byName(k.Str())
 	case object.Symbol:
@@ -3288,7 +3288,7 @@ func (m *MatchData) byName(name string) object.Value {
 func (m *MatchData) indexForKey(vm *VM, key object.Value) int {
 	switch k := key.(type) {
 	case object.Integer:
-		i := int(k)
+		i := clampInt(k)
 		if i < 0 || i > m.md.NGroups() {
 			raise("IndexError", "index %d out of matches", i)
 		}
@@ -3337,14 +3337,14 @@ func (m *MatchData) rangeValuesAt(r *object.Range) []object.Value {
 	n := m.md.NGroups() + 1
 	lo := 0
 	if !object.IsNil(r.Lo) {
-		lo = int(intArg(r.Lo))
+		lo = clampInt(intArg(r.Lo))
 		if lo < 0 {
 			lo += n
 		}
 	}
 	hi := n - 1
 	if !object.IsNil(r.Hi) {
-		hi = int(intArg(r.Hi))
+		hi = clampInt(intArg(r.Hi))
 		if hi < 0 {
 			hi += n
 		}

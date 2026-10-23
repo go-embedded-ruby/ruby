@@ -404,11 +404,12 @@ func (vm *VM) registerOpenSSLPKI(mod, errRoot *RClass) {
 	ssl.consts["VERIFY_FAIL_IF_NO_PEER_CERT"] = object.IntValue(2)
 	ssl.consts["VERIFY_CLIENT_ONCE"] = object.IntValue(4)
 	// TLS option bit flags Puppet's monkey-patch ORs into DEFAULT_PARAMS.
-	for k, v := range map[string]int{
+	// int64: OP_ALL (0x80000bff) does not fit a 32-bit int.
+	for k, v := range map[string]int64{
 		"OP_NO_SSLv2": 0x01000000, "OP_NO_SSLv3": 0x02000000,
 		"OP_NO_TLSv1": 0x04000000, "OP_ALL": 0x80000bff,
 	} {
-		ssl.consts[k] = object.IntValue(int64(v))
+		ssl.consts[k] = object.IntValue(v)
 	}
 
 	// OpenSSL::SSL::SSLContext is constructible (Puppet reopens it and builds one),

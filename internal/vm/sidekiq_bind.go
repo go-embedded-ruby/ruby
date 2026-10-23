@@ -389,7 +389,7 @@ func retryOption(v object.Value) any {
 	case object.Bool:
 		return bool(n)
 	case object.Integer:
-		return int(n)
+		return clampInt(n)
 	}
 	return true
 }

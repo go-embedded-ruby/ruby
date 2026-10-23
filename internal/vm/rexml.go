@@ -317,13 +317,13 @@ func rexmlWriteString(d *rx.Document, args []object.Value) string {
 func rexmlIndentArg(args []object.Value) (int, bool) {
 	if len(args) >= 2 {
 		if n, ok := args[1].(object.Integer); ok {
-			return int(n), true
+			return clampInt(n), true
 		}
 		return 0, false
 	}
 	if len(args) == 1 {
 		if n, ok := args[0].(object.Integer); ok {
-			return int(n), true
+			return clampInt(n), true
 		}
 	}
 	return 0, false
@@ -388,7 +388,7 @@ func (vm *VM) registerREXMLElement(mod *RClass) {
 		e := elem(v)
 		if n, ok := args[0].(object.Integer); ok {
 			// Element#[Integer] is 0-based; the library's ElementAt is 1-based.
-			ch := e.ElementAt(int(n) + 1)
+			ch := e.ElementAt(clampInt(n) + 1)
 			if ch == nil {
 				return object.NilV
 			}
@@ -458,7 +458,7 @@ func (vm *VM) registerREXMLElements(mod *RClass) {
 		e := owner(v)
 		if n, ok := args[0].(object.Integer); ok {
 			// Elements#[Integer] is 1-based, matching the library's ElementAt.
-			ch := e.ElementAt(int(n))
+			ch := e.ElementAt(clampInt(n))
 			if ch == nil {
 				return object.NilV
 			}
@@ -663,7 +663,7 @@ func (vm *VM) registerREXMLFormatters(mod *RClass) {
 			indent := 2
 			if len(args) > 0 {
 				if n, ok := args[0].(object.Integer); ok {
-					indent = int(n)
+					indent = clampInt(n)
 				}
 			}
 			obj := &RObject{class: pretty, ivars: map[string]object.Value{}}
@@ -677,7 +677,7 @@ func (vm *VM) registerREXMLFormatters(mod *RClass) {
 	// ArgumentError, matching MRI's Formatters::Pretty#write.
 	pretty.define("write", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		// @indentation is always the Integer the constructor stored.
-		indent := int(self.(*RObject).ivars["@indentation"].(object.Integer))
+		indent := clampInt(self.(*RObject).ivars["@indentation"].(object.Integer))
 		dv, ok := args[0].(*REXMLDocument)
 		if !ok {
 			raise("ArgumentError", "Formatters::Pretty#write expects a REXML::Document")
