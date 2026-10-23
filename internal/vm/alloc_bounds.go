@@ -3,6 +3,7 @@ package vm
 import (
 	"math"
 	"runtime"
+	"strconv"
 	"strings"
 	"unsafe"
 
@@ -76,6 +77,28 @@ func repeatFitsArray(elems int, n int64) bool {
 // negative; a zero n always fits.
 func repeatFitsString(srcLen int, n int64) bool {
 	return n == 0 || strMaxSize/n >= int64(srcLen)
+}
+
+// hostAllocMax is the largest single allocation, in bytes, rbgo asks the Go
+// runtime for on behalf of a Ruby size. Above Go's own maxAlloc, make panics
+// with a recoverable "makeslice:" fault, which convertAllocPanic turns into
+// NoMemoryError. BELOW it, a request the host cannot satisfy is a fatal
+// "out of memory" that nothing can recover.
+//
+// On a 64-bit target maxAlloc is 2**48 and this bound is set there, so it
+// refuses exactly what make would have refused, with the same NoMemoryError.
+// On a 32-bit target maxAlloc is about 2**32, the whole address space, so
+// everything between ~1 GiB and 4 GiB was the fatal window: "x".center(2**62)
+// asked for 4 GiB and killed the process (386 CI). There the bound is 2**30.
+const hostAllocMax = int64(1) << (30 + 18*(strconv.IntSize/32-1))
+
+// checkAlloc raises NoMemoryError, MRI's answer for a refused allocation, when n
+// elements of elemSize bytes exceed hostAllocMax. It divides rather than
+// multiplies, so n*elemSize is never formed.
+func checkAlloc(n, elemSize int64) {
+	if n > hostAllocMax/elemSize {
+		raise("NoMemoryError", "failed to allocate memory")
+	}
 }
 
 // fitsArrayAlloc reports whether n elements stay within ARY_MAX_SIZE. It is the
@@ -164,5 +187,6 @@ func randomByteCount(v object.Value) int {
 	if n < 0 {
 		raise("ArgumentError", "negative string size (or size too big)")
 	}
+	checkAlloc(n, 1)
 	return clampInt(n)
 }

@@ -9275,7 +9275,11 @@ func arrayFill(vm *VM, self object.Value, args []object.Value, blk *Proc) object
 	}
 	if len(rest) >= 2 && !object.IsNil(rest[1]) {
 		length := vm.fillLength(rest[1])
-		end = beg + length
+		// beg + length can pass math.MaxInt and wrap negative (on a 32-bit target
+		// at 2**31), which would skip arrayFillRange's size check and fill
+		// nothing. Each term is first capped just past maxFillSize, which keeps
+		// the int64 sum exact enough: any end past maxFillSize is refused alike.
+		end = clampInt(min(int64(beg), maxFillSize+1) + min(int64(length), maxFillSize+1))
 	} else {
 		end = alen
 	}
@@ -10772,6 +10776,7 @@ func (vm *VM) padString(self *object.String, args []object.Value, side byte) (st
 
 // makePad builds n runes from the (non-empty) pad string, repeating/truncating.
 func makePad(pad string, n int) string {
+	checkAlloc(int64(n), 4) // a []rune of n
 	runes := []rune(pad)
 	out := make([]rune, n)
 	for i := 0; i < n; i++ {
@@ -11449,9 +11454,15 @@ func (vm *VM) rangeStepByPlus(blk *Proc, r *object.Range, step object.Value) {
 
 func shiftInt(a *big.Int, n int64) object.Value {
 	if n >= 0 {
+		// The result needs n/8 bytes. Checking n/2 instead keeps n within a
+		// 32-bit uint wherever the check passes (hostAllocMax is 2**30 there),
+		// so uint(n) cannot wrap: 1 << 2**62 used to shift by 0 on 386.
+		checkAlloc(n/2, 1)
 		return object.NormInt(new(big.Int).Lsh(a, uint(n)))
 	}
-	return object.NormInt(new(big.Int).Rsh(a, uint(-n)))
+	// Past a's bit length every right shift gives the same 0 or -1, so the
+	// amount is capped there: uint(-n) would wrap on a 32-bit target.
+	return object.NormInt(new(big.Int).Rsh(a, uint(min(-n, int64(a.BitLen())+1))))
 }
 
 // integerShift implements Integer#<< (right=false) and Integer#>> (right=true).
