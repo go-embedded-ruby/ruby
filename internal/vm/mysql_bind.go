@@ -244,7 +244,7 @@ func mysqlConnectOptions(h *object.Hash) (mysql.Options, mysql.QueryOptions) {
 		case "host":
 			opts.Host = v.ToS()
 		case "port":
-			opts.Port = int(mysqlInt(v))
+			opts.Port = clampInt(mysqlInt(v))
 		case "username", "user":
 			opts.Username = v.ToS()
 		case "password", "pass":

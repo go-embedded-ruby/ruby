@@ -137,7 +137,7 @@ func (vm *VM) unpackOffset(args []object.Value, byteLen int) int {
 	if n > int64(byteLen) {
 		raise("ArgumentError", "offset outside of string")
 	}
-	return int(n)
+	return clampInt(n)
 }
 
 // packFormat extracts the mandatory format argument, which is a String or any

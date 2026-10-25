@@ -122,7 +122,7 @@ func jsonSharedOpts(h *object.Hash) []json.Option {
 	if v, ok := h.Get(object.Symbol("max_nesting")); ok {
 		switch n := v.(type) {
 		case object.Integer:
-			opts = append(opts, json.WithMaxNesting(int(n)))
+			opts = append(opts, json.WithMaxNesting(clampInt(n)))
 		case object.Bool:
 			if !bool(n) { // max_nesting: false disables the limit
 				opts = append(opts, json.WithMaxNesting(0))

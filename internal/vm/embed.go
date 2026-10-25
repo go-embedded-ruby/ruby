@@ -90,7 +90,7 @@ func (vm *VM) ExitStatus(rerr RubyError) (int, bool) {
 	if !vm.classIsA(rerr.Class, "SystemExit") {
 		return 0, false
 	}
-	return int(vm.exitStatusOf(rerr.Obj)), true
+	return clampInt(vm.exitStatusOf(rerr.Obj)), true
 }
 
 // LocalGet reads a local of the binding.
@@ -215,7 +215,7 @@ func (vm *VM) CallBlock(p *Proc, args []object.Value) object.Value { return vm.c
 // ProcArity is Proc#arity.
 func (vm *VM) ProcArity(p *Proc) int {
 	n, _ := vm.send(p, "arity", nil, nil).(object.Integer)
-	return int(n)
+	return clampInt(n)
 }
 
 // InspectValue is Kernel#inspect as p prints it.

@@ -484,8 +484,8 @@ func ftpBlocksizeArg(args []object.Value, i int) int {
 	if i >= len(args) {
 		return ftpDefaultBlocksize
 	}
-	if n, ok := args[i].(object.Integer); ok && int(n) > 0 {
-		return int(n)
+	if n, ok := args[i].(object.Integer); ok && clampInt(n) > 0 {
+		return clampInt(n)
 	}
 	return ftpDefaultBlocksize
 }

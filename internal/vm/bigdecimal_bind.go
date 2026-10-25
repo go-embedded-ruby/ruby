@@ -189,7 +189,7 @@ func roundFamily(d *bigdecimal.Decimal, args []object.Value, fn func(n int) *big
 	if len(args) == 0 {
 		return decimalToInteger(fn(0))
 	}
-	return &BigDecimal{d: fn(int(intArg(args[0])))}
+	return &BigDecimal{d: fn(clampInt(intArg(args[0])))}
 }
 
 // registerBigDecimal installs Kernel#BigDecimal, the BigDecimal instance methods
@@ -218,7 +218,7 @@ func (vm *VM) registerBigDecimal() {
 			if len(args) < 2 {
 				return raise("ArgumentError", "can't omit precision for a Float")
 			}
-			d, err := bigdecimal.FromFloat(float64(v), int(intArg(args[1])))
+			d, err := bigdecimal.FromFloat(float64(v), clampInt(intArg(args[1])))
 			if err != nil {
 				return raise("ArgumentError", "%s", err.Error())
 			}
@@ -272,7 +272,7 @@ func (vm *VM) registerBigDecimal() {
 	// ordinary method send. The exponent must be an Integer (intArg raises
 	// TypeError otherwise).
 	powFn := func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return &BigDecimal{d: self(v).d.Pow(int(intArg(args[0])))}
+		return &BigDecimal{d: self(v).d.Pow(clampInt(intArg(args[0])))}
 	}
 	d("**", powFn)
 	d("power", powFn) // MRI's named form
@@ -284,7 +284,7 @@ func (vm *VM) registerBigDecimal() {
 	d("div", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		o := bigDecimalArg(args[0])
 		if len(args) >= 2 {
-			return &BigDecimal{d: divChecked(self(v).d, o, int(intArg(args[1])))}
+			return &BigDecimal{d: divChecked(self(v).d, o, clampInt(intArg(args[1])))}
 		}
 		q, err := self(v).d.IDiv(o)
 		if err != nil {
@@ -333,7 +333,7 @@ func (vm *VM) registerBigDecimal() {
 		if len(args) == 0 {
 			return decimalToInteger(self(v).d.Round(0, bigdecimal.RoundHalfUp))
 		}
-		n := int(intArg(args[0]))
+		n := clampInt(intArg(args[0]))
 		mode := bigdecimal.RoundHalfUp
 		hasMode := len(args) >= 2
 		if hasMode {

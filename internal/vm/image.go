@@ -54,7 +54,7 @@ func (vm *VM) registerImage() {
 	}
 
 	s("new", 2, 2, func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		w, h := int(intArg(args[0])), int(intArg(args[1]))
+		w, h := clampInt(intArg(args[0])), clampInt(intArg(args[1]))
 		if w <= 0 || h <= 0 {
 			raise("ArgumentError", "image dimensions must be positive")
 		}
@@ -101,7 +101,7 @@ func (vm *VM) registerImage() {
 		return object.IntValue(int64(imgOf(v).Bounds().Dy()))
 	})
 	d("get", 2, 2, func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		c := imgOf(v).RGBAAt(int(intArg(args[0])), int(intArg(args[1])))
+		c := imgOf(v).RGBAAt(clampInt(intArg(args[0])), clampInt(intArg(args[1])))
 		return object.NewArray(object.IntValue(int64(c.R)), object.IntValue(int64(c.G)), object.IntValue(int64(c.B)), object.IntValue(int64(c.A)))
 	})
 	d("set", 5, 6, func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
@@ -109,7 +109,7 @@ func (vm *VM) registerImage() {
 		if len(args) > 5 {
 			a = uint8(intArg(args[5]))
 		}
-		imgOf(v).SetRGBA(int(intArg(args[0])), int(intArg(args[1])),
+		imgOf(v).SetRGBA(clampInt(intArg(args[0])), clampInt(intArg(args[1])),
 			color.RGBA{uint8(intArg(args[2])), uint8(intArg(args[3])), uint8(intArg(args[4])), a})
 		return object.NilV
 	})
@@ -170,16 +170,16 @@ func (vm *VM) registerImage() {
 		return mustImg(goimg.GaussianBlur(imgOf(v), s))
 	})
 	d("box_blur", 1, 1, func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return mustImg(goimg.BoxBlur(imgOf(v), int(intArg(args[0]))))
+		return mustImg(goimg.BoxBlur(imgOf(v), clampInt(intArg(args[0]))))
 	})
 	d("median", 1, 1, func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return mustImg(goimg.Median(imgOf(v), int(intArg(args[0]))))
+		return mustImg(goimg.Median(imgOf(v), clampInt(intArg(args[0]))))
 	})
 	d("erode", 1, 1, func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return mustImg(goimg.Erode(imgOf(v), int(intArg(args[0]))))
+		return mustImg(goimg.Erode(imgOf(v), clampInt(intArg(args[0]))))
 	})
 	d("dilate", 1, 1, func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return mustImg(goimg.Dilate(imgOf(v), int(intArg(args[0]))))
+		return mustImg(goimg.Dilate(imgOf(v), clampInt(intArg(args[0]))))
 	})
 	d("canny", 3, 3, func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		sigma, _ := toFloat(args[0])
@@ -188,11 +188,11 @@ func (vm *VM) registerImage() {
 		return mustImg(goimg.Canny(imgOf(v), sigma, low, high))
 	})
 	d("resize", 2, 2, func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return mustImg(goimg.Resize(imgOf(v), int(intArg(args[0])), int(intArg(args[1])), goimg.Bilinear))
+		return mustImg(goimg.Resize(imgOf(v), clampInt(intArg(args[0])), clampInt(intArg(args[1])), goimg.Bilinear))
 	})
 	d("crop", 4, 4, func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		x, y := int(intArg(args[0])), int(intArg(args[1]))
-		w, h := int(intArg(args[2])), int(intArg(args[3]))
+		x, y := clampInt(intArg(args[0])), clampInt(intArg(args[1]))
+		w, h := clampInt(intArg(args[2])), clampInt(intArg(args[3]))
 		return mustImg(goimg.Crop(imgOf(v), image.Rect(x, y, x+w, y+h)))
 	})
 

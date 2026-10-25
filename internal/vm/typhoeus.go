@@ -168,7 +168,7 @@ func (vm *VM) registerTyphoeusHydra(c *RClass) {
 		var opts typhoeus.HydraOptions
 		if h := typhoeusHashAt(args, 0); h != nil {
 			if v, ok := h.Get(object.Symbol("max_concurrency")); ok {
-				opts.MaxConcurrency = int(toInt(v))
+				opts.MaxConcurrency = clampInt(toInt(v))
 			}
 		}
 		return &TyphoeusHydra{typhoeus.NewHydra(opts)}

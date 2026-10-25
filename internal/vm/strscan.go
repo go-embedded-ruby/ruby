@@ -206,7 +206,7 @@ func (vm *VM) registerStringScanner() {
 		sc := ssScannerOf(v)
 		switch k := args[0].(type) {
 		case object.Integer:
-			text, ok := sc.Group(int(k))
+			text, ok := sc.Group(clampInt(k))
 			if !ok {
 				return object.NilV
 			}
@@ -223,7 +223,7 @@ func (vm *VM) registerStringScanner() {
 
 	// peek(n) returns up to n bytes from the current position without advancing.
 	d("peek", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(ssScannerOf(v).Peek(int(intArg(args[0]))))
+		return object.NewString(ssScannerOf(v).Peek(clampInt(intArg(args[0]))))
 	})
 
 	// pos / charpos report the position; pos= moves it, raising RangeError when
@@ -237,7 +237,7 @@ func (vm *VM) registerStringScanner() {
 		return object.IntValue(int64(ssScannerOf(v).CharPos()))
 	})
 	posSet := func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		n := int(intArg(args[0]))
+		n := clampInt(intArg(args[0]))
 		if err := ssScannerOf(v).SetPos(n); err != nil {
 			raise("RangeError", "index out of range")
 		}

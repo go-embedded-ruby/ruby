@@ -246,7 +246,7 @@ func (vm *VM) registerArrowSchema(cls *RClass) {
 		s := self(v).s
 		switch k := args[0].(type) {
 		case object.Integer:
-			i := int(k)
+			i := clampInt(k)
 			if i < 0 || i >= s.NumFields() {
 				raise("IndexError", "field index %d out of range (%d fields)", i, s.NumFields())
 			}
@@ -285,7 +285,7 @@ func (vm *VM) registerArrowArray(cls *RClass) {
 
 	d("[]", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		arrowArity(args, 1, "[]")
-		val, err := self(v).a.Get(int(arrowInt(args[0])))
+		val, err := self(v).a.Get(clampInt(arrowInt(args[0])))
 		raiseArrowErr(err)
 		return arrowScalarToRuby(val)
 	})
@@ -303,11 +303,11 @@ func (vm *VM) registerArrowArray(cls *RClass) {
 	})
 	d("null?", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		arrowArity(args, 1, "null?")
-		return object.Bool(self(v).a.NullQ(int(arrowInt(args[0]))))
+		return object.Bool(self(v).a.NullQ(clampInt(arrowInt(args[0]))))
 	})
 	d("valid?", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		arrowArity(args, 1, "valid?")
-		return object.Bool(self(v).a.ValidQ(int(arrowInt(args[0]))))
+		return object.Bool(self(v).a.ValidQ(clampInt(arrowInt(args[0]))))
 	})
 	d("value_data_type", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return &ArrowDataType{dt: self(v).a.DataType()}
@@ -404,7 +404,7 @@ func (vm *VM) registerArrowRecordBatch(cls *RClass) {
 	})
 	d("column", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		arrowArity(args, 1, "column")
-		a, err := self(v).r.Column(int(arrowInt(args[0])))
+		a, err := self(v).r.Column(clampInt(arrowInt(args[0])))
 		raiseArrowErr(err)
 		return &ArrowArray{a: a}
 	})
@@ -543,7 +543,7 @@ func arrowInt(v object.Value) int64 {
 func arrowColumnKey(v object.Value) any {
 	switch k := v.(type) {
 	case object.Integer:
-		return int(k)
+		return clampInt(k)
 	case *object.String:
 		return k.Str()
 	case object.Symbol:

@@ -96,7 +96,7 @@ func (vm *VM) registerBCryptPassword(mod *RClass) {
 			var opts []bcrypt.CreateOption
 			if h := bcryptOptsHash(args[1:]); h != nil {
 				if v, ok := h.Get(object.Symbol("cost")); ok {
-					opts = append(opts, bcrypt.WithCost(int(intArg(v))))
+					opts = append(opts, bcrypt.WithCost(clampInt(intArg(v))))
 				}
 			}
 			p, err := bcrypt.CreateString(strArg(args[0]), opts...)
@@ -163,7 +163,7 @@ func (vm *VM) registerBCryptEngine(mod *RClass) {
 		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 			cost := bcrypt.DefaultCost
 			if len(args) > 0 {
-				cost = int(intArg(args[0]))
+				cost = clampInt(intArg(args[0]))
 			}
 			salt, err := bcrypt.GenerateSalt(cost)
 			if err != nil {

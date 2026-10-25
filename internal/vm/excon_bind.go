@@ -85,19 +85,19 @@ func rubyHashToExconOptions(h *object.Hash) excon.Options {
 		o.Idempotent = v.Truthy()
 	}
 	if v, ok := h.Get(object.Symbol("retry_limit")); ok {
-		o.RetryLimit = int(toInt(v))
+		o.RetryLimit = clampInt(toInt(v))
 	}
 	if v, ok := h.Get(object.Symbol("retry_interval")); ok {
-		o.RetryInterval = int(toInt(v))
+		o.RetryInterval = clampInt(toInt(v))
 	}
 	if v, ok := h.Get(object.Symbol("read_timeout")); ok {
-		o.ReadTimeout = int(toInt(v))
+		o.ReadTimeout = clampInt(toInt(v))
 	}
 	if v, ok := h.Get(object.Symbol("write_timeout")); ok {
-		o.WriteTimeout = int(toInt(v))
+		o.WriteTimeout = clampInt(toInt(v))
 	}
 	if v, ok := h.Get(object.Symbol("connect_timeout")); ok {
-		o.ConnectTimeout = int(toInt(v))
+		o.ConnectTimeout = clampInt(toInt(v))
 	}
 	if v, ok := h.Get(object.Symbol("user")); ok {
 		o.User = v.ToS()
@@ -134,11 +134,11 @@ func exconExpects(v object.Value) []int {
 	if arr, ok := v.(*object.Array); ok {
 		out := make([]int, 0, len(arr.Elems))
 		for _, e := range arr.Elems {
-			out = append(out, int(toInt(e)))
+			out = append(out, clampInt(toInt(e)))
 		}
 		return out
 	}
-	return []int{int(toInt(v))}
+	return []int{clampInt(toInt(v))}
 }
 
 // rubyHashToExconQuery builds an ordered library Query from a Ruby Hash, keeping

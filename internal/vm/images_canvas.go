@@ -47,7 +47,7 @@ func (vm *VM) registerImagesCanvas(mod *RClass) {
 			if len(args) > 2 {
 				fill = imagesColorArg(args[2])
 			}
-			return &ImagesCanvas{c: canvas.New(int(intArg(args[0])), int(intArg(args[1])), fill)}
+			return &ImagesCanvas{c: canvas.New(clampInt(intArg(args[0])), clampInt(intArg(args[1])), fill)}
 		}}
 
 	// Images::Canvas.decode(blob) / .from_blob(blob) read a PNG String blob.
@@ -79,14 +79,14 @@ func (vm *VM) registerImagesCanvas(mod *RClass) {
 	// coordinates fall outside the canvas); #[]= / #set / #point writes.
 	at := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		imagesArity(args, 2)
-		return object.IntValue(int64(imagesCanvasAt(imagesCanvasSelf(self).c, int(intArg(args[0])), int(intArg(args[1])))))
+		return object.IntValue(int64(imagesCanvasAt(imagesCanvasSelf(self).c, clampInt(intArg(args[0])), clampInt(intArg(args[1])))))
 	}
 	cls.define("[]", at)
 	cls.define("at", at)
 
 	set := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		imagesArity(args, 3)
-		imagesCanvasSet(imagesCanvasSelf(self).c, int(intArg(args[0])), int(intArg(args[1])), imagesColorArg(args[2]))
+		imagesCanvasSet(imagesCanvasSelf(self).c, clampInt(intArg(args[0])), clampInt(intArg(args[1])), imagesColorArg(args[2]))
 		return args[2]
 	}
 	cls.define("[]=", set)
@@ -101,22 +101,22 @@ func (vm *VM) registerImagesCanvas(mod *RClass) {
 	})
 	cls.define("line", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		imagesArity(args, 5)
-		imagesCanvasSelf(self).c.Line(int(intArg(args[0])), int(intArg(args[1])), int(intArg(args[2])), int(intArg(args[3])), imagesColorArg(args[4]))
+		imagesCanvasSelf(self).c.Line(clampInt(intArg(args[0])), clampInt(intArg(args[1])), clampInt(intArg(args[2])), clampInt(intArg(args[3])), imagesColorArg(args[4]))
 		return self
 	})
 	cls.define("rect", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		imagesArity(args, 6)
-		imagesCanvasSelf(self).c.Rect(int(intArg(args[0])), int(intArg(args[1])), int(intArg(args[2])), int(intArg(args[3])), imagesColorArg(args[4]), imagesColorArg(args[5]))
+		imagesCanvasSelf(self).c.Rect(clampInt(intArg(args[0])), clampInt(intArg(args[1])), clampInt(intArg(args[2])), clampInt(intArg(args[3])), imagesColorArg(args[4]), imagesColorArg(args[5]))
 		return self
 	})
 	cls.define("circle", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		imagesArity(args, 4)
-		imagesCanvasSelf(self).c.Circle(int(intArg(args[0])), int(intArg(args[1])), int(intArg(args[2])), imagesColorArg(args[3]))
+		imagesCanvasSelf(self).c.Circle(clampInt(intArg(args[0])), clampInt(intArg(args[1])), clampInt(intArg(args[2])), imagesColorArg(args[3]))
 		return self
 	})
 	cls.define("compose", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		imagesArity(args, 3)
-		imagesCanvasSelf(self).c.Compose(imagesCanvasSelf(args[0]).c, int(intArg(args[1])), int(intArg(args[2])))
+		imagesCanvasSelf(self).c.Compose(imagesCanvasSelf(args[0]).c, clampInt(intArg(args[1])), clampInt(intArg(args[2])))
 		return self
 	})
 

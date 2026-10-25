@@ -147,7 +147,7 @@ func httprbApplyChain(base *HTTPrbClient, name string, args []object.Value) obje
 	case "accept":
 		return &HTTPrbClient{base.c.Accept(httprbName(args[0]))}
 	case "timeout":
-		return &HTTPrbClient{base.c.Timeout(int(toInt(args[0])))}
+		return &HTTPrbClient{base.c.Timeout(clampInt(toInt(args[0])))}
 	case "follow":
 		return &HTTPrbClient{base.c.Follow()}
 	}

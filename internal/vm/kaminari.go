@@ -96,7 +96,7 @@ func (r *kaminariRubyRelation) Slice(offset, limit int) any {
 // 0, so a misbehaving stub cannot crash the paginator).
 func kaminariToInt(v object.Value) int {
 	if n, ok := v.(object.Integer); ok {
-		return int(n)
+		return clampInt(n)
 	}
 	return 0
 }
@@ -108,7 +108,7 @@ func kaminariPageNum(args []object.Value) int {
 		return 1
 	}
 	if n, ok := args[0].(object.Integer); ok {
-		return int(n)
+		return clampInt(n)
 	}
 	return 1
 }
@@ -121,7 +121,7 @@ func kaminariPerPtr(args []object.Value) *int {
 		return nil
 	}
 	if n, ok := args[0].(object.Integer); ok {
-		return kaminari.Intp(int(n))
+		return kaminari.Intp(clampInt(n))
 	}
 	return nil
 }
@@ -133,7 +133,7 @@ func kaminariPaddingNum(args []object.Value) int {
 		return 0
 	}
 	if n, ok := args[0].(object.Integer); ok {
-		return int(n)
+		return clampInt(n)
 	}
 	return 0
 }
@@ -193,13 +193,13 @@ func kaminariArrayOpts(args []object.Value) []kaminari.ArrayOption {
 		}
 		switch arStr(k) {
 		case "total_count":
-			opts = append(opts, kaminari.WithTotalCount(int(n)))
+			opts = append(opts, kaminari.WithTotalCount(clampInt(n)))
 		case "limit":
-			opts = append(opts, kaminari.WithLimit(int(n)))
+			opts = append(opts, kaminari.WithLimit(clampInt(n)))
 		case "offset":
-			opts = append(opts, kaminari.WithOffset(int(n)))
+			opts = append(opts, kaminari.WithOffset(clampInt(n)))
 		case "padding":
-			opts = append(opts, kaminari.WithPadding(int(n)))
+			opts = append(opts, kaminari.WithPadding(clampInt(n)))
 		}
 	}
 	return opts

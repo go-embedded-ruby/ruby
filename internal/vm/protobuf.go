@@ -164,27 +164,27 @@ func (vm *VM) registerProtobufBuilders(builderCls, msgBuilderCls, oneofBuilderCl
 	msgBuilderCls.define("optional", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		mb := self.(*ProtobufMessageBuilder).mb
 		if tn := pbTypeName(args, 3); tn != "" {
-			mb.Optional(pbName(args[0]), pbSym(args[1]), int(intArg(args[2])), tn)
+			mb.Optional(pbName(args[0]), pbSym(args[1]), clampInt(intArg(args[2])), tn)
 		} else {
-			mb.Optional(pbName(args[0]), pbSym(args[1]), int(intArg(args[2])))
+			mb.Optional(pbName(args[0]), pbSym(args[1]), clampInt(intArg(args[2])))
 		}
 		return object.NilV
 	})
 	msgBuilderCls.define("repeated", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		mb := self.(*ProtobufMessageBuilder).mb
 		if tn := pbTypeName(args, 3); tn != "" {
-			mb.Repeated(pbName(args[0]), pbSym(args[1]), int(intArg(args[2])), tn)
+			mb.Repeated(pbName(args[0]), pbSym(args[1]), clampInt(intArg(args[2])), tn)
 		} else {
-			mb.Repeated(pbName(args[0]), pbSym(args[1]), int(intArg(args[2])))
+			mb.Repeated(pbName(args[0]), pbSym(args[1]), clampInt(intArg(args[2])))
 		}
 		return object.NilV
 	})
 	msgBuilderCls.define("map", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		mb := self.(*ProtobufMessageBuilder).mb
 		if tn := pbTypeName(args, 4); tn != "" {
-			mb.Map(pbName(args[0]), pbSym(args[1]), pbSym(args[2]), int(intArg(args[3])), tn)
+			mb.Map(pbName(args[0]), pbSym(args[1]), pbSym(args[2]), clampInt(intArg(args[3])), tn)
 		} else {
-			mb.Map(pbName(args[0]), pbSym(args[1]), pbSym(args[2]), int(intArg(args[3])))
+			mb.Map(pbName(args[0]), pbSym(args[1]), pbSym(args[2]), clampInt(intArg(args[3])))
 		}
 		return object.NilV
 	})
@@ -198,15 +198,15 @@ func (vm *VM) registerProtobufBuilders(builderCls, msgBuilderCls, oneofBuilderCl
 	oneofBuilderCls.define("optional", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		ob := self.(*ProtobufOneofBuilder).ob
 		if tn := pbTypeName(args, 3); tn != "" {
-			ob.Optional(pbName(args[0]), pbSym(args[1]), int(intArg(args[2])), tn)
+			ob.Optional(pbName(args[0]), pbSym(args[1]), clampInt(intArg(args[2])), tn)
 		} else {
-			ob.Optional(pbName(args[0]), pbSym(args[1]), int(intArg(args[2])))
+			ob.Optional(pbName(args[0]), pbSym(args[1]), clampInt(intArg(args[2])))
 		}
 		return object.NilV
 	})
 
 	enumBuilderCls.define("value", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		self.(*ProtobufEnumBuilder).eb.Value(pbSym(args[0]), int(intArg(args[1])))
+		self.(*ProtobufEnumBuilder).eb.Value(pbSym(args[0]), clampInt(intArg(args[1])))
 		return object.NilV
 	})
 }
@@ -246,7 +246,7 @@ func (vm *VM) registerProtobufDescriptors(descCls, enumDescCls, fieldDescCls *RC
 		return object.IntValue(int64(n))
 	})
 	enumDescCls.define("lookup_value", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		s, ok := self.(*ProtobufEnumDescriptor).ed.LookupValue(int(intArg(args[0])))
+		s, ok := self.(*ProtobufEnumDescriptor).ed.LookupValue(clampInt(intArg(args[0])))
 		if !ok {
 			return object.NilV
 		}
@@ -394,10 +394,10 @@ func (vm *VM) registerProtobufRepeated(repeatedCls *RClass) {
 		return v
 	})
 	repeatedCls.define("[]", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return vm.pbToRuby(self(v).At(int(intArg(args[0]))))
+		return vm.pbToRuby(self(v).At(clampInt(intArg(args[0]))))
 	})
 	repeatedCls.define("[]=", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		if err := self(v).SetAt(int(intArg(args[0])), vm.rubyToPB(args[1])); err != nil {
+		if err := self(v).SetAt(clampInt(intArg(args[0])), vm.rubyToPB(args[1])); err != nil {
 			raisePBError(err)
 		}
 		return args[1]

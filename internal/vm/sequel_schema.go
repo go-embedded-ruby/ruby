@@ -179,7 +179,7 @@ func sequelColOpts(h *object.Hash) []sequel.ColOpt {
 		opts = append(opts, sequel.Unique())
 	}
 	if v, ok := sequelKw(h, "size"); ok {
-		opts = append(opts, sequel.Size(int(pgIntArg(v))))
+		opts = append(opts, sequel.Size(clampInt(pgIntArg(v))))
 	}
 	if v, ok := sequelKw(h, "text"); ok && v.Truthy() {
 		opts = append(opts, sequel.Text())

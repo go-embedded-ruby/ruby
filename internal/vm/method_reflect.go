@@ -96,7 +96,7 @@ func (vm *VM) registerMethodReflect() {
 		required, total, hasSplat := methodParamInfo(b.m)
 		need := required
 		if len(args) > 0 {
-			need = int(intArg(args[0]))
+			need = clampInt(intArg(args[0]))
 			if need < required || (!hasSplat && need > total) {
 				raise("ArgumentError", "wrong number of arguments (given %d, expected %d)", need, required)
 			}

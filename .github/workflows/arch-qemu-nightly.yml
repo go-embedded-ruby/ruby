@@ -1,7 +1,8 @@
 name: arch-qemu-nightly
 
 # Scheduled QEMU validation of the four EXOTIC 64-bit targets that GitHub-hosted
-# runners cannot run natively: riscv64, loong64, ppc64le, s390x.
+# runners cannot run natively: riscv64, loong64, ppc64le, s390x — and of 32-bit
+# arm (vetted per PR in ci.yml's arch-386 job, whose 386 suite runs natively).
 #
 # These lanes used to run on every PR/push, where qemu-user emulation (~50-100x
 # slower than native) was the CI bottleneck (~10 min/lane). They have been moved
@@ -39,6 +40,8 @@ jobs:
           - { goarch: loong64, qemu: qemu-loongarch64-static }
           - { goarch: ppc64le, qemu: qemu-ppc64le-static }
           - { goarch: s390x,   qemu: qemu-s390x-static }
+          # 32-bit: int is 32 bits. (386 runs natively per PR in ci.yml.)
+          - { goarch: arm,     qemu: qemu-arm-static }
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7

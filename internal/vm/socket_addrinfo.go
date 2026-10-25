@@ -193,7 +193,7 @@ func (vm *VM) registerSocketAddr() {
 			}
 			flags := 0
 			if len(args) > 1 && !object.IsNil(args[1]) {
-				flags = int(intArg(args[1]))
+				flags = clampInt(intArg(args[1]))
 			}
 			host, port := nameinfoTarget(args[0])
 			return object.NewArray(
@@ -209,7 +209,7 @@ func (vm *VM) registerSocketAddr() {
 			if len(args) < 2 {
 				raise("ArgumentError", "wrong number of arguments (given %d, expected 2)", len(args))
 			}
-			return object.NewStringBytesEnc(packSockaddrIn(int(intArg(args[0])), strArg(args[1])), "ASCII-8BIT")
+			return object.NewStringBytesEnc(packSockaddrIn(clampInt(intArg(args[0])), strArg(args[1])), "ASCII-8BIT")
 		}}
 	sock.smethods["pack_sockaddr_in"] = packIn
 	sock.smethods["sockaddr_in"] = &Method{name: "sockaddr_in", owner: sock, native: packIn.native}
@@ -249,7 +249,7 @@ func (vm *VM) registerAddrinfo(sock *RClass) {
 				raise("ArgumentError", "wrong number of arguments (given %d, expected 2)", len(args))
 			}
 			ip, af := resolveOneIP("ip", strArg(args[0]))
-			return &addrinfo{cls: cls, afamily: af, ip: ip, port: int(intArg(args[1])), socktype: socktype, protocol: protocol}
+			return &addrinfo{cls: cls, afamily: af, ip: ip, port: clampInt(intArg(args[1])), socktype: socktype, protocol: protocol}
 		}
 	}
 	cls.smethods["tcp"] = &Method{name: "tcp", owner: cls, native: mkQualified(sockStream, ipprotoTCP)}
@@ -297,7 +297,7 @@ func (vm *VM) registerAddrinfo(sock *RClass) {
 				a.socktype = socktypeNumber(args[2])
 			}
 			if len(args) > 3 && !object.IsNil(args[3]) {
-				a.protocol = int(intArg(args[3]))
+				a.protocol = clampInt(intArg(args[3]))
 			}
 			return a
 		}}
@@ -360,7 +360,7 @@ func resolveAddrinfo(cls *RClass, args []object.Value) []*addrinfo {
 	}
 	protocol := 0
 	if len(args) > 4 && !object.IsNil(args[4]) {
-		protocol = int(intArg(args[4]))
+		protocol = clampInt(intArg(args[4]))
 	} else {
 		switch socktype {
 		case sockStream:
@@ -416,7 +416,7 @@ func resolveOneIP(network, host string) (string, int) {
 func resolvePort(v object.Value, socktype int) int {
 	switch p := v.(type) {
 	case object.Integer:
-		return int(p)
+		return clampInt(p)
 	case *object.String:
 		s := p.Str()
 		if n, err := strconv.Atoi(s); err == nil {
@@ -454,10 +454,10 @@ func familyNumber(v object.Value) int {
 	switch x := v.(type) {
 	case object.Integer:
 		// Accept both the BSD (30) and Linux (10) AF_INET6 spellings.
-		if int(x) == 10 {
+		if clampInt(x) == 10 {
 			return afINET6
 		}
-		return int(x)
+		return clampInt(x)
 	case object.Symbol:
 		return familyFromName(string(x))
 	case *object.String:
@@ -489,7 +489,7 @@ func familyFromName(name string) int {
 func socktypeNumber(v object.Value) int {
 	switch x := v.(type) {
 	case object.Integer:
-		return int(x)
+		return clampInt(x)
 	case object.Symbol:
 		return socktypeFromName(string(x))
 	case *object.String:
@@ -590,7 +590,7 @@ func addrinfoFromSockaddr(cls *RClass, v object.Value) *addrinfo {
 			raise("ArgumentError", "array address must have 4 elements [afamily, port, host, addr]")
 		}
 		af := familyNumber(arr.Elems[0])
-		return &addrinfo{cls: cls, afamily: af, ip: strArg(arr.Elems[3]), port: int(intArg(arr.Elems[1]))}
+		return &addrinfo{cls: cls, afamily: af, ip: strArg(arr.Elems[3]), port: clampInt(intArg(arr.Elems[1]))}
 	}
 	raise("TypeError", "expected a packed sockaddr String or an address Array")
 	return nil
@@ -636,7 +636,7 @@ func nameinfoTarget(v object.Value) (string, int) {
 func nameinfoPort(v object.Value) int {
 	switch p := v.(type) {
 	case object.Integer:
-		return int(p)
+		return clampInt(p)
 	case *object.String:
 		if n, err := strconv.Atoi(p.Str()); err == nil {
 			return n

@@ -447,7 +447,7 @@ func (vm *VM) registerTime() {
 	// require "time" formatters. iso8601 / xmlschema take an optional
 	// fraction_digits count (default 0); rfc2822 / rfc822 / httpdate take none.
 	iso := func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).iso8601Str(int(intArgOr(args, 0))))
+		return object.NewString(self(v).iso8601Str(clampInt(intArgOr(args, 0))))
 	}
 	d("iso8601", iso)
 	rfc2822 := func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -879,7 +879,7 @@ func numFloat(v object.Value) float64 {
 func (vm *VM) timeInt(v object.Value) int {
 	switch n := v.(type) {
 	case object.Integer:
-		return int(n)
+		return clampInt(n)
 	case object.Float:
 		return int(n)
 	}
@@ -889,7 +889,7 @@ func (vm *VM) timeInt(v object.Value) int {
 		r := vm.send(v, "to_int", nil, nil)
 		switch n := r.(type) {
 		case object.Integer:
-			return int(n)
+			return clampInt(n)
 		case *object.Bignum:
 			// Every rbgo Bignum is outside int64, so no calendar field can hold one.
 			raise("RangeError", "bignum too big to convert into 'long'")
@@ -987,7 +987,7 @@ func (vm *VM) newTimeOffset(v object.Value) *stdtime.Location {
 	case *object.String:
 		return parseUtcOffset(x.Str())
 	case object.Integer:
-		return fixedOffsetLoc(int(x))
+		return fixedOffsetLoc(clampInt(x))
 	case object.Float:
 		return fixedOffsetLoc(int(x))
 	case *object.Rational:
@@ -1003,7 +1003,7 @@ func (vm *VM) newTimeOffset(v object.Value) *stdtime.Location {
 	}
 	if vm.respondsToDynamic(v, "to_int") {
 		if n, ok := vm.send(v, "to_int", nil, nil).(object.Integer); ok {
-			return fixedOffsetLoc(int(n))
+			return fixedOffsetLoc(clampInt(n))
 		}
 	}
 	if vm.isNumeric(v) && vm.respondsToDynamic(v, "to_r") {
@@ -1053,7 +1053,7 @@ func (vm *VM) assembleZoneObjectTime(zone object.Value, wall *Time, utcEpoch, of
 			name = s.Str()
 		}
 	}
-	t := stdtime.Unix(utcEpoch, ns).In(stdtime.FixedZone(name, int(offset)))
+	t := stdtime.Unix(utcEpoch, ns).In(stdtime.FixedZone(name, clampInt(offset)))
 	return &Time{t: t, zoneObj: zone}
 }
 
@@ -1397,24 +1397,24 @@ func (vm *VM) timeMonthPart(pos []object.Value, i, def int) int {
 func (vm *VM) timeSecParts(v object.Value) (int, int64) {
 	switch n := v.(type) {
 	case object.Integer:
-		return int(n), 0
+		return clampInt(n), 0
 	case object.Float:
 		return floatSecParts(float64(n))
 	case *object.Rational:
 		s, ns := ratSecNs(n.R)
-		return int(s), ns
+		return clampInt(s), ns
 	case *object.String:
 		return parseRubyInt(n.Str()), 0
 	}
 	if vm.respondsToDynamic(v, "to_int") {
 		if i, ok := vm.send(v, "to_int", nil, nil).(object.Integer); ok {
-			return int(i), 0
+			return clampInt(i), 0
 		}
 	}
 	if vm.isNumeric(v) && vm.respondsToDynamic(v, "to_r") {
 		if r, ok := vm.send(v, "to_r", nil, nil).(*object.Rational); ok {
 			s, ns := ratSecNs(r.R)
-			return int(s), ns
+			return clampInt(s), ns
 		}
 	}
 	raise("TypeError", "no implicit conversion of %s into Time", v.Inspect())
@@ -1511,7 +1511,7 @@ func (vm *VM) buildTime(pos []object.Value, usecNs int64, usecGiven bool, loc *s
 	checkRange("hour", hour, 0, 24)
 	checkRange("min", min, 0, 59)
 	checkRange("sec", sec, 0, 60)
-	return &Time{t: stdtime.Date(year, stdtime.Month(month), day, hour, min, sec, int(ns), loc)}
+	return &Time{t: stdtime.Date(year, stdtime.Month(month), day, hour, min, sec, clampInt(ns), loc)}
 }
 
 // checkRange enforces MRI's two-tier range error: a value below the low bound is

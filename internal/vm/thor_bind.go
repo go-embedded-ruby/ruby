@@ -140,7 +140,7 @@ func thorConfig(h *object.Hash) thor.Config {
 		}
 		if v, ok := thorKw(h, "terminal_width"); ok {
 			if n, ok := v.(object.Integer); ok {
-				c.TerminalWidth = int(n)
+				c.TerminalWidth = clampInt(n)
 			}
 		}
 	}
@@ -174,7 +174,7 @@ func thorKw(h *object.Hash, key string) (object.Value, bool) {
 func thorIntArg(args []object.Value, i int) int {
 	if i < len(args) {
 		if n, ok := args[i].(object.Integer); ok {
-			return int(n)
+			return clampInt(n)
 		}
 	}
 	return 0

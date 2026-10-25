@@ -52,7 +52,7 @@ require (
 	github.com/go-ruby-capistrano/capistrano v0.0.0-20260927173236-3b90af3c6888
 	github.com/go-ruby-capybara/capybara v0.0.0-20260910084630-0731c9ea8d6d
 	github.com/go-ruby-cgi/cgi v0.0.0-20260916091525-3d328d3ff447
-	github.com/go-ruby-chronic/chronic v0.0.0-20260916091614-bd47d560b6f4
+	github.com/go-ruby-chronic/chronic v0.1.0
 	github.com/go-ruby-cmath/cmath v0.0.0-20260916091648-4963ab4145f7
 	github.com/go-ruby-concurrent-ruby/concurrent-ruby v0.0.0-20260916091840-b820f7a57284
 	github.com/go-ruby-confd/confd v0.0.0-20260825131031-1ac780d51c57

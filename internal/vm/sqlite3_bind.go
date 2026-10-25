@@ -105,7 +105,7 @@ func sqlite3Mode(args []object.Value) sqlite3.TransactionMode {
 func sqlite3BindKey(v object.Value) any {
 	switch n := v.(type) {
 	case object.Integer:
-		return int(n)
+		return clampInt(n)
 	case object.Symbol:
 		return string(n)
 	case *object.String:

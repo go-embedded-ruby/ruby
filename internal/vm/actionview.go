@@ -537,7 +537,7 @@ func avNumberOpts(h *object.Hash) []actionview.Option {
 	var o []actionview.Option
 	if v, ok := avHashVal(h, "precision"); ok {
 		if i, ok := v.(object.Integer); ok {
-			o = append(o, actionview.Precision(int(i)))
+			o = append(o, actionview.Precision(clampInt(i)))
 		}
 	}
 	if v, ok := avHashVal(h, "significant"); ok {

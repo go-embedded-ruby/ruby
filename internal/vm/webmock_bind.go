@@ -143,7 +143,7 @@ func webmockAssert(args []object.Value, negate bool) object.Value {
 		times = 0
 	}
 	if t, ok := acmeKwGet(kw, "times").(object.Integer); ok {
-		times = int(t)
+		times = clampInt(t)
 	}
 	if err := webmock.Default.AssertRequested(method, uri, times, webmockOptions(kw)...); err != nil {
 		return raise("Minitest::Assertion", "%s", err.Error())
@@ -180,7 +180,7 @@ func webmockOptions(h *object.Hash) []webmock.Option {
 func webmockStubResponse(h *object.Hash) webmock.StubResponse {
 	var sr webmock.StubResponse
 	if s, ok := acmeKwGet(h, "status").(object.Integer); ok {
-		sr.Status = int(s)
+		sr.Status = clampInt(s)
 	}
 	if b, ok := acmeKwGet(h, "body").(*object.String); ok {
 		sr.Body = b.Str()

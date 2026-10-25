@@ -123,7 +123,7 @@ func deviseFromRuby(v object.Value) any {
 	case *object.String:
 		return x.Str()
 	case object.Integer:
-		return int(x)
+		return clampInt(x)
 	case *Time:
 		return stdtime.Unix(x.t.Unix(), 0).UTC()
 	default:
