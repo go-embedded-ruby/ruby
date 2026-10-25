@@ -6,6 +6,8 @@
 
 package vm
 
+import "syscall"
+
 // This is the per-target half of the errno bucket rule stated in errno.go, for
 // js/wasm. Go's js/wasm syscall package (src/syscall/tables_js.go) carries an
 // errno enum of its own that omits ENOTRECOVERABLE, EOWNERDEAD and ETXTBSY —
@@ -23,9 +25,12 @@ package vm
 // constant, not a name with a number rbgo invented.
 
 // errnoPlatformNumbers gives the numbers for the errnoPlatformNames this target
-// defines — none of them.
-var errnoPlatformNumbers = map[string]int64{}
+// defines: EMULTIHOP and ENOLINK, which every target but OpenBSD has.
+var errnoPlatformNumbers = map[string]int64{
+	"EMULTIHOP": int64(syscall.EMULTIHOP),
+	"ENOLINK":   int64(syscall.ENOLINK),
+}
 
 // errnoPlatformUndefined lists the errnoPlatformNames this target has NO number
-// for: all three.
+// for: the three above.
 var errnoPlatformUndefined = []string{"ENOTRECOVERABLE", "EOWNERDEAD", "ETXTBSY"}

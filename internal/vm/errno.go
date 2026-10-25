@@ -55,9 +55,12 @@ import (
 //
 // "Universal" is measured, not assumed: a probe compiled this set for
 // darwin/{amd64,arm64}, linux/{amd64,386,arm64,riscv64,loong64,ppc64le,s390x},
-// windows/{amd64,arm64}, wasip1/wasm and js/wasm. The names js/wasm alone lacks
-// (ENOTRECOVERABLE, EOWNERDEAD, ETXTBSY) are NOT here — they live in the
-// per-target files, which is what issue #682 was about.
+// windows/{amd64,arm64}, wasip1/wasm and js/wasm, and later for every other
+// GOOS Go supports except plan9 (whose syscall package has no errno numbers). The
+// names some of those lack (ENOTRECOVERABLE, EOWNERDEAD and ETXTBSY on js/wasm,
+// EMULTIHOP and ENOLINK on OpenBSD, ENOTRECOVERABLE and EOWNERDEAD on NetBSD
+// and DragonFly) are NOT here — they live in the per-target files, which is what
+// issue #682 was about.
 //
 // The names outside this set are in errnoUndefinedNames, where rbgo reports 0.
 // That is a DECLARED conformance gap, not an absence: the same probe found that
@@ -102,7 +105,6 @@ var errnoUniversalNumbers = map[string]int64{
 	"EMFILE":          int64(syscall.EMFILE),
 	"EMLINK":          int64(syscall.EMLINK),
 	"EMSGSIZE":        int64(syscall.EMSGSIZE),
-	"EMULTIHOP":       int64(syscall.EMULTIHOP),
 	"ENAMETOOLONG":    int64(syscall.ENAMETOOLONG),
 	"ENETDOWN":        int64(syscall.ENETDOWN),
 	"ENETRESET":       int64(syscall.ENETRESET),
@@ -113,7 +115,6 @@ var errnoUniversalNumbers = map[string]int64{
 	"ENOENT":          int64(syscall.ENOENT),
 	"ENOEXEC":         int64(syscall.ENOEXEC),
 	"ENOLCK":          int64(syscall.ENOLCK),
-	"ENOLINK":         int64(syscall.ENOLINK),
 	"ENOMEM":          int64(syscall.ENOMEM),
 	"ENOMSG":          int64(syscall.ENOMSG),
 	"ENOPROTOOPT":     int64(syscall.ENOPROTOOPT),
@@ -158,7 +159,11 @@ var errnoUniversalNumbers = map[string]int64{
 // exactly cover this list with no overlap — so a future name added to one file
 // and forgotten in the other is a test failure, not a silently shorter
 // Errno.constants.
-var errnoPlatformNames = []string{"ENOTRECOVERABLE", "EOWNERDEAD", "ETXTBSY"}
+//
+// The BSDs and DragonFly added two more: OpenBSD has no EMULTIHOP or ENOLINK,
+// NetBSD and DragonFly no ENOTRECOVERABLE or EOWNERDEAD (errno_openbsd.go,
+// errno_bsd_noowner.go).
+var errnoPlatformNames = []string{"EMULTIHOP", "ENOLINK", "ENOTRECOVERABLE", "EOWNERDEAD", "ETXTBSY"}
 
 // errnoKnownNameCount is the size of MRI's known_errors list (ruby/ruby v3_4_0
 // known_errors.inc), which Errno.constants must have on EVERY target. It is

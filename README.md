@@ -775,6 +775,15 @@ Otherwise:
 | **wasip1/wasm** | built with `CGO_ENABLED=0 GOOS=wasip1 GOARCH=wasm` and **run** under [wazero](https://wazero.io), a pure-Go runtime — verified here: `wazero run rbgo.wasm -e 'puts (1..10).sum'` prints `55` |
 | **js/wasm (browser)** | `CGO_ENABLED=0 GOOS=js GOARCH=wasm go build ./...` plus `go vet` over `./cmd/wasm ./cmd/rbgo ./internal/vm`, then the playground module is **run** in node by `web/smoke.mjs` (`wasm (js, browser)` in `ci.yml`). Added with #684, which fixed the three `syscall` constants the `js` port does not define |
 | **rbgo_core** | `go vet` and the `internal/vm` suite with `-tags rbgo_core`, then the core playground module is built for js/wasm, its size bounded, and **run** in node by `web/smoke.mjs --core` (`rbgo_core (core build)` in `ci.yml`). See [the `rbgo_core` build](#the-rbgo_core-build-the-language-and-the-numeric-stack-no-gems) |
+| **every other target** | `go vet ./...`, default and `rbgo_core` builds, for **every GOOS/GOARCH pair `go tool dist list` names except plan9** — aix, android, darwin, dragonfly, freebsd, illumos, ios, js, linux (all 13 arches, mips and ppc64 included), netbsd, openbsd, solaris, wasip1, windows (`compile on every target` in `ci.yml`; android and ios link only through cgo, so their library packages are built instead). Compiling is all it checks there |
+
+What a target lacks, rbgo leaves out the way MRI does:
+
+- **The store gems** — SQLite3, Sequel, ActiveRecord's adapter, Bolt, Bleve, Etcd and Confd — need modernc.org/sqlite, which has a port for darwin/{amd64,arm64}, freebsd/{386,amd64,arm,arm64}, linux/{386,amd64,arm,arm64,loong64,ppc64le,riscv64,s390x}, netbsd/amd64, openbsd/{amd64,arm64} and windows. Elsewhere (wasm included) `require` still works and the modules exist, and the first real operation raises `NotImplementedError: sqlite3 is not supported on linux/mips64le` (or the gem and target in question).
+- **Errno**: a name the system's `<errno.h>` lacks is still a constant, naming `Errno::NOERROR`, as MRI's `undefined_error` does: `EMULTIHOP` and `ENOLINK` on OpenBSD, `ENOTRECOVERABLE` and `EOWNERDEAD` on NetBSD and DragonFly.
+- **`Process::RLIMIT_*`** exist only where the system has the resource: no `RLIMIT_AS` on OpenBSD, no `RLIMIT_MEMLOCK` on AIX, only `RLIMIT_AS` of the four optional ones on Solaris and illumos.
+- **`File#flock`** and PStore's lock use `flock(2)`; AIX has none, so there it is emulated with `fcntl(2)` record locks, exactly as MRI's `missing/flock.c` does.
+- **plan9 does not compile.** Its `syscall` package has no errno numbers (`syscall.EINVAL` is a string error there), no `Kill`, `Flock`, `Getrlimit` or `Stat_t`, and several gem drivers (nats, Kafka's franz-go, Thrift, gopher-lua) do not build for it; a port means a plan9 variant of rbgo's Errno, IO and Process layers.
 
 **Not on the pull-request path** — validated on a nightly schedule instead:
 `riscv64`, `loong64`, `ppc64le`, `s390x` and 32-bit `arm`, under QEMU

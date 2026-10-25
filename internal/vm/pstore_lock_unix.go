@@ -8,12 +8,15 @@ package vm
 
 import (
 	"os"
-	"syscall"
+
+	"golang.org/x/sys/unix"
 )
 
-// flockSyscall is syscall.Flock as a var so a test can force the lock-failure
-// branch of flockFile (a valid fd never fails it in practice).
-var flockSyscall = syscall.Flock
+// flockSyscall is sysFlock as a var so a test can force the lock-failure
+// branch of flockFile (a valid fd never fails it in practice). The syscall
+// package has no Flock on AIX or Solaris; x/sys/unix has the LOCK_ constants on
+// both, and sysFlock the call (emulated on AIX).
+var flockSyscall = sysFlock
 
 // flockFile opens the store file O_CREAT|O_RDWR and takes a real advisory flock(2)
 // on it (LOCK_SH for a read-only transaction, LOCK_EX otherwise), returning a
@@ -25,16 +28,16 @@ func flockFile(path string, readOnly bool) (func(), error) {
 	if err != nil {
 		return nil, err
 	}
-	how := syscall.LOCK_EX
+	how := unix.LOCK_EX
 	if readOnly {
-		how = syscall.LOCK_SH
+		how = unix.LOCK_SH
 	}
 	if err := flockSyscall(int(f.Fd()), how); err != nil {
 		f.Close()
 		return nil, err
 	}
 	return func() {
-		flockSyscall(int(f.Fd()), syscall.LOCK_UN)
+		flockSyscall(int(f.Fd()), unix.LOCK_UN)
 		f.Close()
 	}, nil
 }
