@@ -132,6 +132,45 @@ jobs:
       - name: Test (GOARCH=386)
         run: GOARCH=386 go test -timeout=60m ./...
 
+  # Every GOOS/GOARCH pair Go supports must at least compile rbgo, its tests
+  # and the rbgo_core build: a target that does not compile is one nobody can
+  # embed rbgo on, and nothing else here would notice (the lanes above run six
+  # of them). go vet type-checks every package with its tests for the target.
+  # android and ios link only through cgo, so there the library packages are
+  # built (no link) instead. plan9 is excluded: its syscall package has no
+  # errno numbers and no POSIX process or file-lock calls, which rbgo's IO,
+  # Errno and Process layers are written against (see README "Platforms").
+  every-target:
+    name: compile on every target (${{ matrix.goos }})
+    runs-on: ubuntu-latest
+    env:
+      CGO_ENABLED: "0"
+    strategy:
+      fail-fast: false
+      matrix:
+        goos: [aix, android, darwin, dragonfly, freebsd, illumos, ios, js, linux, netbsd, openbsd, solaris, wasip1, windows]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: 1.27.2
+      - name: Vet (or build) every GOARCH of ${{ matrix.goos }}, both builds
+        shell: bash
+        run: |
+          fail=0
+          for t in $(go tool dist list | grep "^${{ matrix.goos }}/"); do
+            arch=${t#*/}
+            for tags in "" rbgo_core; do
+              case "${{ matrix.goos }}" in
+                android|ios) cmd="go build -tags=$tags . ./internal/..." ;;
+                *)           cmd="go vet -tags=$tags ./..." ;;
+              esac
+              echo "== $t [$tags]: $cmd"
+              GOOS=${{ matrix.goos }} GOARCH=$arch $cmd || { echo "::error::$t [$tags] does not compile"; fail=1; }
+            done
+          done
+          exit $fail
+
   # WebAssembly (WASI preview 1) gate: the same interpreter compiled for
   # GOOS=wasip1 GOARCH=wasm and RUN under a real wasm runtime. The database /
   # search / KV / heavy-network gem backends are compiled out on wasm (their

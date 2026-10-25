@@ -2,13 +2,15 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-//go:build !wasm && !rbgo_core && !386 && !arm && !mips && !mipsle
+//go:build !wasm && !rbgo_core && !386 && !arm && !mips && !mipsle && (linux || darwin || windows || freebsd)
 
 // The in-process server these tests run against, dolthub/go-mysql-server
 // (v0.20.0, its latest release), does not compile for 32-bit targets: its
 // sql/types and sql/rowexec packages assign math.MaxUint32 and larger
-// constants to int. The mysql2 binding itself builds and runs there; only
-// this server-backed test file is limited to 64-bit targets.
+// constants to int, and its server package needs internal/sockstate, which
+// has no implementation outside Linux, macOS, Windows and FreeBSD. The mysql2
+// binding itself builds and runs everywhere; only this server-backed test file
+// is limited to those systems' 64-bit targets.
 
 package vm_test
 
