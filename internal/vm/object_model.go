@@ -280,10 +280,13 @@ type RClass struct {
 	methods  map[string]*Method
 	smethods map[string]*Method // singleton (class) methods: def self.foo
 	consts   map[string]object.Value
-	cvars    map[string]object.Value // class variables (@@name), shared down the hierarchy
-	ivars    map[string]object.Value // the class object's OWN instance variables (@name with self = the class)
-	includes []*RClass               // modules mixed in via include (most recent last)
-	prepends []*RClass               // modules mixed in via prepend (most recent last), ahead of own methods
+	// constKeys caches consts' names, sorted, for Module#constants; see
+	// sortedConstKeys for why it is validated rather than invalidated.
+	constKeys []string
+	cvars     map[string]object.Value // class variables (@@name), shared down the hierarchy
+	ivars     map[string]object.Value // the class object's OWN instance variables (@name with self = the class)
+	includes  []*RClass               // modules mixed in via include (most recent last)
+	prepends  []*RClass               // modules mixed in via prepend (most recent last), ahead of own methods
 	// lexParent is the lexically-enclosing class/module this one was defined in
 	// (its Module.nesting parent), used to resolve bare constants by lexical
 	// scope. nil for top-level definitions and for anonymous classes that have
