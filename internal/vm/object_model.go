@@ -1141,6 +1141,14 @@ func lookupOwnOrIncluded(c *RClass, name string) *Method {
 // prepends/includes, and each ancestor appearing once (first occurrence wins).
 // This is the basis of both Module#ancestors and super.
 func (vm *VM) ancestors(c *RClass) []*RClass {
+	return vm.ancestorsUntil(c, nil)
+}
+
+// ancestorsUntil is ancestors cut where the superclass walk reaches stop: stop,
+// its prepends and everything above it are left out (a nil stop walks the whole
+// chain). It is the shape of MRI's rb_mod_const_of, which follows RCLASS_SUPER
+// and breaks on reaching Object for any receiver other than Object itself.
+func (vm *VM) ancestorsUntil(c, stop *RClass) []*RClass {
 	var out []*RClass
 	seen := map[*RClass]bool{}
 	push := func(k *RClass) {
@@ -1159,7 +1167,7 @@ func (vm *VM) ancestors(c *RClass) []*RClass {
 			addTree(m.includes[i])
 		}
 	}
-	for k := c; k != nil; k = k.super {
+	for k := c; k != nil && k != stop; k = k.super {
 		for i := len(k.prepends) - 1; i >= 0; i-- {
 			addTree(k.prepends[i])
 		}
