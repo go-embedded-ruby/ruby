@@ -1054,6 +1054,54 @@ class Array
   def deconstruct
     self
   end
+
+  # rfind(ifnone = nil): the LAST element for which the block is truthy, found by
+  # walking backwards. New in Ruby 4.0, and Array's own rather than Enumerable's:
+  # MRI defines find, detect and rfind on rb_cArray itself
+  # (array.c at v4.0.9, lines 8916-8918), which is also why
+  # core/array/{find,detect,rfind}_spec.rb all sit behind a 4.0 guard.
+  #
+  # ⛔ IT INDEXES THE LIVE ARRAY AND RE-READS THE SIZE AFTER EVERY YIELD. The
+  # obvious implementation, `reverse_each` or `to_a.reverse.find`, takes a
+  # snapshot and is wrong for a block that mutates the receiver —
+  # core/array/rfind_spec.rb:81 asserts exactly that case:
+  #
+  #   ary = [4, 2, 1, 5, 1, 3]
+  #   seen = []
+  #   ary.rfind { |x| seen << x; ary.clear; false }
+  #   seen.should == [3]
+  #
+  # one element, not six. MRI's loop (rb_ary_rfind, array.c:2155) is
+  #
+  #   idx = RARRAY_LEN(ary);
+  #   while (idx--) {
+  #       elem = RARRAY_AREF(ary, idx);
+  #       if (RTEST(rb_yield(elem))) return elem;
+  #       len = RARRAY_LEN(ary);
+  #       idx = (idx >= len) ? len : idx;
+  #   }
+  #
+  # and the clamp is the whole of that behaviour: after the block empties the
+  # array, idx is pulled down to the new length and the loop ends. A growing
+  # array is left alone, since the clamp only ever lowers idx.
+  def rfind(ifnone = nil)
+    # The { nil } block gives the enumerator an unknown size, which is what
+    # core/array/rfind_spec.rb's :enumeratorized_with_unknown_size requires, and
+    # passing ifnone through is what makes `[1,2,3].rfind(p).each { false }`
+    # return p.call.
+    return enum_for(:rfind, ifnone) { nil } unless block_given?
+    idx = size
+    while idx > 0
+      idx -= 1
+      elem = self[idx]
+      return elem if yield(elem)
+      len = size
+      idx = len if idx >= len
+    end
+    # nil is IGNORED rather than called, and a non-callable ifnone raises
+    # NoMethodError from the call itself — both asserted by the spec.
+    ifnone.nil? ? nil : ifnone.call
+  end
 end
 
 class Range
