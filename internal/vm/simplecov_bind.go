@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+//go:build !rbgo_core
+
 package vm
 
 import (
@@ -117,7 +119,7 @@ func simpleCovLinesToHits(arr *object.Array) []simplecov.Hit {
 		if !ok {
 			raise("TypeError", "coverage line must be an Integer or nil, got %s", e.Inspect())
 		}
-		hits[i] = simplecov.Coverable(int(n))
+		hits[i] = simplecov.Coverable(clampInt(n))
 	}
 	return hits
 }

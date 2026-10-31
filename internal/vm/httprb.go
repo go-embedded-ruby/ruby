@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+//go:build !rbgo_core
+
 package vm
 
 import (
@@ -145,7 +147,7 @@ func httprbApplyChain(base *HTTPrbClient, name string, args []object.Value) obje
 	case "accept":
 		return &HTTPrbClient{base.c.Accept(httprbName(args[0]))}
 	case "timeout":
-		return &HTTPrbClient{base.c.Timeout(int(toInt(args[0])))}
+		return &HTTPrbClient{base.c.Timeout(clampInt(toInt(args[0])))}
 	case "follow":
 		return &HTTPrbClient{base.c.Follow()}
 	}

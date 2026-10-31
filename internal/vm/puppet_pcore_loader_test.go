@@ -1,3 +1,5 @@
+//go:build !rbgo_core
+
 package vm_test
 
 import "testing"

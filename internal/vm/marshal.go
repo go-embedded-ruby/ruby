@@ -85,11 +85,11 @@ func (vm *VM) registerMarshal() {
 func marshalDumpLimit(args []object.Value) int {
 	if len(args) >= 2 {
 		if n, ok := args[1].(object.Integer); ok {
-			return int(n)
+			return clampInt(n)
 		}
 		if len(args) >= 3 {
 			if n, ok := args[2].(object.Integer); ok {
-				return int(n)
+				return clampInt(n)
 			}
 		}
 	}

@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+//go:build !rbgo_core
+
 package vm
 
 import (
@@ -31,9 +33,9 @@ func builderOptions(args []object.Value) []xmlbuilder.Option {
 			val, _ := h.Get(k)
 			switch builderName(k) {
 			case "indent":
-				opts = append(opts, xmlbuilder.WithIndent(int(intArg(val))))
+				opts = append(opts, xmlbuilder.WithIndent(clampInt(intArg(val))))
 			case "margin":
-				opts = append(opts, xmlbuilder.WithMargin(int(intArg(val))))
+				opts = append(opts, xmlbuilder.WithMargin(clampInt(intArg(val))))
 			}
 		}
 	}

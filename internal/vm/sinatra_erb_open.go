@@ -1,4 +1,4 @@
-//go:build !rbgo_closed
+//go:build !rbgo_closed && !rbgo_core
 
 package vm
 

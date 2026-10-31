@@ -1,3 +1,5 @@
+//go:build !rbgo_core
+
 package vm
 
 import (
@@ -42,59 +44,76 @@ func (vm *VM) registerImage() {
 	vm.cImage = newClass("Image", vm.cObject)
 	vm.consts["Image"] = vm.cImage
 
-	vm.cImage.smethods["new"] = &Method{name: "new", owner: vm.cImage,
-		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-			w, h := int(intArg(args[0])), int(intArg(args[1]))
-			if w <= 0 || h <= 0 {
-				raise("ArgumentError", "image dimensions must be positive")
-			}
-			return &Image{img: image.NewRGBA(image.Rect(0, 0, w, h))}
-		}}
-	vm.cImage.smethods["load"] = &Method{name: "load", owner: vm.cImage,
-		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-			img, err := goimg.Load(args[0].ToS())
-			if err != nil {
-				raise("ArgumentError", "%s", err.Error())
-			}
-			return &Image{img: img}
-		}}
+	// s registers a module method with its arity, for the same reason as d.
+	s := func(name string, min, max int, fn NativeFn) {
+		vm.cImage.smethods[name] = &Method{name: name, owner: vm.cImage,
+			native: func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+				ndArgc(args, min, max)
+				return fn(vm, self, args, blk)
+			}}
+	}
+
+	s("new", 2, 2, func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		w, h := clampInt(intArg(args[0])), clampInt(intArg(args[1]))
+		if w <= 0 || h <= 0 {
+			raise("ArgumentError", "image dimensions must be positive")
+		}
+		return &Image{img: image.NewRGBA(image.Rect(0, 0, w, h))}
+	})
+	s("load", 1, 1, func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		img, err := goimg.Load(args[0].ToS())
+		if err != nil {
+			raise("ArgumentError", "%s", err.Error())
+		}
+		return &Image{img: img}
+	})
 	// Image.decode(bytes) decodes an in-memory PNG/JPEG String — no filesystem,
 	// so it works in a browser (wasm) where the program is handed image bytes.
-	vm.cImage.smethods["decode"] = &Method{name: "decode", owner: vm.cImage,
-		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-			s, ok := args[0].(*object.String)
-			if !ok {
-				raise("TypeError", "Image.decode expects a String of image bytes")
-			}
-			img, err := goimg.Decode(bytes.NewReader(s.Bytes()))
-			if err != nil {
-				raise("ArgumentError", "%s", err.Error())
-			}
-			return &Image{img: img}
-		}}
+	s("decode", 1, 1, func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		s, ok := args[0].(*object.String)
+		if !ok {
+			raise("TypeError", "Image.decode expects a String of image bytes")
+		}
+		img, err := goimg.Decode(bytes.NewReader(s.Bytes()))
+		if err != nil {
+			raise("ArgumentError", "%s", err.Error())
+		}
+		return &Image{img: img}
+	})
 
-	d := func(name string, fn NativeFn) { vm.cImage.define(name, fn) }
+	// d registers an instance method WITH its arity. The counts live in the
+	// signature so a method added later cannot be registered without them:
+	// the bodies index args[0..3] directly, and a missing argument used to
+	// surface as "runtime error: index out of range" -- a recovered Go panic
+	// relabelled ArgumentError -- where MRI says "wrong number of
+	// arguments" (#820).
+	d := func(name string, min, max int, fn NativeFn) {
+		vm.cImage.define(name, func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+			ndArgc(args, min, max)
+			return fn(vm, self, args, blk)
+		})
+	}
 
-	d("width", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+	d("width", 0, 0, func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(int64(imgOf(v).Bounds().Dx()))
 	})
-	d("height", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+	d("height", 0, 0, func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(int64(imgOf(v).Bounds().Dy()))
 	})
-	d("get", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		c := imgOf(v).RGBAAt(int(intArg(args[0])), int(intArg(args[1])))
+	d("get", 2, 2, func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
+		c := imgOf(v).RGBAAt(clampInt(intArg(args[0])), clampInt(intArg(args[1])))
 		return object.NewArray(object.IntValue(int64(c.R)), object.IntValue(int64(c.G)), object.IntValue(int64(c.B)), object.IntValue(int64(c.A)))
 	})
-	d("set", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
+	d("set", 5, 6, func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		a := uint8(255)
 		if len(args) > 5 {
 			a = uint8(intArg(args[5]))
 		}
-		imgOf(v).SetRGBA(int(intArg(args[0])), int(intArg(args[1])),
+		imgOf(v).SetRGBA(clampInt(intArg(args[0])), clampInt(intArg(args[1])),
 			color.RGBA{uint8(intArg(args[2])), uint8(intArg(args[3])), uint8(intArg(args[4])), a})
 		return object.NilV
 	})
-	d("save", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
+	d("save", 1, 1, func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		if err := goimg.Save(args[0].ToS(), imgOf(v)); err != nil {
 			raise("ArgumentError", "%s", err.Error())
 		}
@@ -103,7 +122,7 @@ func (vm *VM) registerImage() {
 	// to_png / to_jpeg encode to an in-memory byte String (browser-friendly: hand
 	// the bytes to JS for a canvas/Blob). Encoding to a buffer cannot fail.
 	encode := func(name string, format goimg.Format) {
-		d(name, func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		d(name, 0, 0, func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 			var buf bytes.Buffer
 			_ = goimg.Encode(&buf, imgOf(v), format)
 			return object.NewStringBytes(buf.Bytes())
@@ -114,7 +133,7 @@ func (vm *VM) registerImage() {
 
 	// Operations with no error: image → image.
 	unary := func(name string, f func(image.Image) *image.RGBA) {
-		d(name, func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		d(name, 0, 0, func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 			return &Image{img: f(imgOf(v))}
 		})
 	}
@@ -137,7 +156,7 @@ func (vm *VM) registerImage() {
 
 	// Operations with a scalar parameter, no error.
 	scalar := func(name string, f func(image.Image, float64) *image.RGBA) {
-		d(name, func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
+		d(name, 1, 1, func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 			x, _ := toFloat(args[0])
 			return &Image{img: f(imgOf(v), x)}
 		})
@@ -146,38 +165,38 @@ func (vm *VM) registerImage() {
 	scalar("adjust_contrast", goimg.AdjustContrast)
 
 	// Operations that can fail.
-	d("gaussian_blur", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
+	d("gaussian_blur", 1, 1, func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		s, _ := toFloat(args[0])
 		return mustImg(goimg.GaussianBlur(imgOf(v), s))
 	})
-	d("box_blur", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return mustImg(goimg.BoxBlur(imgOf(v), int(intArg(args[0]))))
+	d("box_blur", 1, 1, func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
+		return mustImg(goimg.BoxBlur(imgOf(v), clampInt(intArg(args[0]))))
 	})
-	d("median", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return mustImg(goimg.Median(imgOf(v), int(intArg(args[0]))))
+	d("median", 1, 1, func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
+		return mustImg(goimg.Median(imgOf(v), clampInt(intArg(args[0]))))
 	})
-	d("erode", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return mustImg(goimg.Erode(imgOf(v), int(intArg(args[0]))))
+	d("erode", 1, 1, func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
+		return mustImg(goimg.Erode(imgOf(v), clampInt(intArg(args[0]))))
 	})
-	d("dilate", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return mustImg(goimg.Dilate(imgOf(v), int(intArg(args[0]))))
+	d("dilate", 1, 1, func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
+		return mustImg(goimg.Dilate(imgOf(v), clampInt(intArg(args[0]))))
 	})
-	d("canny", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
+	d("canny", 3, 3, func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		sigma, _ := toFloat(args[0])
 		low, _ := toFloat(args[1])
 		high, _ := toFloat(args[2])
 		return mustImg(goimg.Canny(imgOf(v), sigma, low, high))
 	})
-	d("resize", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return mustImg(goimg.Resize(imgOf(v), int(intArg(args[0])), int(intArg(args[1])), goimg.Bilinear))
+	d("resize", 2, 2, func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
+		return mustImg(goimg.Resize(imgOf(v), clampInt(intArg(args[0])), clampInt(intArg(args[1])), goimg.Bilinear))
 	})
-	d("crop", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		x, y := int(intArg(args[0])), int(intArg(args[1]))
-		w, h := int(intArg(args[2])), int(intArg(args[3]))
+	d("crop", 4, 4, func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
+		x, y := clampInt(intArg(args[0])), clampInt(intArg(args[1]))
+		w, h := clampInt(intArg(args[2])), clampInt(intArg(args[3]))
 		return mustImg(goimg.Crop(imgOf(v), image.Rect(x, y, x+w, y+h)))
 	})
 
-	d("inspect", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+	d("inspect", 0, 0, func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(v.(*Image).Inspect())
 	})
 	vm.cImage.define("to_s", vm.cImage.methods["inspect"].native)

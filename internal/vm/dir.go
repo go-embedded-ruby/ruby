@@ -65,7 +65,7 @@ func (vm *VM) registerDir() {
 			raise("ArgumentError", "wrong number of arguments (given %d, expected 1..2)", len(pos))
 		}
 		if len(pos) == 2 {
-			flags = int(intArg(pos[1]))
+			flags = clampInt(intArg(pos[1]))
 		}
 		return globResult(vm, globPatternArg(vm, pos[0]), flags, base, sortR, blk)
 	})
@@ -379,13 +379,13 @@ func (vm *VM) registerDirInstance(cDir *RClass) {
 	d("seek", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		dir := self(v)
 		checkOpen(dir)
-		dir.pos = int(intArg(args[0]))
+		dir.pos = clampInt(intArg(args[0]))
 		return dir // seek returns the Dir instance
 	})
 	d("pos=", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		dir := self(v)
 		checkOpen(dir)
-		dir.pos = int(intArg(args[0]))
+		dir.pos = clampInt(intArg(args[0]))
 		return args[0] // pos= returns its argument
 	})
 	d("rewind", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -713,7 +713,7 @@ func parseGlobArgs(vm *VM, args []object.Value) (base string, sortR bool, flags 
 				sortR = v == object.True
 			}
 			if v, ok := h.Get(object.Symbol("flags")); ok && v != object.NilV {
-				flags = int(intArg(v))
+				flags = clampInt(intArg(v))
 			}
 		}
 	}

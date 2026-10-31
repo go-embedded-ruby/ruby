@@ -12,6 +12,7 @@ import (
 // operator dispatch, to_s/inspect dispatch in puts/print/p). Each case asserts
 // the observable behaviour verified against MRI.
 func TestStdlibProvidedModules(t *testing.T) {
+	skipOnCoreBuild(t, "some of these modules (uri) are not part of core")
 	tests := []struct{ name, src, want string }{
 		// --- Gem::Version -------------------------------------------------------
 		{"gem_version_to_s", `p Gem::Version.new("1.2.3").to_s`, "\"1.2.3\"\n"},
@@ -276,6 +277,7 @@ K = DelegateClass(Array); p K.new([9, 8]).first`, "9\n"},
 
 // TestStdlibErrors covers the error branches of the new modules.
 func TestStdlibErrors(t *testing.T) {
+	skipOnCoreBuild(t, "some of these libraries (uri) are not part of core")
 	tests := []struct{ name, src, class, msgPart string }{
 		{"gem_version_malformed", `Gem::Version.new("not a version!!")`, "ArgumentError", "Malformed"},
 		{"gem_req_illformed", `Gem::Requirement.new("?? 1")`, "ArgumentError", "Illformed"},

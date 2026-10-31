@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+//go:build !rbgo_core
+
 package vm
 
 import (
@@ -431,7 +433,7 @@ func uriBuildField(v object.Value) (string, bool) {
 func uriBuildPort(v object.Value) (int, bool) {
 	switch p := v.(type) {
 	case object.Integer:
-		return int(p), true
+		return clampInt(p), true
 	case *object.String:
 		n := 0
 		for _, c := range p.Str() {

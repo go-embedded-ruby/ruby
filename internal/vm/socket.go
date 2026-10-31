@@ -353,7 +353,7 @@ func streamRecv(vm *VM, s streamIO, args []object.Value) object.Value {
 	if len(args) == 0 {
 		raise("ArgumentError", "wrong number of arguments (given 0, expected 1..2)")
 	}
-	n := int(intArg(args[0]))
+	n := clampInt(intArg(args[0]))
 	if n < 0 {
 		raise("ArgumentError", "negative length %d given", n)
 	}
@@ -375,7 +375,7 @@ func streamRead(vm *VM, s streamIO, args []object.Value) object.Value {
 		ioBlock(vm, func() { data, _ = io.ReadAll(s.reader()) })
 		return object.NewStringBytesEnc(data, "ASCII-8BIT")
 	}
-	n := int(intArg(args[0]))
+	n := clampInt(intArg(args[0]))
 	if n < 0 {
 		raise("ArgumentError", "negative length %d given", n)
 	}
@@ -415,7 +415,7 @@ func streamReadpartial(vm *VM, s streamIO, args []object.Value) object.Value {
 	if len(args) == 0 {
 		raise("ArgumentError", "wrong number of arguments (given 0, expected 1..2)")
 	}
-	n := int(intArg(args[0]))
+	n := clampInt(intArg(args[0]))
 	if n < 0 {
 		raise("ArgumentError", "negative length %d given", n)
 	}

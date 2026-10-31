@@ -447,10 +447,10 @@ func (vm *VM) registerIO() {
 		var fd int
 		switch fv := pos[0].(type) {
 		case object.Integer:
-			fd = int(fv)
+			fd = clampInt(fv)
 		default:
 			if vm.respondsToDynamic(pos[0], "to_int") {
-				fd = int(vm.repeatLong(pos[0]))
+				fd = clampInt(vm.repeatLong(pos[0]))
 			} else {
 				raise("TypeError", "no implicit conversion of %s into Integer", classNameOf(pos[0]))
 			}
@@ -661,7 +661,7 @@ func (vm *VM) registerIO() {
 		return object.IntValue(int64(len(o.buf)))
 	})
 	cFile.define("flock", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return vm.fileFlock(self.(*IOObj), int(vm.toIntCoerce(args[0])))
+		return vm.fileFlock(self.(*IOObj), clampInt(vm.toIntCoerce(args[0])))
 	})
 	// IO.read/binread/write/binwrite/foreach/readlines, installed identically on IO
 	// and File (File.readlines/foreach included) now that both classes exist.
@@ -726,7 +726,7 @@ func (vm *VM) warnUplevelPrefix(lev int64) string {
 	if lev > int64(len(vm.frameNames)) {
 		return "warning: "
 	}
-	i := len(vm.frameNames) - 1 - int(lev)
+	i := len(vm.frameNames) - 1 - clampInt(lev)
 	if i < 0 {
 		return "warning: "
 	}
@@ -1991,7 +1991,7 @@ func defStringIORead(cls *RClass) {
 			// IO#seek accepts the :SET/:CUR/:END whence symbols; StringIO#seek
 			// (strio_seek) does not — a Symbol there raises the Integer TypeError.
 			if ioIsStringIO(o) {
-				whence = int(vm.toIntCoerce(args[1]))
+				whence = clampInt(vm.toIntCoerce(args[1]))
 			} else {
 				whence = vm.seekWhence(args[1])
 			}
@@ -2029,7 +2029,7 @@ func defStringIORead(cls *RClass) {
 		if o.wrClosed { // a read-only stream cannot be truncated
 			raise("IOError", "not opened for writing")
 		}
-		n := int(vm.toIntCoerce(args[0]))
+		n := clampInt(vm.toIntCoerce(args[0]))
 		if n < 0 {
 			raise("Errno::EINVAL", "Invalid argument")
 		}
@@ -2093,7 +2093,7 @@ func defStringIORead(cls *RClass) {
 			return vm.ioDecodeRead(o, data)
 		}
 		if lengthGiven {
-			n := int(vm.toIntCoerce(args[0]))
+			n := clampInt(vm.toIntCoerce(args[0]))
 			if n < 0 {
 				raise("ArgumentError", "negative length %d given", n)
 			}
@@ -2117,7 +2117,7 @@ func defStringIORead(cls *RClass) {
 		o := self.(*IOObj)
 		ioCheckReadable(o)
 		o.pipeRefresh()
-		n := int(toInt(args[0]))
+		n := clampInt(toInt(args[0]))
 		if n < 0 {
 			raise("ArgumentError", "negative length %d given", n)
 		}
@@ -2287,7 +2287,7 @@ func (vm *VM) seekWhence(v object.Value) int {
 		}
 		raise("TypeError", "no implicit conversion of Symbol into Integer")
 	}
-	return int(vm.toIntCoerce(v))
+	return clampInt(vm.toIntCoerce(v))
 }
 
 // ioIsStringIO reports whether o is a StringIO (or a subclass), which — unlike a
@@ -2590,7 +2590,7 @@ func (vm *VM) resolveGetsArgs(args []object.Value) (sep getsSep, limit int, chom
 	if len(args) > 0 {
 		switch a := args[0].(type) {
 		case object.Integer:
-			limit = int(a)
+			limit = clampInt(a)
 		case *object.String:
 			sep = getsSep{s: a.Str(), set: true}
 		default:
@@ -3007,7 +3007,7 @@ func (vm *VM) ioOfftArg(v object.Value) int {
 	if _, ok := v.(*object.Bignum); ok {
 		raise("RangeError", "bignum too big to convert into 'long long'")
 	}
-	return int(vm.toIntCoerce(v))
+	return clampInt(vm.toIntCoerce(v))
 }
 
 // ioCIntArg coerces an argument the way MRI's NUM2INT does for a value stored in
@@ -3022,7 +3022,7 @@ func (vm *VM) ioCIntArg(v object.Value) int {
 	if n < -2147483648 || n > 2147483647 { // int32 bounds
 		raise("RangeError", "integer %d too big to convert to 'int'", n)
 	}
-	return int(n)
+	return clampInt(n)
 }
 
 // toInt coerces a small Integer position/length argument to int64 (raising for

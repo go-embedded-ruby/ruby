@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+//go:build !rbgo_core
+
 package vm
 
 import (
@@ -297,7 +299,7 @@ func (vm *VM) minitestDescribe(args []object.Value, blk *Proc, super *RClass) ob
 func (vm *VM) minitestNextSpecSeq(cls *RClass) int {
 	n := 0
 	if v, ok := getIvar(cls, "@__specs__").(object.Integer); ok {
-		n = int(v)
+		n = clampInt(v)
 	}
 	n++
 	setIvar(cls, "@__specs__", object.IntValue(int64(n)))

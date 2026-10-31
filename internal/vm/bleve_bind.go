@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-//go:build !wasm
+//go:build !wasm && !rbgo_core && ((darwin && (amd64 || arm64)) || (freebsd && (386 || amd64 || arm || arm64)) || (linux && (386 || amd64 || arm || arm64 || loong64 || ppc64le || riscv64 || s390x)) || (netbsd && amd64) || (openbsd && (amd64 || arm64)) || windows)
 
 package vm
 
@@ -240,10 +240,10 @@ func bleveSearchOpts(rest []object.Value) []libbleve.SearchOption {
 	}
 	var opts []libbleve.SearchOption
 	if v, ok := h.Get(object.Symbol("size")); ok {
-		opts = append(opts, libbleve.Size(int(intArg(v))))
+		opts = append(opts, libbleve.Size(clampInt(intArg(v))))
 	}
 	if v, ok := h.Get(object.Symbol("from")); ok {
-		opts = append(opts, libbleve.From(int(intArg(v))))
+		opts = append(opts, libbleve.From(clampInt(intArg(v))))
 	}
 	if v, ok := h.Get(object.Symbol("fields")); ok {
 		opts = append(opts, libbleve.Fields(bleveStringList(v)...))

@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+//go:build !rbgo_core
+
 package vm
 
 import (
@@ -85,7 +87,7 @@ func (vm *VM) registerRQRCode() {
 		if len(args) < 2 {
 			raise("ArgumentError", "wrong number of arguments (given %d, expected 2)", len(args))
 		}
-		on, err := self.(*RQRCode).q.Checked(int(intArg(args[0])), int(intArg(args[1])))
+		on, err := self.(*RQRCode).q.Checked(clampInt(intArg(args[0])), clampInt(intArg(args[1])))
 		if err != nil {
 			raise("RQRCode::QRCodeRunTimeError", "%s", rqrcodeErrMsg(err))
 		}

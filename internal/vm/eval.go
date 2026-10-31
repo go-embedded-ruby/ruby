@@ -80,7 +80,7 @@ func (vm *VM) evalLoc(fileArg, lineArg object.Value, nilFileAllowed bool) evalLo
 // TypeError, which is what BasicObject#instance_eval's spec pins.
 func (vm *VM) evalLineno(v object.Value) int {
 	if i, ok := v.(object.Integer); ok {
-		return int(i)
+		return clampInt(i)
 	}
 	// nil is rb_to_int's own arm, with its own wording ("from nil to integer",
 	// not "of nil into Integer"): eval(src, nil, "f", nil) raises it.
@@ -90,7 +90,7 @@ func (vm *VM) evalLineno(v object.Value) int {
 	if vm.respondsToDynamic(v, "to_int") {
 		r := vm.send(v, "to_int", nil, nil)
 		if i, ok := r.(object.Integer); ok {
-			return int(i)
+			return clampInt(i)
 		}
 		raise("TypeError", "can't convert %s to Integer (%s#to_int gives %s)",
 			classNameOf(v), classNameOf(v), classNameOf(r))

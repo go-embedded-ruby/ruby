@@ -203,7 +203,7 @@ func udpRecvLen(args []object.Value) int {
 	if len(args) == 0 || object.IsNil(args[0]) {
 		return 65536
 	}
-	n := int(intArg(args[0]))
+	n := clampInt(intArg(args[0]))
 	if n <= 0 {
 		raise("ArgumentError", "negative length %d given", n)
 	}

@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+//go:build !rbgo_core
+
 package vm
 
 import (
@@ -112,7 +114,7 @@ func (vm *VM) registerImagesImage(mod *RClass) {
 			if len(args) > 2 {
 				fill = imagesColorArg(args[2])
 			}
-			return &ImagesImage{im: images.New(int(intArg(args[0])), int(intArg(args[1])), fill)}
+			return &ImagesImage{im: images.New(clampInt(intArg(args[0])), clampInt(intArg(args[1])), fill)}
 		}}
 
 	// Query methods.
@@ -134,7 +136,7 @@ func (vm *VM) registerImagesImage(mod *RClass) {
 	})
 	cls.define("at", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		imagesArity(args, 2)
-		c, err := imagesSelf(self).im.At(int(intArg(args[0])), int(intArg(args[1])))
+		c, err := imagesSelf(self).im.At(clampInt(intArg(args[0])), clampInt(intArg(args[1])))
 		if err != nil {
 			raise("Images::OutOfBoundsError", "%s", err.Error())
 		}
@@ -171,23 +173,23 @@ func (vm *VM) registerImagesTransforms(cls *RClass) {
 	// Error-returning geometric transforms + format conversion.
 	cls.define("resize", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		imagesArity(args, 2)
-		return imagesWrap(imagesSelf(self).im.Resize(int(intArg(args[0])), int(intArg(args[1]))))
+		return imagesWrap(imagesSelf(self).im.Resize(clampInt(intArg(args[0])), clampInt(intArg(args[1]))))
 	})
 	cls.define("resize_nearest", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		imagesArity(args, 2)
-		return imagesWrap(imagesSelf(self).im.ResizeNearest(int(intArg(args[0])), int(intArg(args[1]))))
+		return imagesWrap(imagesSelf(self).im.ResizeNearest(clampInt(intArg(args[0])), clampInt(intArg(args[1]))))
 	})
 	cls.define("thumbnail", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		imagesArity(args, 2)
-		return imagesWrap(imagesSelf(self).im.Thumbnail(int(intArg(args[0])), int(intArg(args[1]))))
+		return imagesWrap(imagesSelf(self).im.Thumbnail(clampInt(intArg(args[0])), clampInt(intArg(args[1]))))
 	})
 	cls.define("crop", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		imagesArity(args, 4)
-		return imagesWrap(imagesSelf(self).im.Crop(int(intArg(args[0])), int(intArg(args[1])), int(intArg(args[2])), int(intArg(args[3]))))
+		return imagesWrap(imagesSelf(self).im.Crop(clampInt(intArg(args[0])), clampInt(intArg(args[1])), clampInt(intArg(args[2])), clampInt(intArg(args[3]))))
 	})
 	cls.define("rotate", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		imagesArity(args, 1)
-		return imagesWrap(imagesSelf(self).im.Rotate(int(intArg(args[0]))))
+		return imagesWrap(imagesSelf(self).im.Rotate(clampInt(intArg(args[0]))))
 	})
 	cls.define("convert", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		imagesArity(args, 1)
@@ -197,7 +199,7 @@ func (vm *VM) registerImagesTransforms(cls *RClass) {
 	// Error-returning scikit-image filters.
 	cls.define("blur", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		imagesArity(args, 1)
-		return imagesWrap(imagesSelf(self).im.Blur(int(intArg(args[0]))))
+		return imagesWrap(imagesSelf(self).im.Blur(clampInt(intArg(args[0]))))
 	})
 	cls.define("gaussian_blur", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		imagesArity(args, 1)
@@ -209,7 +211,7 @@ func (vm *VM) registerImagesTransforms(cls *RClass) {
 	})
 	cls.define("median", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		imagesArity(args, 1)
-		return imagesWrap(imagesSelf(self).im.Median(int(intArg(args[0]))))
+		return imagesWrap(imagesSelf(self).im.Median(clampInt(intArg(args[0]))))
 	})
 	cls.define("canny", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		imagesArity(args, 3)
@@ -217,25 +219,25 @@ func (vm *VM) registerImagesTransforms(cls *RClass) {
 	})
 	cls.define("convolve", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		imagesArity(args, 3)
-		return imagesWrap(imagesSelf(self).im.Convolve(int(intArg(args[0])), int(intArg(args[1])), imagesFloatSlice(args[2])))
+		return imagesWrap(imagesSelf(self).im.Convolve(clampInt(intArg(args[0])), clampInt(intArg(args[1])), imagesFloatSlice(args[2])))
 	})
 
 	// Error-returning morphology.
 	cls.define("erode", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		imagesArity(args, 1)
-		return imagesWrap(imagesSelf(self).im.Erode(int(intArg(args[0]))))
+		return imagesWrap(imagesSelf(self).im.Erode(clampInt(intArg(args[0]))))
 	})
 	cls.define("dilate", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		imagesArity(args, 1)
-		return imagesWrap(imagesSelf(self).im.Dilate(int(intArg(args[0]))))
+		return imagesWrap(imagesSelf(self).im.Dilate(clampInt(intArg(args[0]))))
 	})
 	cls.define("open", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		imagesArity(args, 1)
-		return imagesWrap(imagesSelf(self).im.Open(int(intArg(args[0]))))
+		return imagesWrap(imagesSelf(self).im.Open(clampInt(intArg(args[0]))))
 	})
 	cls.define("close", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		imagesArity(args, 1)
-		return imagesWrap(imagesSelf(self).im.Close(int(intArg(args[0]))))
+		return imagesWrap(imagesSelf(self).im.Close(clampInt(intArg(args[0]))))
 	})
 
 	// Total (never-erroring) transforms + colour ops.

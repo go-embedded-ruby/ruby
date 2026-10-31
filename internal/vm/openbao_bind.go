@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+//go:build !rbgo_core
+
 package vm
 
 import (
@@ -279,14 +281,14 @@ func vaultIntAt(args []object.Value, i int, def int) int {
 	if object.IsNil(v) {
 		return def
 	}
-	return int(intArg(v))
+	return clampInt(intArg(v))
 }
 
 // vaultVersions reads a trailing list of version-number arguments starting at i.
 func vaultVersions(args []object.Value, i int) []int {
 	var out []int
 	for _, a := range args[min(i, len(args)):] {
-		out = append(out, int(intArg(a)))
+		out = append(out, clampInt(intArg(a)))
 	}
 	return out
 }

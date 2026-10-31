@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-//go:build !wasm
+//go:build !wasm && !rbgo_core
 
 package vm
 
@@ -185,7 +185,7 @@ func natsServers(v object.Value) []string {
 // natsInt coerces a Ruby Integer option to an int (0 for a non-Integer).
 func natsInt(v object.Value) int {
 	if n, ok := v.(object.Integer); ok {
-		return int(n)
+		return clampInt(n)
 	}
 	return 0
 }

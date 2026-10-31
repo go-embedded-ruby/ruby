@@ -48,7 +48,7 @@ func (vm *VM) toRoundInt(a object.Value) int {
 		if int64(v) < math.MinInt32 || int64(v) > math.MaxInt32 {
 			raise("RangeError", "integer %d too big to convert to `int'", int64(v))
 		}
-		return int(v)
+		return clampInt(v)
 	case *object.Bignum:
 		raise("RangeError", "bignum too big to convert into `long'")
 	case object.Float:
@@ -371,7 +371,7 @@ func bitAt(n, i *big.Int) *big.Int {
 		}
 		return big.NewInt(0)
 	}
-	return big.NewInt(int64(n.Bit(int(i.Int64()))))
+	return big.NewInt(int64(n.Bit(clampInt(i.Int64()))))
 }
 
 // bitSlice computes (n >> i) & ((1 << length) - 1) with Ruby semantics; a

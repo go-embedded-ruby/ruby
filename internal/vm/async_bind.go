@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+//go:build !rbgo_core
+
 package vm
 
 import (
@@ -155,7 +157,7 @@ func asyncInt(args []object.Value, def int) int {
 	}
 	switch n := args[0].(type) {
 	case object.Integer:
-		return int(int64(n))
+		return clampInt(int64(n))
 	case object.Float:
 		return int(float64(n))
 	}

@@ -36,6 +36,7 @@ func TestSymbolIntern(t *testing.T) {
 
 // TestResolvRequire covers require "resolv" returning true then false.
 func TestResolvRequire(t *testing.T) {
+	skipOnCoreBuild(t, resolvNotCore)
 	if got := eval(t, `p require "resolv"`); got != "true\n" {
 		t.Errorf("first require got %q", got)
 	}
@@ -47,6 +48,7 @@ func TestResolvRequire(t *testing.T) {
 // TestResolvIPv4 covers Resolv::IPv4: create/new, to_s/to_str, inspect, ==, the
 // Regex constant, and the ArgumentError raised for a malformed address.
 func TestResolvIPv4(t *testing.T) {
+	skipOnCoreBuild(t, resolvNotCore)
 	cases := []struct{ src, want string }{
 		{`require "resolv"; p Resolv::IPv4.create("1.2.3.4").to_s`, "\"1.2.3.4\"\n"},
 		{`require "resolv"; p Resolv::IPv4.new("10.0.0.1").to_str`, "\"10.0.0.1\"\n"},
@@ -75,6 +77,7 @@ func TestResolvIPv4(t *testing.T) {
 // TestResolvIPv6 covers Resolv::IPv6: create/new, to_s/to_str, inspect, ==, the
 // Regex constant, the zone-id form, and the ArgumentError for bad input.
 func TestResolvIPv6(t *testing.T) {
+	skipOnCoreBuild(t, resolvNotCore)
 	cases := []struct{ src, want string }{
 		{`require "resolv"; p Resolv::IPv6.create("::1").to_s`, "\"::1\"\n"},
 		{`require "resolv"; p Resolv::IPv6.new("fe80::1").to_str.start_with?("fe80")`, "true\n"},
@@ -105,6 +108,7 @@ func TestResolvIPv6(t *testing.T) {
 // literal IP), the ResolvError for a hostname, and the NotImplementedError for
 // the socket-backed helpers.
 func TestResolvModuleMethods(t *testing.T) {
+	skipOnCoreBuild(t, resolvNotCore)
 	cases := []struct{ src, want string }{
 		{`require "resolv"; p Resolv.getaddress("127.0.0.1")`, "\"127.0.0.1\"\n"},
 		{`require "resolv"; p Resolv.getaddress("::1")`, "\"::1\"\n"},
@@ -129,6 +133,7 @@ func TestResolvModuleMethods(t *testing.T) {
 // TestResolvDNS covers Resolv::DNS (constructable, query methods raise), the
 // Resource constant tree, and Resolv::DNS::Name and Resolv::Hosts.
 func TestResolvDNS(t *testing.T) {
+	skipOnCoreBuild(t, resolvNotCore)
 	cases := []struct{ src, want string }{
 		{`require "resolv"; p Resolv::DNS.new.class`, "Resolv::DNS\n"},
 		{`require "resolv"; p Resolv::DNS.open.class`, "Resolv::DNS\n"},
@@ -161,6 +166,7 @@ const resolvReq = `require "resolv"; `
 // create/to_s, the case-insensitive ==/eql?, length, and the trailing-dot
 // absolute? flag — each pinned to MRI 4.0.5.
 func TestResolvName(t *testing.T) {
+	skipOnCoreBuild(t, resolvNotCore)
 	cases := []struct{ src, want string }{
 		{resolvReq + `p Resolv::DNS::Name.create("www.example.com").to_s`, "\"www.example.com\"\n"},
 		// The original byte string is preserved by to_s.
@@ -185,6 +191,7 @@ func TestResolvName(t *testing.T) {
 // TestResolvIPv6Compression covers the library's canonical "::" rendering, which
 // must match MRI's first-longest-run compression quirk exactly.
 func TestResolvIPv6Compression(t *testing.T) {
+	skipOnCoreBuild(t, resolvNotCore)
 	cases := []struct{ src, want string }{
 		{resolvReq + `p Resolv::IPv6.create("fe80:0:0:0:0:0:0:1").to_s`, "\"fe80::1\"\n"},
 		{resolvReq + `p Resolv::IPv6.create("0:0:0:0:0:0:0:0").to_s`, "\"::\"\n"},
@@ -207,6 +214,7 @@ func TestResolvIPv6Compression(t *testing.T) {
 // accessors, add_question, encode (byte-exact wire + the encoding-name quirk),
 // the Message.decode class method, question/each_question, and a DecodeError.
 func TestResolvMessage(t *testing.T) {
+	skipOnCoreBuild(t, resolvNotCore)
 	const mk = resolvReq + `m=Resolv::DNS::Message.new(0x1234); m.rd=1; ` +
 		`m.add_question("www.example.com",Resolv::DNS::Resource::IN::A); `
 	cases := []struct{ src, want string }{
@@ -254,6 +262,7 @@ d=Resolv::DNS::Message.decode(m.encode); p d.question[0][0].to_s`, "\"q.r\"\n"},
 // construction, the MRI accessors, and a full encode/decode round-trip through a
 // Message answer section. Every wired record type is exercised.
 func TestResolvRecords(t *testing.T) {
+	skipOnCoreBuild(t, resolvNotCore)
 	// roundTrip wraps a record in an answer, encodes, decodes, and reads it back.
 	const rt = resolvReq + `def rt(rec)
   m=Resolv::DNS::Message.new(1); m.add_answer("a.b",7,rec)
@@ -324,7 +333,11 @@ p [r.mname.to_s, r.rname.to_s, r.serial, r.refresh, r.retry, r.expire, r.minimum
 // TestResolvHostsParse covers Resolv::Hosts backed by go-ruby-resolv's
 // ParseHosts: the content-string constructor, getaddress(es)/getname(s) with
 // MRI's reversed per-name order, and the ResolvError for an absent entry.
+// resolvNotCore is why the Resolv tests skip on the rbgo_core build.
+const resolvNotCore = "resolv is not part of core"
+
 func TestResolvHostsParse(t *testing.T) {
+	skipOnCoreBuild(t, resolvNotCore)
 	const h = resolvReq + `h=Resolv::Hosts.new("127.0.0.1 localhost loop\n10.0.0.2 foo foo.example\n10.0.0.3 foo\n"); `
 	cases := []struct{ src, want string }{
 		{h + `p h.getaddress("localhost")`, "\"127.0.0.1\"\n"},
@@ -361,6 +374,7 @@ func TestResolvHostsParse(t *testing.T) {
 // permute!/getopts, and each MRI-exact ParseError. Behaviour is pinned against
 // MRI 4.x.
 func TestOptParse(t *testing.T) {
+	skipOnCoreBuild(t, "optparse is not part of core")
 	const req = `require "optparse"; `
 	cases := []struct{ src, want string }{
 		{`p require "optparse"`, "true\n"},
@@ -602,6 +616,7 @@ e=OptionParser::InvalidOption.new("--bad"); a=["x"]; e.recover(a); p a`); got !=
 // TestRipper covers the ripper loadable shell: require and the
 // NotImplementedError class methods.
 func TestRipper(t *testing.T) {
+	skipOnCoreBuild(t, "ripper is not part of core")
 	if got := eval(t, `p require "ripper"`); got != "true\n" {
 		t.Errorf("require got %q", got)
 	}

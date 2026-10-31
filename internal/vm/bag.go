@@ -362,7 +362,7 @@ func (vm *VM) registerBag() {
 		// An Integer n caps the result; a missing arg or explicit nil keeps all.
 		if len(args) > 0 {
 			if _, isNil := args[0].(object.Nil); !isNil {
-				n := int(intArg(args[0]))
+				n := clampInt(intArg(args[0]))
 				if n < 0 {
 					n = 0
 				}

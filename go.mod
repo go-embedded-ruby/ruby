@@ -16,8 +16,11 @@ require (
 	github.com/go-kramdown/kramdown v0.2.0
 	github.com/go-liquid/liquid v0.1.1
 	github.com/go-mustache/mustache v0.1.0
-	github.com/go-ndarray/ndarray v0.11.0
+	github.com/go-ndarray/ndarray v0.12.0
 	github.com/go-nokogiri/nokogiri v0.1.0
+	github.com/go-numerics/integrate v0.2.0
+	github.com/go-numerics/optimize v0.2.0
+	github.com/go-numerics/special v0.1.0
 	github.com/go-rouge/rouge v0.3.0
 	github.com/go-ruby-aasm/aasm v0.0.0-20260717061120-cec0976ec205
 	github.com/go-ruby-abbrev/abbrev v0.0.0-20260916090008-ac08b8471830
@@ -49,7 +52,7 @@ require (
 	github.com/go-ruby-capistrano/capistrano v0.0.0-20260927173236-3b90af3c6888
 	github.com/go-ruby-capybara/capybara v0.0.0-20260910084630-0731c9ea8d6d
 	github.com/go-ruby-cgi/cgi v0.0.0-20260916091525-3d328d3ff447
-	github.com/go-ruby-chronic/chronic v0.0.0-20260916091614-bd47d560b6f4
+	github.com/go-ruby-chronic/chronic v0.1.0
 	github.com/go-ruby-cmath/cmath v0.0.0-20260916091648-4963ab4145f7
 	github.com/go-ruby-concurrent-ruby/concurrent-ruby v0.0.0-20260916091840-b820f7a57284
 	github.com/go-ruby-confd/confd v0.0.0-20260825131031-1ac780d51c57
@@ -196,6 +199,7 @@ require (
 	github.com/go-ruby-yaml/yaml v0.0.0-20260916104302-910ced2db1c7
 	github.com/go-ruby-zeitwerk/zeitwerk v0.0.0-20260916104335-29169305e951
 	github.com/go-ruby-zlib/zlib v0.0.0-20260927173414-e9d862990b6d
+	github.com/go-statistics/stats v0.1.0
 	github.com/go-webauthn/webauthn v0.18.2
 	github.com/go-xslt/xslt v0.1.0
 	github.com/nats-io/nats-server/v2 v2.15.0

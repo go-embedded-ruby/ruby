@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+//go:build !rbgo_core
+
 package vm
 
 import (
@@ -24,7 +26,7 @@ func augStrArg(args []object.Value, i int) string {
 func augIntArg(args []object.Value, i int) int {
 	if i < len(args) {
 		if n, ok := args[i].(object.Integer); ok {
-			return int(n)
+			return clampInt(n)
 		}
 	}
 	return 0

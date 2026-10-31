@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+//go:build !rbgo_core
+
 package vm
 
 import (
@@ -81,7 +83,7 @@ func (vm *VM) cpNewPool(cls *RClass, args []object.Value, blk *Proc) *RConnectio
 	timeout := 5 * time.Second
 	if h := cpOptions(args); h != nil {
 		if v, ok := h.Get(object.Symbol("size")); ok {
-			size = int(intArg(v))
+			size = clampInt(intArg(v))
 		}
 		if v, ok := h.Get(object.Symbol("timeout")); ok {
 			timeout = cpDuration(v)

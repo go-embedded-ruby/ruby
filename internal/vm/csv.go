@@ -559,7 +559,7 @@ func (vm *VM) registerCSVRowClass(cls *RClass) {
 	idx := func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		r := rowOf(v)
 		if n, ok := args[0].(object.Integer); ok {
-			if val, ok := r.At(int(n)); ok {
+			if val, ok := r.At(clampInt(n)); ok {
 				return vm.csvFieldToRuby(val)
 			}
 			return object.NilV
@@ -680,7 +680,7 @@ func (vm *VM) registerCSVTableClass(cls *RClass) {
 		return vm.csvHeadersArray(tblOf(v).Headers)
 	})
 	d("[]", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		if r, ok := tblOf(v).Row(int(intArg(args[0]))); ok {
+		if r, ok := tblOf(v).Row(clampInt(intArg(args[0]))); ok {
 			return &CSVRow{r: r}
 		}
 		return object.NilV

@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+//go:build !rbgo_core
+
 package vm
 
 import (
@@ -136,7 +138,7 @@ func (vm *VM) registerOAuth2Value(mod *RClass) {
 			if len(args) == 0 {
 				raise("ArgumentError", "wrong number of arguments (given 0, expected 1..3)")
 			}
-			status := int(intArg(args[0]))
+			status := clampInt(intArg(args[0]))
 			headers := oauth2.NewMap()
 			if len(args) > 1 {
 				if h, ok := args[1].(*object.Hash); ok {

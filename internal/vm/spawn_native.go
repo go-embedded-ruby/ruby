@@ -93,17 +93,26 @@ const procPosix = true
 // process.c's rlimit_resource_name2int accepts. The numbers differ per OS
 // (RLIMIT_NPROC is 6 on Linux and 7 on Darwin), so they come from the kernel
 // headers via x/sys/unix rather than being written out here.
-var rlimitResources = map[string]int{
-	"AS":      unix.RLIMIT_AS,
-	"CORE":    unix.RLIMIT_CORE,
-	"CPU":     unix.RLIMIT_CPU,
-	"DATA":    unix.RLIMIT_DATA,
-	"FSIZE":   unix.RLIMIT_FSIZE,
-	"MEMLOCK": unix.RLIMIT_MEMLOCK,
-	"NOFILE":  unix.RLIMIT_NOFILE,
-	"NPROC":   unix.RLIMIT_NPROC,
-	"RSS":     unix.RLIMIT_RSS,
-	"STACK":   unix.RLIMIT_STACK,
+//
+// Not every system has every resource. The six below exist everywhere this file
+// builds; AS, MEMLOCK, NPROC and RSS come from rlimitHostResources, one file per
+// family (rlimit_*.go), and a name the host lacks is simply absent — as in MRI,
+// whose process.c defines Process::RLIMIT_<name> only #ifdef RLIMIT_<name>.
+var rlimitResources = mergeRlimitResources(map[string]int{
+	"CORE":   unix.RLIMIT_CORE,
+	"CPU":    unix.RLIMIT_CPU,
+	"DATA":   unix.RLIMIT_DATA,
+	"FSIZE":  unix.RLIMIT_FSIZE,
+	"NOFILE": unix.RLIMIT_NOFILE,
+	"STACK":  unix.RLIMIT_STACK,
+}, rlimitHostResources)
+
+// mergeRlimitResources adds the host's optional resources to the common ones.
+func mergeRlimitResources(common, host map[string]int) map[string]int {
+	for name, n := range host {
+		common[name] = n
+	}
+	return common
 }
 
 // rlimitValues is the symbolic limit table process.c's rlimit_resource_value
@@ -123,6 +132,9 @@ var prioTargets = map[string]int{
 	"USER":    unix.PRIO_USER,
 }
 
+// setRlim stores a limit in an Rlimit field of either signedness.
+func setRlim[T ~int64 | ~uint64](dst *T, v uint64) { *dst = T(v) }
+
 // The seams themselves. Each is a package var so a whitebox test can drive the
 // failure branch of the shared code without needing a kernel that fails.
 var (
@@ -134,7 +146,12 @@ var (
 		return uint64(rl.Cur), uint64(rl.Max), nil
 	}
 	procSetrlimit = func(res int, cur, max uint64) error {
-		rl := unix.Rlimit{Cur: cur, Max: max}
+		// Rlimit's fields are uint64 on most systems and int64 on FreeBSD and
+		// DragonFly (whose RLIM_INFINITY is math.MaxInt64); setRlim stores into
+		// whichever this one has.
+		var rl unix.Rlimit
+		setRlim(&rl.Cur, cur)
+		setRlim(&rl.Max, max)
 		return unix.Setrlimit(res, &rl)
 	}
 	procGetpriority = unix.Getpriority

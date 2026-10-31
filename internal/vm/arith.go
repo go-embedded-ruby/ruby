@@ -72,12 +72,10 @@ func binary(op bytecode.Op, a, b object.Value) object.Value {
 		return raise("NoMethodError", "undefined method '%s' for an instance of Set", arithOpName(op))
 	}
 
-	// IPAddr arithmetic: ip + n / ip - n (shift the address by a whole-number
-	// offset) reach the operator fast path (the bitwise & | ~ combinators dispatch
-	// as methods). The right operand is an integer offset, mirroring MRI's
-	// IPAddr#+ / IPAddr#-.
-	if ai, ok := a.(*IPAddr); ok {
-		return ipaddrOp(op, ai, b)
+	// IPAddr arithmetic (ip + n / ip - n), through the gem seam (gems_classof.go;
+	// no IPAddr on the rbgo_core build).
+	if r, ok := gemArith(op, a, b); ok {
+		return r
 	}
 
 	// Matrix / Vector arithmetic: + and - reach the operator fast path (the other
@@ -256,6 +254,9 @@ func (vm *VM) hasCustomNeq(a object.Value) bool {
 // is the BASIC_OP_UNREDEFINED_P guard rbgo was missing -- see
 // basic_op_redefinition.go for what that cost.
 func (vm *VM) binaryOp(op bytecode.Op, a, b object.Value) object.Value {
+	if g, ok := a.(*GoObject); ok {
+		return vm.goObjectOp(op, g, b)
+	}
 	if m := vm.overriddenBasicOp(op, a); m != nil {
 		if m == basicOpRemoved {
 			// The method was removed; raise the NoMethodError a send would.
@@ -430,34 +431,16 @@ func (vm *VM) binaryOpBuiltin(op bytecode.Op, a, b object.Value) object.Value {
 		if _, isRange := a.(*object.Range); isRange && op == bytecode.OpMod {
 			return vm.send(a, "%", []object.Value{b}, nil)
 		}
-		// A URI dispatches its arithmetic operator (only + is defined, resolving a
-		// reference) as a method, so the binding's merge — which needs the VM to
-		// wrap the result — runs with a live VM rather than the VM-less binary path.
-		if _, isURI := a.(*URI); isURI {
+		// The gem values whose arithmetic is a method (URI, Money, a Protobuf
+		// RepeatedField, an ActiveSupport::SafeBuffer) dispatch it rather than
+		// fall into the numeric coercion path; see gemDispatchesArith.
+		if gemDispatchesArith(a) {
 			return vm.send(a, arithOpName(op), []object.Value{b}, nil)
 		}
 		// A Benchmark::Tms dispatches its memberwise/scalar + - * / as methods
 		// (defined in internal/vm/benchmark.go), so the library's Tms arithmetic
 		// runs rather than the numeric coercion path.
 		if _, isTms := a.(*Tms); isTms {
-			return vm.send(a, arithOpName(op), []object.Value{b}, nil)
-		}
-		// A Money dispatches its arithmetic (+ - * over the go-ruby-money library,
-		// raising Money::DifferentCurrencyError on a currency mismatch) as a method
-		// rather than falling into the numeric coercion path.
-		if _, isMoney := a.(*Money); isMoney {
-			return vm.send(a, arithOpName(op), []object.Value{b}, nil)
-		}
-		// A Google::Protobuf::RepeatedField dispatches its + (a new list = the
-		// receiver's elements followed by the other list's) as a method rather than
-		// falling into the numeric coercion path.
-		if _, isRF := a.(*ProtobufRepeatedField); isRF {
-			return vm.send(a, arithOpName(op), []object.Value{b}, nil)
-		}
-		// An ActiveSupport::SafeBuffer dispatches its + (a new html-safe buffer with
-		// the right operand escaped-unless-safe) as a method, so a view can build
-		// markup with `f.label + f.text_field` rather than hitting the coercion path.
-		if _, isSB := a.(*SafeBufferVal); isSB {
 			return vm.send(a, arithOpName(op), []object.Value{b}, nil)
 		}
 		// Time arithmetic (t + n / t - n, and t - other) needs a live VM: MRI's
@@ -991,9 +974,9 @@ func negate(v object.Value) object.Value {
 		return &BigDecimal{d: n.d.Neg()}
 	case *Matrix:
 		return &Matrix{m: n.m.Neg()}
-	case *Money:
-		// -money negates the amount via the go-ruby-money library.
-		return &Money{m: n.m.Neg()}
+	}
+	if r, ok := gemNegate(v); ok {
+		return r
 	}
 	return raise("NoMethodError", "undefined method '-@' for %s", v.Inspect())
 }
@@ -1106,6 +1089,11 @@ func valueEqualRec(vm *VM, a, b object.Value, seen map[eqPair]struct{}) bool {
 	if eq, ok := valueEqualExtBinding(a, b); ok {
 		return eq
 	}
+	// IPAddr and URI compare by value through their gem libraries (gems_classof.go;
+	// neither exists on the rbgo_core build).
+	if eq, ok := gemValueEqual(a, b); ok {
+		return eq
+	}
 	switch av := a.(type) {
 	case object.Integer:
 		if bv, ok := b.(object.Integer); ok {
@@ -1213,9 +1201,6 @@ func valueEqualRec(vm *VM, a, b object.Value, seen map[eqPair]struct{}) bool {
 	case *Set:
 		bv, ok := b.(*Set)
 		return ok && av.eq(bv)
-	case *IPAddr:
-		bv, ok := b.(*IPAddr)
-		return ok && av.ip.Eql(bv.ip)
 	case *Matrix:
 		return eqMatrix(av, b)
 	case *Vector:
@@ -1227,8 +1212,6 @@ func valueEqualRec(vm *VM, a, b object.Value, seen map[eqPair]struct{}) bool {
 		return timeEqual(av, b)
 	case *Date:
 		return dateEqual(av, b)
-	case *URI:
-		return uriEqual(av, b)
 	case *Regexp:
 		bv, ok := b.(*Regexp)
 		return ok && av.source == bv.source && av.optionBits() == bv.optionBits()

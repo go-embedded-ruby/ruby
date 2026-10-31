@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+//go:build !rbgo_core
+
 package vm
 
 import (
@@ -341,10 +343,10 @@ func pumaFirst(args []object.Value, name string) object.Value {
 // non-Integer (a thread count / port / status must be an Integer).
 func pumaInt(v object.Value) int {
 	if n, ok := v.(object.Integer); ok {
-		return int(n)
+		return clampInt(n)
 	}
 	if n, ok := object.BigOf(v); ok {
-		return int(n.Int64())
+		return clampInt(n.Int64())
 	}
 	raise("TypeError", "expected an Integer, got %s", v.Inspect())
 	panic("unreachable")

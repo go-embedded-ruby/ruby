@@ -255,8 +255,14 @@ func hasCustomEq(_ *VM, v object.Value) bool {
 	if hasCustomEqExtBinding(v) {
 		return true
 	}
+	// The gem value types that compare by value (BCrypt::Password, Money, a
+	// Dry::Struct, Protobuf messages, …) answer through gemHasCustomEq
+	// (gems_classof.go; none on the rbgo_core build).
+	if gemHasCustomEq(v) {
+		return true
+	}
 	switch v.(type) {
-	case *DigestObj, *BCryptPassword:
+	case *DigestObj:
 		return true
 	case *RandomObj:
 		// Random#== compares generator state (the MT vector, its index, and the
@@ -274,36 +280,6 @@ func hasCustomEq(_ *VM, v object.Value) bool {
 	case *BoundMethod:
 		// Method#== compares receiver plus the underlying method definition (so an
 		// alias equals its original), not object identity.
-		return true
-	case *Money:
-		// Money#== compares fractional amount and currency via the go-ruby-money
-		// library, not object identity, so it must dispatch its own ==.
-		return true
-	case *Currency:
-		// Money::Currency#== compares by id, not identity.
-		return true
-	case *DryStruct:
-		// Dry::Struct#== compares attributes by value (via go-ruby-dry-struct's
-		// Struct.Eql), not object identity, so it must dispatch its own ==.
-		return true
-	case *ProtobufMessage, *ProtobufRepeatedField, *ProtobufMap:
-		// Google::Protobuf messages and their RepeatedField / Map containers compare
-		// by value (proto.Equal / element-wise) through the go-ruby-protobuf library,
-		// not object identity, so each must dispatch its own ==.
-		return true
-	case *SemVerObj:
-		// SemanticPuppet::Version#== compares SemVer precedence (major/minor/patch/
-		// prerelease/build) by value through go-ruby-semantic-puppet, not object
-		// identity, so it must dispatch its own ==.
-		return true
-	case *StringInquirerVal:
-		// Rails::StringInquirer#== compares the wrapped string by value (env ==
-		// "production"), not object identity, so it must dispatch its own ==.
-		return true
-	case *RailsEnvVal:
-		// Rails::EnvironmentInquirer#== compares the wrapped environment name by
-		// value (Rails.env == "production"), not object identity, so it must
-		// dispatch its own ==.
 		return true
 	}
 	return false

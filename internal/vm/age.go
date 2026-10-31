@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+//go:build !rbgo_core
+
 package vm
 
 import (
@@ -137,7 +139,7 @@ func (vm *VM) registerAgeScrypt(mod *RClass) {
 			}
 			if h := ageOptsHash(args[1:]); h != nil {
 				if v, ok := h.Get(object.Symbol("work_factor")); ok {
-					r.SetWorkFactor(int(intArg(v)))
+					r.SetWorkFactor(clampInt(intArg(v)))
 				}
 			}
 			return &AgeScryptRecipient{cls: rc, rcp: r}
@@ -153,7 +155,7 @@ func (vm *VM) registerAgeScrypt(mod *RClass) {
 			}
 			if h := ageOptsHash(args[1:]); h != nil {
 				if v, ok := h.Get(object.Symbol("max_work_factor")); ok {
-					id.SetMaxWorkFactor(int(intArg(v)))
+					id.SetMaxWorkFactor(clampInt(intArg(v)))
 				}
 			}
 			return &AgeScryptIdentity{cls: ic, id: id}

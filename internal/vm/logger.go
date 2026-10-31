@@ -219,7 +219,7 @@ func (lo *Logger) armPeriod(now time.Time) {
 func (lo *Logger) applyShiftAge(v object.Value) {
 	switch x := v.(type) {
 	case object.Integer:
-		lo.shiftAge = int(x)
+		lo.shiftAge = clampInt(x)
 	case *object.String:
 		lo.setPeriod(x.Str())
 	case object.Symbol:
@@ -589,7 +589,7 @@ func (lo *Logger) applyKwargs(kw *object.Hash) {
 func severityArg(v object.Value) any {
 	switch x := v.(type) {
 	case object.Integer:
-		return int(x)
+		return clampInt(x)
 	case *object.String:
 		return x.Str()
 	case object.Symbol:

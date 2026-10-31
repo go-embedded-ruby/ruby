@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-//go:build !(js && wasm)
+//go:build !(js && wasm) && !rbgo_core
 
 // This file is the native half of the server-gem seam. registerServerGems runs
 // the register* calls for the gems that are useless in a browser WebAssembly

@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-//go:build !wasm
+//go:build !wasm && !rbgo_core && ((darwin && (amd64 || arm64)) || (freebsd && (386 || amd64 || arm || arm64)) || (linux && (386 || amd64 || arm || arm64 || loong64 || ppc64le || riscv64 || s390x)) || (netbsd && amd64) || (openbsd && (amd64 || arm64)) || windows)
 
 package vm
 
@@ -367,7 +367,7 @@ func (vm *VM) registerBleveQuery(cls *RClass) {
 	d("fuzziness", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		bleveArity(args, 1, "fuzziness")
 		q := self(v)
-		q.q = q.q.Fuzziness(int(intArg(args[0])))
+		q.q = q.q.Fuzziness(clampInt(intArg(args[0])))
 		return v
 	})
 }
@@ -437,7 +437,7 @@ func (vm *VM) registerBleveHit(cls *RClass) {
 func (vm *VM) registerBleveFacet(cls *RClass) {
 	bleveSMethod(cls, "term", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		bleveArity(args, 2, "term")
-		return &BleveFacet{cls: cls, f: libbleve.TermFacet(strArg(args[0]), int(intArg(args[1])))}
+		return &BleveFacet{cls: cls, f: libbleve.TermFacet(strArg(args[0]), clampInt(intArg(args[1])))}
 	})
 
 	self := func(v object.Value) *BleveFacet { return v.(*BleveFacet) }

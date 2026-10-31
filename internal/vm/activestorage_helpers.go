@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+//go:build !rbgo_core
+
 package vm
 
 import (
@@ -107,14 +109,6 @@ func asPosInt(args []object.Value, i int) int64 {
 		}
 	}
 	return 0
-}
-
-// argAt returns the i-th positional argument, or NilV when absent.
-func argAt(args []object.Value, i int) object.Value {
-	if i < len(args) {
-		return args[i]
-	}
-	return object.NilV
 }
 
 // asReader turns a Ruby io: argument into an io.Reader: a String yields a reader

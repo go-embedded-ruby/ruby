@@ -342,10 +342,10 @@ func (vm *VM) registerMatrixClass() {
 		if blk == nil {
 			raise("LocalJumpError", "no block given (build)")
 		}
-		r := int(args[0].(object.Integer))
+		r := clampInt(args[0].(object.Integer))
 		c := r
 		if len(args) > 1 {
-			c = int(args[1].(object.Integer))
+			c = clampInt(args[1].(object.Integer))
 		}
 		return matOK(libmatrix.Build(r, c, func(i, j int) any {
 			res := vm.callBlock(blk, []object.Value{object.IntValue(int64(i)), object.IntValue(int64(j))})
@@ -354,17 +354,17 @@ func (vm *VM) registerMatrixClass() {
 	})
 
 	identFn := func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return &Matrix{m: libmatrix.Identity(int(args[0].(object.Integer)))}
+		return &Matrix{m: libmatrix.Identity(clampInt(args[0].(object.Integer)))}
 	}
 	sm("identity", identFn)
 	sm("I", identFn)
 	sm("unit", identFn)
 
 	sm("zero", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		r := int(args[0].(object.Integer))
+		r := clampInt(args[0].(object.Integer))
 		c := r
 		if len(args) > 1 {
-			c = int(args[1].(object.Integer))
+			c = clampInt(args[1].(object.Integer))
 		}
 		return &Matrix{m: libmatrix.Zero(r, c)}
 	})
@@ -372,7 +372,7 @@ func (vm *VM) registerMatrixClass() {
 		return matOK(libmatrix.Diagonal(argsToCells(args)...))
 	})
 	sm("scalar", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return matOK(libmatrix.Scalar(int(args[0].(object.Integer)), numFromValue(args[1])))
+		return matOK(libmatrix.Scalar(clampInt(args[0].(object.Integer)), numFromValue(args[1])))
 	})
 	sm("row_vector", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		return matOK(libmatrix.RowVector(cellsFromValue(args[0])))
@@ -397,21 +397,21 @@ func (vm *VM) registerMatrixClass() {
 		return object.IntValue(int64(self(v).m.ColumnCount()))
 	})
 	d("[]", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		n, ok := self(v).m.At(int(args[0].(object.Integer)), int(args[1].(object.Integer)))
+		n, ok := self(v).m.At(clampInt(args[0].(object.Integer)), clampInt(args[1].(object.Integer)))
 		if !ok {
 			return object.NilV
 		}
 		return numToValue(n)
 	})
 	d("row", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		vec, ok := self(v).m.Row(int(args[0].(object.Integer)))
+		vec, ok := self(v).m.Row(clampInt(args[0].(object.Integer)))
 		if !ok {
 			return object.NilV
 		}
 		return &Vector{v: vec}
 	})
 	d("column", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		vec, ok := self(v).m.Column(int(args[0].(object.Integer)))
+		vec, ok := self(v).m.Column(clampInt(args[0].(object.Integer)))
 		if !ok {
 			return object.NilV
 		}
@@ -435,11 +435,11 @@ func (vm *VM) registerMatrixClass() {
 	})
 	d("minor", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		return matOK(self(v).m.Minor(
-			int(args[0].(object.Integer)), int(args[1].(object.Integer)),
-			int(args[2].(object.Integer)), int(args[3].(object.Integer))))
+			clampInt(args[0].(object.Integer)), clampInt(args[1].(object.Integer)),
+			clampInt(args[2].(object.Integer)), clampInt(args[3].(object.Integer))))
 	})
 	d("first_minor", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return matOK(self(v).m.FirstMinor(int(args[0].(object.Integer)), int(args[1].(object.Integer))))
+		return matOK(self(v).m.FirstMinor(clampInt(args[0].(object.Integer)), clampInt(args[1].(object.Integer))))
 	})
 	d("to_a", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		rows := self(v).m.ToA()
@@ -473,7 +473,7 @@ func (vm *VM) registerMatrixClass() {
 		return matOK(self(v).m.DivScalar(numFromValue(args[0])))
 	})
 	d("**", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return matOK(self(v).m.Pow(int(args[0].(object.Integer))))
+		return matOK(self(v).m.Pow(clampInt(args[0].(object.Integer))))
 	})
 	d("-@", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return &Matrix{m: self(v).m.Neg()}
@@ -513,7 +513,7 @@ func (vm *VM) registerMatrixClass() {
 	d("round", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		n := 0
 		if len(args) > 0 {
-			n = int(args[0].(object.Integer))
+			n = clampInt(args[0].(object.Integer))
 		}
 		return &Matrix{m: self(v).m.RoundEntries(n)}
 	})
@@ -617,7 +617,7 @@ func (vm *VM) registerVectorClass() {
 	self := func(v object.Value) *Vector { return v.(*Vector) }
 
 	d("[]", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		n, ok := self(v).v.At(int(args[0].(object.Integer)))
+		n, ok := self(v).v.At(clampInt(args[0].(object.Integer)))
 		if !ok {
 			return object.NilV
 		}

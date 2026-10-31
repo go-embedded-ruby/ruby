@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+//go:build !rbgo_core
+
 package vm
 
 import (
@@ -254,14 +256,14 @@ func (vm *VM) registerIPAddr() {
 		return object.IntValue(int64(self(v).ip.Prefix()))
 	})
 	d("prefix=", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		_, err := self(v).ip.SetPrefix(int(ipInt(args[0])))
+		_, err := self(v).ip.SetPrefix(clampInt(ipInt(args[0])))
 		raiseIPAddrErr(err)
 		return args[0]
 	})
 	d("mask", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		switch x := args[0].(type) {
 		case object.Integer:
-			return ipOK(self(v).ip.MaskLen(int(x)))
+			return ipOK(self(v).ip.MaskLen(clampInt(x)))
 		case *object.String:
 			return ipOK(self(v).ip.Mask(string(x.Bytes())))
 		}

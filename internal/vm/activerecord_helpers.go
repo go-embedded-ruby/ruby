@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+//go:build !rbgo_core
+
 package vm
 
 import (
@@ -74,7 +76,7 @@ func arInt(args []object.Value) int {
 		return 0
 	}
 	if n, ok := args[0].(object.Integer); ok {
-		return int(n)
+		return clampInt(n)
 	}
 	return 0
 }
@@ -205,7 +207,7 @@ func arLengthOpts(args []object.Value) activerecord.LengthOpts {
 		if !isInt {
 			continue
 		}
-		i := int(n)
+		i := clampInt(n)
 		switch arStr(k) {
 		case "minimum":
 			o.Minimum = &i

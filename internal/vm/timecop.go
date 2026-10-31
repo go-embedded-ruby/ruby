@@ -65,7 +65,7 @@ func (vm *VM) timecopInstant(args []object.Value, i int) stdtime.Time {
 func dateInstant(d *Date) stdtime.Time {
 	loc := stdtime.FixedZone("", d.d.Offset())
 	return stdtime.Date(d.d.Year(), stdtime.Month(d.d.Month()), d.d.Day(),
-		d.d.Hour(), d.d.Min(), d.d.Sec(), int(d.d.SecFractionNanos()), loc).UTC()
+		d.d.Hour(), d.d.Min(), d.d.Sec(), clampInt(d.d.SecFractionNanos()), loc).UTC()
 }
 
 // timecopFactor reads Timecop.scale's leading factor argument as a float,

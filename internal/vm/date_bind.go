@@ -100,7 +100,7 @@ func dateArg(v object.Value) *Date {
 // Float is rejected) — the day/month-offset counterpart of intArg.
 func dateDays(v object.Value) int {
 	if n, ok := v.(object.Integer); ok {
-		return int(n)
+		return clampInt(n)
 	}
 	raise("TypeError", "no implicit conversion of %s into Integer", v.Inspect())
 	return 0
@@ -174,7 +174,7 @@ func floorDivDay(ns int64) int {
 	if ns%dateNsPerDay != 0 && ns < 0 {
 		q--
 	}
-	return int(q)
+	return clampInt(q)
 }
 
 // formatZone renders a UTC offset in seconds as MRI's "+HH:MM" / "-HH:MM" zone
@@ -192,13 +192,13 @@ func formatZone(secs int) string {
 // i of a DateTime class-method's arguments, each defaulting to 0.
 func dtTimeArgs(args []object.Value, i int) (h, mi, s int) {
 	if len(args) > i {
-		h = int(intArg(args[i]))
+		h = clampInt(intArg(args[i]))
 	}
 	if len(args) > i+1 {
-		mi = int(intArg(args[i+1]))
+		mi = clampInt(intArg(args[i+1]))
 	}
 	if len(args) > i+2 {
-		s = int(intArg(args[i+2]))
+		s = clampInt(intArg(args[i+2]))
 	}
 	return
 }
@@ -234,7 +234,7 @@ func offsetSeconds(v object.Value) int {
 		}
 		return secs
 	case object.Integer:
-		return int(int64(x) * 86400)
+		return clampInt(int64(x) * 86400)
 	case object.Float:
 		return int(float64(x) * 86400)
 	case *object.Rational:
@@ -354,13 +354,13 @@ func (vm *VM) registerDateConstructors() {
 	newFn := func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		y, m, d := -4712, 1, 1
 		if len(args) > 0 {
-			y = int(intArg(args[0]))
+			y = clampInt(intArg(args[0]))
 		}
 		if len(args) > 1 {
-			m = int(intArg(args[1]))
+			m = clampInt(intArg(args[1]))
 		}
 		if len(args) > 2 {
-			d = int(intArg(args[2]))
+			d = clampInt(intArg(args[2]))
 		}
 		return payloadDate(date.NewDate(y, m, d))
 	}
@@ -369,28 +369,28 @@ func (vm *VM) registerDateConstructors() {
 
 	// Date.jd(n) — the Date for astronomical Julian Day Number n.
 	sm(vm.cDate, "jd", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return &Date{d: date.DateJD(int(intArgOr(args, 0)))}
+		return &Date{d: date.DateJD(clampInt(intArgOr(args, 0)))}
 	})
 	// Date.ordinal(y, yday) — the yday-th day of year y (1-based); an out-of-range
 	// yday raises Date::Error.
 	sm(vm.cDate, "ordinal", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		y := -4712
 		if len(args) > 0 {
-			y = int(intArg(args[0]))
+			y = clampInt(intArg(args[0]))
 		}
-		return payloadDate(date.Ordinal(y, int(intArgOr(args[1:], 1))))
+		return payloadDate(date.Ordinal(y, clampInt(intArgOr(args[1:], 1))))
 	})
 	// Date.commercial(cwyear, cweek, cwday) — the ISO week-date constructor.
 	sm(vm.cDate, "commercial", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		cwy, cw, cwd := -4712, 1, 1
 		if len(args) > 0 {
-			cwy = int(intArg(args[0]))
+			cwy = clampInt(intArg(args[0]))
 		}
 		if len(args) > 1 {
-			cw = int(intArg(args[1]))
+			cw = clampInt(intArg(args[1]))
 		}
 		if len(args) > 2 {
-			cwd = int(intArg(args[2]))
+			cwd = clampInt(intArg(args[2]))
 		}
 		return payloadDate(date.Commercial(cwy, cw, cwd))
 	})
@@ -425,22 +425,22 @@ func (vm *VM) registerDateConstructors() {
 	sm(vm.cDateTime, "new", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		y, m, d, h, mi, s, off := -4712, 1, 1, 0, 0, 0, 0
 		if len(args) > 0 {
-			y = int(intArg(args[0]))
+			y = clampInt(intArg(args[0]))
 		}
 		if len(args) > 1 {
-			m = int(intArg(args[1]))
+			m = clampInt(intArg(args[1]))
 		}
 		if len(args) > 2 {
-			d = int(intArg(args[2]))
+			d = clampInt(intArg(args[2]))
 		}
 		if len(args) > 3 {
-			h = int(intArg(args[3]))
+			h = clampInt(intArg(args[3]))
 		}
 		if len(args) > 4 {
-			mi = int(intArg(args[4]))
+			mi = clampInt(intArg(args[4]))
 		}
 		if len(args) > 5 {
-			s = int(intArg(args[5]))
+			s = clampInt(intArg(args[5]))
 		}
 		if len(args) > 6 {
 			off = offsetSeconds(args[6])
@@ -465,25 +465,25 @@ func (vm *VM) registerDateConstructors() {
 	// constructors carrying a wall clock. The calendar day is resolved by the plain
 	// Date constructor, then re-expressed as a DateTime at the given time of day.
 	sm(vm.cDateTime, "jd", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return dateTimeFromDate(date.DateJD(int(intArgOr(args, 0))), args, 1)
+		return dateTimeFromDate(date.DateJD(clampInt(intArgOr(args, 0))), args, 1)
 	})
 	sm(vm.cDateTime, "ordinal", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		y := -4712
 		if len(args) > 0 {
-			y = int(intArg(args[0]))
+			y = clampInt(intArg(args[0]))
 		}
-		return dateTimeFromDate(payloadDate(date.Ordinal(y, int(intArgOr(args[1:], 1)))).d, args, 2)
+		return dateTimeFromDate(payloadDate(date.Ordinal(y, clampInt(intArgOr(args[1:], 1)))).d, args, 2)
 	})
 	sm(vm.cDateTime, "commercial", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		cwy, cw, cwd := -4712, 1, 1
 		if len(args) > 0 {
-			cwy = int(intArg(args[0]))
+			cwy = clampInt(intArg(args[0]))
 		}
 		if len(args) > 1 {
-			cw = int(intArg(args[1]))
+			cw = clampInt(intArg(args[1]))
 		}
 		if len(args) > 2 {
-			cwd = int(intArg(args[2]))
+			cwd = clampInt(intArg(args[2]))
 		}
 		return dateTimeFromDate(payloadDate(date.Commercial(cwy, cw, cwd)).d, args, 3)
 	})
@@ -493,7 +493,7 @@ func (vm *VM) registerDateConstructors() {
 	// Julian Day Number; valid_ordinal?(y, yday) and valid_commercial?(cwy, cw, cwd)
 	// — the ordinal and week-date validity, each probing the matching constructor.
 	validCivil := func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		_, err := date.NewDate(int(intArg(args[0])), int(intArg(args[1])), int(intArg(args[2])))
+		_, err := date.NewDate(clampInt(intArg(args[0])), clampInt(intArg(args[1])), clampInt(intArg(args[2])))
 		return object.Bool(err == nil)
 	}
 	sm(vm.cDate, "valid_civil?", validCivil)
@@ -503,11 +503,11 @@ func (vm *VM) registerDateConstructors() {
 		return object.Bool(ok)
 	})
 	sm(vm.cDate, "valid_ordinal?", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		_, err := date.Ordinal(int(intArg(args[0])), int(intArg(args[1])))
+		_, err := date.Ordinal(clampInt(intArg(args[0])), clampInt(intArg(args[1])))
 		return object.Bool(err == nil)
 	})
 	sm(vm.cDate, "valid_commercial?", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		_, err := date.Commercial(int(intArg(args[0])), int(intArg(args[1])), int(intArg(args[2])))
+		_, err := date.Commercial(clampInt(intArg(args[0])), clampInt(intArg(args[1])), clampInt(intArg(args[2])))
 		return object.Bool(err == nil)
 	})
 }
@@ -652,7 +652,7 @@ func (vm *VM) registerDateAccessors() {
 		if dd.IsDateTime() {
 			loc := stdtime.FixedZone("", dd.Offset())
 			return &Time{t: stdtime.Date(dd.Year(), stdtime.Month(dd.Month()), dd.Day(),
-				dd.Hour(), dd.Min(), dd.Sec(), int(dd.SecFractionNanos()), loc)}
+				dd.Hour(), dd.Min(), dd.Sec(), clampInt(dd.SecFractionNanos()), loc)}
 		}
 		return &Time{t: stdtime.Date(dd.Year(), stdtime.Month(dd.Month()), dd.Day(), 0, 0, 0, 0, stdtime.Local)}
 	})
@@ -762,8 +762,8 @@ func (vm *VM) registerDateFormat() {
 			return object.NewString(dd.Iso8601())
 		}
 		out := dd.Strftime("%FT%T")
-		if len(args) > 0 && int(intArg(args[0])) > 0 {
-			out += "." + fracDigits(int(dd.SecFractionNanos()), int(intArg(args[0])))
+		if len(args) > 0 && clampInt(intArg(args[0])) > 0 {
+			out += "." + fracDigits(clampInt(dd.SecFractionNanos()), clampInt(intArg(args[0])))
 		}
 		return object.NewString(out + formatZone(dd.Offset()))
 	}

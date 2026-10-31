@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+//go:build !rbgo_core
+
 package vm
 
 import (
@@ -108,7 +110,7 @@ func (vm *VM) registerPagyInstance(cls *RClass) {
 		if len(args) == 0 {
 			return pagySeries(p.Series())
 		}
-		s, err := p.SeriesSize(int(intArg(args[0])))
+		s, err := p.SeriesSize(clampInt(intArg(args[0])))
 		if err != nil {
 			raise("Pagy::VariableError", "%s", err.Error())
 		}
