@@ -19,7 +19,31 @@ $RB_FAILS = []   # [kind, describe, it, exc_class, msg]
 $mock_registry = nil
 $mock_installs = nil
 
-CUR_VERSION = "3.4.1"
+# ⛔ DERIVED, never typed again (#799). This selects the POPULATION the whole
+# conformance figure is counted over: at 3.4.1 every example behind a
+# `ruby_version_is "4.0"` guard is removed from the suite before anything runs
+# -- 61 block guards and 5 inline sites at that boundary, and 41 guards
+# asserting what 4.0 changed away from (censused by cmd/guards).
+#
+# It used to read `"3.4.1"`, a second hardcoded copy of what
+# internal/vm/kernel_introspect.go's `rubyVersion` already says. They agreed, so
+# nothing was wrong today; the defect was that half a version change could land
+# -- the runtime bumped, this file forgotten -- and the gate would go on
+# measuring the old population while every page claimed the new version. Both
+# halves look correct on their own, which is why nothing would have said so.
+#
+# Reading RUBY_VERSION is also what mspec itself does, so this is the upstream
+# behaviour rather than a local convenience. The chain, at mspec b79c65e:
+#
+#   guards/version.rb:67  VersionGuard.new(VersionGuard::FULL_RUBY_VERSION, …)
+#   guards/version.rb:6   FULL_RUBY_VERSION = SpecVersion.new SpecGuard.ruby_version(:full)
+#   guards/guard.rb:41    def self.ruby_version(which = :minor)
+#   guards/guard.rb:51      RUBY_VERSION.split('.')[0,n].join('.')   # n = 3 for :full
+#
+# i.e. RUBY_VERSION itself for a three-part version. Run under a different
+# interpreter, the shim then measures at THAT interpreter's version, which is the
+# only answer that is ever right.
+CUR_VERSION = RUBY_VERSION
 PLATFORMS = [:darwin, :bsd, :unix]
 WORDSIZE = 64
 ENDIAN = :little
