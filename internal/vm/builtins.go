@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -1714,74 +1715,29 @@ func (vm *VM) bootstrap() {
 		delete(table, name)
 		return val
 	})
-	// Module#constants returns the names (as symbols) of the constants defined
-	// directly in the module/class. With inherit (the default, true) the constants
-	// of ancestor modules/classes are included too, excluding Object's. Names are
-	// returned in sorted order; MRI leaves the order unspecified, and sorting keeps
-	// results deterministic across platforms.
+	// Module#constants returns the names (as symbols) of the public constants of
+	// the module/class; see constantNames for the inherit semantics.
 	vm.cModule.define("constants", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		inherit := true
 		if len(args) > 0 {
 			inherit = args[0].Truthy()
 		}
-		seen := map[string]bool{}
-		var names []string
-		// A pending autoload counts as a constant: MRI's rb_autoload_str reserves
-		// the name with an undefined value, so Module#constants lists it before the
-		// file is loaded. Reference: ruby/ruby v3_4_0 variable.c
-		// autoload_synchronized → const_set(module, name, Qundef).
-		add := func(c *RClass) {
-			for name := range c.consts {
-				if !seen[name] {
-					seen[name] = true
-					names = append(names, name)
-				}
-			}
-			for name := range c.autoloads {
-				if !seen[name] {
-					seen[name] = true
-					names = append(names, name)
-				}
-			}
-		}
-		cls := self.(*RClass)
-		if inherit {
-			for _, anc := range vm.ancestors(cls) {
-				if anc == vm.cObject || anc == vm.cBasicObject {
-					continue
-				}
-				add(anc)
-			}
-		} else {
-			add(cls)
-		}
-		sort.Strings(names)
-		out := make([]object.Value, len(names))
-		for i, n := range names {
-			out[i] = object.Symbol(n)
-		}
-		return object.NewArrayFromSlice(out)
+		return symbolArray(vm.constantNames(self.(*RClass), inherit))
 	})
 	// Module.constants (the SINGLETON method, distinct from Module#constants) has
 	// two forms in MRI (rb_mod_s_constants): with no argument it returns the
 	// constants accessible in the caller's scope — at the top level, every
 	// top-level constant, equal to Object.constants; with an argument it behaves
-	// like Module#constants on the receiver (Module's own + inherited). It shadows
-	// the instance method only for the Module class and its subclasses (a plain
-	// class's `.constants` still finds the instance method through the Class chain).
-	// Reference: ruby/ruby v3_4_0 variable.c rb_mod_s_constants.
+	// like Module#constants on the receiver (Module's own + inherited), and so does
+	// a subclass of Module that inherits the singleton (`mod != rb_cModule`).
+	// Reference: ruby/ruby v3_4_1 eval.c rb_mod_s_constants.
 	instConstants := vm.cModule.methods["constants"]
 	vm.cModule.smethods["constants"] = &Method{name: "constants", owner: vm.cModule,
 		native: func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
-			if len(args) > 0 {
+			if len(args) > 0 || self != object.Value(vm.cModule) {
 				return vm.invoke(instConstants, self, args, blk)
 			}
-			names := vm.topLevelConstNames()
-			out := make([]object.Value, len(names))
-			for i, n := range names {
-				out[i] = object.Symbol(n)
-			}
-			return object.NewArrayFromSlice(out)
+			return symbolArray(vm.lexicalConstantNames())
 		}}
 	// Module#remove_const is a PRIVATE instance method in MRI
 	// (rb_define_private_method(rb_cModule, "remove_const", …)), reachable as a
@@ -10062,26 +10018,156 @@ func (vm *VM) fireConstAdded(cls *RClass, name string) {
 	}
 }
 
-// topLevelConstNames returns the sorted, de-duplicated names of every top-level
-// constant, which back the no-argument form of Module.constants (equal to
-// Object.constants in MRI). Top-level constants live in two tables in rbgo: the
-// core classes/modules registered in vm.consts and the user-defined ones written
-// to cObject.consts, so the union of the two is enumerated. Only well-formed
-// constant names are reported, filtering any internal bookkeeping key.
-func (vm *VM) topLevelConstNames() []string {
-	set := map[string]bool{}
-	for name := range vm.consts {
-		set[name] = true
+// constantNames returns the names of cls's public constants, the answer
+// of Module#constants. It follows MRI (ruby/ruby v3_4_1 variable.c):
+//
+//   - inherit=false is rb_local_constants: cls's own table only.
+//   - inherit=true is rb_mod_const_of + rb_const_list: cls and its ancestors up
+//     the superclass chain, breaking on reaching Object unless cls IS Object —
+//     so Object.constants lists every top-level constant plus Kernel's and
+//     BasicObject's, while String.constants leaves all of those out.
+//   - A name is reported once, and its NEAREST definition decides (cv_i_update
+//     keeps the first entry): a private_constant nearer the receiver hides a
+//     public one of the same name further up.
+//   - list_i / rb_local_constants_i push only public entries, so a
+//     private_constant is never listed.
+//   - A pending autoload counts as a constant (autoload_synchronized reserves
+//     the name with const_set(module, name, Qundef)).
+//
+// Order: rb_const_list walks an insertion-ordered st_table filled table by table
+// along the chain, so the receiver's names come first, then each ancestor's, as
+// rbgo does. Within one table MRI yields the slot order of its id_table hash
+// (id_table.c rb_id_table_foreach), which the documentation leaves unspecified;
+// rbgo sorts each table's names, so results are deterministic. The cost is
+// O(n log n) in the number of constants.
+func (vm *VM) constantNames(cls *RClass, inherit bool) []string {
+	if !inherit {
+		return publicConstNames([]*RClass{cls})
 	}
-	for name := range vm.cObject.consts {
-		set[name] = true
+	return publicConstNames(vm.constOf(cls))
+}
+
+// constOf is the table chain rb_mod_const_of visits for cls: cls and its
+// ancestors, cut before Object unless cls is Object.
+func (vm *VM) constOf(cls *RClass) []*RClass {
+	var stop *RClass
+	if cls != vm.cObject {
+		stop = vm.cObject
 	}
-	names := make([]string, 0, len(set))
-	for name := range set {
-		names = append(names, name)
+	return vm.ancestorsUntil(cls, stop)
+}
+
+// lexicalConstantNames answers the no-argument Module.constants, MRI's
+// rb_mod_s_constants: the tables of every class on the caller's lexical cref
+// chain (innermost first, ending at the top level, Object), then rb_mod_const_of
+// of the innermost one. At the top level that is exactly Object.constants.
+func (vm *VM) lexicalConstantNames() []string {
+	var cref *RClass
+	if n := len(vm.frameCrefs); n > 0 {
+		cref = vm.frameCrefs[n-1]
 	}
-	sort.Strings(names)
+	lex := vm.nesting(cref)
+	if len(lex) == 0 {
+		return vm.constantNames(vm.cObject, true)
+	}
+	chain := make([]*RClass, 0, len(lex)+1)
+	chain = append(append(chain, lex...), vm.cObject)
+	return publicConstNames(append(chain, vm.constOf(lex[0])...))
+}
+
+// publicConstNames lists the public constant names of the tables in chain, table
+// by table in chain order (each table's names sorted), the nearest (earliest)
+// table deciding each name's visibility. A name already in an earlier table of
+// the chain is skipped by probing those tables directly: the chain is short (a
+// handful of ancestors), so this costs no per-name set insertion.
+func publicConstNames(chain []*RClass) []string {
+	size := 0
+	for _, c := range chain {
+		size += len(c.consts) + len(c.autoloads)
+	}
+	names := make([]string, 0, size)
+	for i, c := range chain {
+		earlier := chain[:i]
+		keep := func(name string) bool {
+			return !c.privateConsts[name] && !inConstTables(earlier, name)
+		}
+		if len(c.autoloads) == 0 {
+			for _, name := range c.sortedConstKeys() {
+				if keep(name) {
+					names = append(names, name)
+				}
+			}
+			continue
+		}
+		// Pending autoloads are few: merge them into a fresh sorted list.
+		start := len(names)
+		for _, name := range c.sortedConstKeys() {
+			if keep(name) {
+				names = append(names, name)
+			}
+		}
+		for name := range c.autoloads {
+			if _, both := c.consts[name]; !both && keep(name) {
+				names = append(names, name)
+			}
+		}
+		slices.Sort(names[start:])
+	}
 	return names
+}
+
+// sortedConstKeys returns the names of c.consts, sorted, reusing the copy cached
+// on c while it still matches the table. The table is written directly at many
+// sites, so the cache cannot be invalidated on write; it is validated instead: a
+// list of distinct names as long as the table, every one of them in the table,
+// is exactly the table's key set. Validation is n map probes, cheaper than the
+// n log n string comparisons of a fresh sort. Callers must not modify the result.
+func (c *RClass) sortedConstKeys() []string {
+	if keys := c.constKeys; len(keys) == len(c.consts) && allConstKeys(keys, c.consts) {
+		return keys
+	}
+	keys := make([]string, 0, len(c.consts))
+	for name := range c.consts {
+		keys = append(keys, name)
+	}
+	slices.Sort(keys)
+	c.constKeys = keys
+	return keys
+}
+
+// allConstKeys reports whether every name in keys is a key of table.
+func allConstKeys(keys []string, table map[string]object.Value) bool {
+	for _, name := range keys {
+		if _, ok := table[name]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// inConstTables reports whether name is a constant or a pending autoload of any
+// of tables.
+func inConstTables(tables []*RClass, name string) bool {
+	for _, c := range tables {
+		if _, ok := c.consts[name]; ok {
+			return true
+		}
+		if _, ok := c.autoloads[name]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// symbolArray builds a Ruby Array of the Symbols named by names. Boxing each
+// directly beats the SymVal intern here: its sync.Map probe costs more than the
+// allocation it saves (measured: 0.24 vs 0.36 ms for 10 000 names).
+func symbolArray(names []string) *object.Array {
+	out := make([]object.Value, len(names))
+	for i, n := range names {
+		out[i] = object.Symbol(n)
+	}
+	return object.NewArrayFromSlice(out)
 }
 
 // cvarNameArg coerces a class-variable name argument (Symbol or String) to its

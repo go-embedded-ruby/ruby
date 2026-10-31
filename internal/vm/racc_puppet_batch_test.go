@@ -97,9 +97,10 @@ func TestModuleConstants(t *testing.T) {
 		{"class Foo; BAR=1; BAZ=2; end; p Foo.constants", "[:BAR, :BAZ]"},
 		{"module M; X=9; end; p M.constants", "[:X]"},
 		{"module Empty; end; p Empty.constants", "[]"},
-		// inherit=true (default) walks ancestors but skips Object's constants.
+		// inherit=true (default) walks ancestors, receiver first, but stops before
+		// Object (MRI 3.4 prints [:OWN, :MIXED, :PARENT]).
 		{"module Mix; MIXED=1; end; class P; PARENT=1; end; class C < P; include Mix; OWN=1; end; p C.constants",
-			"[:MIXED, :OWN, :PARENT]"},
+			"[:OWN, :MIXED, :PARENT]"},
 		// inherit=false reports only the receiver's own constants.
 		{"class P2; PARENT=1; end; class C2 < P2; OWN=1; end; p C2.constants(false)",
 			"[:OWN]"},
