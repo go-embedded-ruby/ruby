@@ -1190,7 +1190,14 @@ func (vm *VM) threadLocalKey(k object.Value) object.Value {
 }
 
 func (vm *VM) registerMutex() {
-	cMutex := newClass("Mutex", vm.cObject)
+	// The class's name is the QUALIFIED one; `Mutex` at top level is a second
+	// constant pointing at the same class, which is what MRI does --
+	// `Mutex.equal?(Thread::Mutex)` is true in both engines, and `Mutex.name`
+	// answers "Thread::Mutex" in MRI however it was reached. rbgo answered
+	// "Mutex" (#759), and that only became visible in OUTPUT once Kernel#to_s
+	// started building its string from classOf(self).name (#756) rather than
+	// from the hardcoded "#<Thread::Mutex>" in RMutex.ToS.
+	cMutex := newClass("Thread::Mutex", vm.cObject)
 	vm.consts["Mutex"] = cMutex
 	vm.consts["Thread"].(*RClass).consts["Mutex"] = cMutex
 	cMutex.smethods["new"] = &Method{name: "new", owner: cMutex, native: func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
