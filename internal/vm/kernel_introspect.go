@@ -33,27 +33,64 @@ func Description() string { return "ruby " + rubyVersion + " [" + rubyPlatform()
 
 func (vm *VM) registerVersionConstants() {
 	version := rubyVersion
+
+	// The Ruby module, new in Ruby 4.0: "the Ruby module that contains portable
+	// information among implementations. The constants defined here are aliased
+	// in the toplevel with +RUBY_+ prefix" (version.c, Init_version at tag
+	// v4.0.9).
+	//
+	// ⛔ ONE OBJECT, TWO NAMES — this is the whole of it. version.c does not
+	// define the pair twice; it defines each value once and installs it under
+	// both names:
+	//
+	//	static inline void
+	//	define_ruby_const(VALUE mod, const char *name, VALUE value, bool toplevel)
+	//	{
+	//	    if (toplevel) {
+	//	        rb_define_global_const(name, value);   // RUBY_VERSION
+	//	        name += rb_strlen_lit("RUBY_");
+	//	    }
+	//	    rb_define_const(mod, name, value);         // Ruby::VERSION
+	//	}
+	//
+	// which is why core/builtin_constants asserts `Ruby::VERSION.should.equal?
+	// (RUBY_VERSION)` — `equal?` is IDENTITY, not equality. Two separate frozen
+	// strings holding the same bytes would satisfy `==` and fail every one of
+	// those nine examples, and the failure would read as "the constant is
+	// wrong" rather than "it is a different object". Hence define() below: the
+	// value is built once, by one expression, and the two names cannot drift.
+	mRuby := newClass("Ruby", nil)
+	mRuby.isModule = true
+	vm.consts["Ruby"] = mRuby
+	define := func(name string, v object.Value) {
+		vm.consts["RUBY_"+name] = v
+		mRuby.consts[name] = v
+	}
+
 	// Every RUBY_* String constant is frozen. version.c's Init_version at tag
 	// v3_4_0 builds each one through
 	//     #define MKSTR(name) rb_obj_freeze(rb_usascii_str_new_static(ruby_##name, sizeof(ruby_##name)-1))
 	//     rb_define_global_const("RUBY_VERSION", MKSTR(version));
 	// so core/builtin_constants asserts `.should.frozen?` on all nine; rbgo only
 	// froze RUBY_RELEASE_DATE and RUBY_REVISION.
-	vm.consts["RUBY_VERSION"] = object.NewFrozenStringView(version)
-	vm.consts["RUBY_ENGINE"] = object.NewFrozenStringView("ruby")
-	vm.consts["RUBY_ENGINE_VERSION"] = object.NewFrozenStringView(version)
-	vm.consts["RUBY_PATCHLEVEL"] = object.IntValue(0)
-	vm.consts["RUBY_PLATFORM"] = object.NewFrozenStringView(rubyPlatform())
-	vm.consts["RUBY_DESCRIPTION"] = object.NewFrozenStringView(Description())
-	vm.consts["RUBY_COPYRIGHT"] = object.NewFrozenStringView("ruby - Copyright (C) 1993-2025 Yukihiro Matsumoto")
+	versionStr := object.NewFrozenStringView(version)
+	define("VERSION", versionStr)
+	define("ENGINE", object.NewFrozenStringView("ruby"))
+	// The SAME object as VERSION, as in version.c, which passes the one `version`
+	// VALUE to both: `rb_define_const(mRuby, "ENGINE_VERSION", version)`.
+	define("ENGINE_VERSION", versionStr)
+	define("PATCHLEVEL", object.IntValue(0))
+	define("PLATFORM", object.NewFrozenStringView(rubyPlatform()))
+	define("DESCRIPTION", object.NewFrozenStringView(Description()))
+	define("COPYRIGHT", object.NewFrozenStringView("ruby - Copyright (C) 1993-2025 Yukihiro Matsumoto"))
 	// RUBY_RELEASE_DATE and RUBY_REVISION describe the MRI release this runtime
 	// targets, and both are frozen Strings (core/builtin_constants asserts the
 	// class and the frozen-ness of each). version.h at tag v3_4_1 builds
 	// RUBY_RELEASE_DATE out of RUBY_RELEASE_YEAR/MONTH/DAY and takes RUBY_REVISION
 	// from the generated revision.h, i.e. the tagged commit: ruby/ruby v3_4_1 is
 	// 48d4efcb85000e1ebae42004e963b5d0cedddcf2, committed 2024-12-25.
-	vm.consts["RUBY_RELEASE_DATE"] = object.NewFrozenStringView(releaseDate)
-	vm.consts["RUBY_REVISION"] = object.NewFrozenStringView(revision)
+	define("RELEASE_DATE", object.NewFrozenStringView(releaseDate))
+	define("REVISION", object.NewFrozenStringView(revision))
 	vm.registerRbConfig(version)
 }
 
