@@ -80,6 +80,35 @@ and be recorded as not loading, which bakes the load into the gate. The CI job
 (`.github/workflows/rubyspec-ratchet.yml`) enforces the baseline on every push
 and pull request, and raises `TIMEOUT` to 60s for exactly this reason.
 
+## Which examples the version string selects — `cmd/guards`
+
+`spec_helper.rb` sets `CUR_VERSION`, and the corpus guards whole blocks and
+individual values on it. Moving that string moves the population **in both
+directions**, so `cmd/guards` censuses the corpus before anything is
+re-recorded — a static read, needing no sweep, and so runnable on a loaded
+machine where a sweep is not:
+
+```bash
+go run ./scripts/conformance/rubyspec/cmd/guards -root /tmp/rubyspec-corpus -list
+```
+
+It separates the two shapes, because they do opposite things:
+
+| shape | at a version below the threshold | raising `CUR_VERSION` |
+|---|---|---|
+| `ruby_version_is "4.0" do … end` | the examples inside are **skipped** | **adds** them to the population |
+| `ruby_version_is("4.0") ? a : b` | the example **runs**, asserting the pre-4.0 branch | **changes what it asserts** |
+
+⛔ **It reports its own control first.** The guard identification is checked
+against the figure in [#799](https://github.com/go-embedded-ruby/ruby/issues/799)
+(56 guards at `"4.0"` under a `do$` anchor); the example counts are a **lower
+bound**, since a static reader cannot expand `it_behaves_like`. Read the guard
+columns as the measurement and the example columns as a floor — and if the
+control ever stops reproducing, nothing below it is worth reading.
+
+It is an analysis tool, not a gate: nothing fails when it is not run. What it
+exists to prevent is a `UPDATE_BASELINE=1` that absorbs a loss silently.
+
 ## Caveats
 
 The shim is not full MSpec: a few matchers (`complain`, `output`,
