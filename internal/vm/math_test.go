@@ -238,6 +238,21 @@ func TestMathLog1pAndExpm1(t *testing.T) {
 			"ArgumentError: wrong number of arguments (given 2, expected 1)\n"},
 		{mathRescue(`Math.expm1(9, 3)`),
 			"ArgumentError: wrong number of arguments (given 2, expected 1)\n"},
+		// ⛔ And with NO argument, where the older helpers do something worse than
+		// being lenient: they index args[0] out of range, and the VM's
+		// panic-to-exception net surfaces the Go runtime error as the Ruby
+		// message. Measured on main:
+		//
+		//	Math.cbrt   -> ArgumentError: cbrt: runtime error: index out of range [0] with length 0
+		//	Math.log1p  -> ArgumentError: wrong number of arguments (given 0, expected 1)
+		//
+		// The class is right by accident; the message is a Go internal leaked to
+		// Ruby code, and it would read differently on another Go version. These
+		// two cases pin MRI's wording so that cannot regress into it.
+		{mathRescue(`Math.log1p`),
+			"ArgumentError: wrong number of arguments (given 0, expected 1)\n"},
+		{mathRescue(`Math.expm1`),
+			"ArgumentError: wrong number of arguments (given 0, expected 1)\n"},
 
 		// module_function: reachable as a private instance method on an includer,
 		// which is the last example of each spec file.
