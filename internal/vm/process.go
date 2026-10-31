@@ -227,7 +227,7 @@ func (vm *VM) defineProcessLimits(def func(string, NativeFn)) {
 		if len(args) != 2 {
 			raise("ArgumentError", "wrong number of arguments (given %d, expected 2)", len(args))
 		}
-		prio, err := procGetpriority(int(vm.procToInt(args[0])), int(vm.procToInt(args[1])))
+		prio, err := procGetpriority(clampInt(vm.procToInt(args[0])), clampInt(vm.procToInt(args[1])))
 		if err != nil && getpriorityFailed(prio, err) {
 			sysFail(err, "")
 		}
@@ -237,7 +237,7 @@ func (vm *VM) defineProcessLimits(def func(string, NativeFn)) {
 		if len(args) != 3 {
 			raise("ArgumentError", "wrong number of arguments (given %d, expected 3)", len(args))
 		}
-		err := procSetpriority(int(vm.procToInt(args[0])), int(vm.procToInt(args[1])), int(vm.procToInt(args[2])))
+		err := procSetpriority(clampInt(vm.procToInt(args[0])), clampInt(vm.procToInt(args[1])), clampInt(vm.procToInt(args[2])))
 		if err != nil {
 			sysFail(err, "")
 		}
@@ -254,7 +254,7 @@ func (vm *VM) defineProcessGroups(def func(string, NativeFn)) {
 		if len(args) != 1 {
 			raise("ArgumentError", "wrong number of arguments (given %d, expected 1)", len(args))
 		}
-		pgid, err := procGetpgid(int(vm.procToInt(args[0])))
+		pgid, err := procGetpgid(clampInt(vm.procToInt(args[0])))
 		if err != nil {
 			sysFail(err, "")
 		}
@@ -272,7 +272,7 @@ func (vm *VM) defineProcessGroups(def func(string, NativeFn)) {
 	def("getsid", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		pid := 0
 		if len(args) > 0 && !object.IsNil(args[0]) {
-			pid = int(vm.procToInt(args[0]))
+			pid = clampInt(vm.procToInt(args[0]))
 		}
 		sid, err := procGetsid(pid)
 		if err != nil {
@@ -285,7 +285,7 @@ func (vm *VM) defineProcessGroups(def func(string, NativeFn)) {
 		if len(args) != 2 {
 			raise("ArgumentError", "wrong number of arguments (given %d, expected 2)", len(args))
 		}
-		if err := procSetpgid(int(vm.procToInt(args[0])), int(vm.procToInt(args[1]))); err != nil {
+		if err := procSetpgid(clampInt(vm.procToInt(args[0])), clampInt(vm.procToInt(args[1]))); err != nil {
 			sysFail(err, "")
 		}
 		return object.IntValue(0)
@@ -318,7 +318,7 @@ func (vm *VM) defineProcessKill(def func(string, NativeFn)) {
 		sig := vm.killSignalNumber(args[0])
 		self := os.Getpid()
 		for _, pv := range args[1:] {
-			pid, send := int(vm.procToInt(pv)), sig
+			pid, send := clampInt(vm.procToInt(pv)), sig
 			if sig < 0 { // killpg(pgid, sig) == kill(-pgid, sig)
 				pid, send = -pid, -sig
 			}
@@ -374,7 +374,7 @@ func rlimValue(lim uint64) object.Value {
 func (vm *VM) rlimitResourceType(v object.Value) int {
 	name, named := vm.rlimitName(v)
 	if !named {
-		return int(vm.procToInt(v))
+		return clampInt(vm.procToInt(v))
 	}
 	if res, ok := rlimitResources[name]; ok {
 		return res
@@ -517,7 +517,7 @@ func sysFail(err error, op string) {
 // restored, which is what MRI prints for both "FOO" and "SIGFOO".
 func (vm *VM) killSignalNumber(v object.Value) int {
 	if i, ok := v.(object.Integer); ok {
-		return int(i)
+		return clampInt(i)
 	}
 	name, named := vm.rlimitName(v) // Symbol / String / #to_str, as signm2signo takes
 	if !named {

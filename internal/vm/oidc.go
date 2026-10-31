@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+//go:build !rbgo_core
+
 package vm
 
 import (
@@ -128,7 +130,7 @@ func (d oidcDoer) Do(req *oidc.HTTPRequest) (*oidc.HTTPResponse, error) {
 	}
 	resp := &oidc.HTTPResponse{Header: map[string]string{}}
 	if v, ok := rh.Get(object.NewString("status")); ok {
-		resp.Status = int(intArg(v))
+		resp.Status = clampInt(intArg(v))
 	}
 	if v, ok := rh.Get(object.NewString("body")); ok {
 		resp.Body = oidcStr(v)

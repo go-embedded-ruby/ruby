@@ -72,7 +72,7 @@ func (vm *VM) ppText(v object.Value) string {
 // when given, otherwise the string's character length (MRI's obj.length default).
 func ppWidth(s string, args []object.Value, idx int) int {
 	if len(args) > idx {
-		return int(intArg(args[idx]))
+		return clampInt(intArg(args[idx]))
 	}
 	return utf8.RuneCountInString(s)
 }
@@ -101,7 +101,7 @@ func (vm *VM) ppNewArgs(args []object.Value) (prefix string, maxwidth int, newli
 	}
 	if len(args) > 1 {
 		if _, isNil := args[1].(object.Nil); !isNil {
-			maxwidth = int(intArg(args[1]))
+			maxwidth = clampInt(intArg(args[1]))
 		}
 	}
 	if len(args) > 2 {
@@ -190,7 +190,7 @@ func (vm *VM) registerPrettyPrint() {
 			raise("LocalJumpError", "no block given (nest)")
 		}
 		p := self(v)
-		indent := int(intArg(args[0]))
+		indent := clampInt(intArg(args[0]))
 		p.q.Nest(indent, func() { vm.callBlock(blk, nil) })
 		return object.NilV
 	})
@@ -205,7 +205,7 @@ func (vm *VM) registerPrettyPrint() {
 		p := self(v)
 		indent := 0
 		if len(args) > 0 {
-			indent = int(intArg(args[0]))
+			indent = clampInt(intArg(args[0]))
 		}
 		openObj, closeObj := "", ""
 		if len(args) > 1 {

@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-//go:build !wasm
+//go:build !wasm && !rbgo_core && ((darwin && (amd64 || arm64)) || (freebsd && (386 || amd64 || arm || arm64)) || (linux && (386 || amd64 || arm || arm64 || loong64 || ppc64le || riscv64 || s390x)) || (netbsd && amd64) || (openbsd && (amd64 || arm64)) || windows)
 
 package vm
 
@@ -179,7 +179,7 @@ func sequelColOpts(h *object.Hash) []sequel.ColOpt {
 		opts = append(opts, sequel.Unique())
 	}
 	if v, ok := sequelKw(h, "size"); ok {
-		opts = append(opts, sequel.Size(int(pgIntArg(v))))
+		opts = append(opts, sequel.Size(clampInt(pgIntArg(v))))
 	}
 	if v, ok := sequelKw(h, "text"); ok && v.Truthy() {
 		opts = append(opts, sequel.Text())

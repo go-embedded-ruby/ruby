@@ -773,7 +773,7 @@ func (vm *VM) registerThreadClass() {
 		if !ok {
 			raise("TypeError", "no implicit conversion of %s into Integer", classNameOf(args[0]))
 		}
-		p := int(n)
+		p := clampInt(n)
 		if p > 3 {
 			p = 3
 		}

@@ -95,7 +95,7 @@ func (vm *VM) ndTypeName(v object.Value) string {
 // ndInt reads an Integer argument (an index, an axis, a dimension).
 func (vm *VM) ndInt(v object.Value) int {
 	if i, ok := v.(object.Integer); ok {
-		return int(i)
+		return clampInt(i)
 	}
 	raise("TypeError", "no implicit conversion of %s into Integer", vm.ndTypeName(v))
 	return 0
@@ -297,7 +297,7 @@ func (vm *VM) ndSpan(lo, hi object.Value, step int, excl bool, length int) nd.In
 func (vm *VM) ndIndex(x object.Value, length int) nd.Index {
 	switch r := x.(type) {
 	case object.Integer:
-		return nd.A(int(r))
+		return nd.A(clampInt(r))
 	case object.Bool:
 		if r {
 			return nd.All()

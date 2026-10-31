@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+//go:build !rbgo_core
+
 package vm
 
 import (
@@ -95,7 +97,7 @@ func rubyHashToTyphoeusOptions(h *object.Hash) typhoeus.Options {
 		o.FollowLocation = v.Truthy()
 	}
 	if v, ok := h.Get(object.Symbol("maxredirs")); ok {
-		o.MaxRedirects = int(toInt(v))
+		o.MaxRedirects = clampInt(toInt(v))
 	}
 	return o
 }

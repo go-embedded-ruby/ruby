@@ -30,7 +30,7 @@ func (vm *VM) registerIOClassMethods(cIO, cFile *RClass) {
 		if len(pos) < 1 || len(pos) > 2 {
 			raise("ArgumentError", "wrong number of arguments (given %d, expected 1..2)", len(pos))
 		}
-		return vm.ioAdoptFd(cIO, int(vm.repeatLong(pos[0])), pos, opts)
+		return vm.ioAdoptFd(cIO, clampInt(vm.repeatLong(pos[0])), pos, opts)
 	}
 	cIO.smethods["for_fd"] = &Method{name: "for_fd", owner: cIO, native: forFd}
 	cIO.smethods["new"] = &Method{name: "new", owner: cIO, native: forFd}
@@ -91,11 +91,11 @@ func (vm *VM) registerIOClassMethods(cIO, cFile *RClass) {
 		}
 		length, hasLen := -1, false
 		if len(args) >= 3 && !object.IsNil(args[2]) {
-			length, hasLen = int(intArg(args[2])), true
+			length, hasLen = clampInt(intArg(args[2])), true
 		}
 		srcOffset, hasOff := -1, false
 		if len(args) >= 4 && !object.IsNil(args[3]) {
-			srcOffset, hasOff = int(intArg(args[3])), true
+			srcOffset, hasOff = clampInt(intArg(args[3])), true
 		}
 		// A zero-length copy transfers nothing and touches neither object — MRI
 		// never calls #read on the source nor #write on the destination.
@@ -225,10 +225,10 @@ func (vm *VM) ioYieldAndClose(o *IOObj, blk *Proc) object.Value {
 // the bool says so rather than raising, because the caller has a path to try.
 func (vm *VM) ioFdArg(v object.Value) (int, bool) {
 	if i, ok := v.(object.Integer); ok {
-		return int(i), true
+		return clampInt(i), true
 	}
 	if vm.respondsToDynamic(v, "to_int") {
-		return int(vm.repeatLong(v)), true
+		return clampInt(vm.repeatLong(v)), true
 	}
 	return 0, false
 }

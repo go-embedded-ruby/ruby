@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+//go:build !rbgo_core
+
 package vm
 
 import (
@@ -25,7 +27,7 @@ func fgStrArg(args []object.Value) string {
 // fgIntArg reads an integer count, treating a non-integer as zero.
 func fgIntArg(v object.Value) int {
 	if n, ok := v.(object.Integer); ok {
-		return int(n)
+		return clampInt(n)
 	}
 	return 0
 }

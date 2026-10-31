@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+//go:build !rbgo_core
+
 package vm
 
 import (
@@ -78,7 +80,7 @@ func (vm *VM) i18nOptions(args []object.Value, bang bool) *i18n.Options {
 			opts.Scope = i18nScope(val)
 		case "count":
 			if n, ok := val.(object.Integer); ok {
-				c := int(n)
+				c := clampInt(n)
 				opts.Count = &c
 			}
 		case "default":
@@ -195,7 +197,7 @@ func toI18nData(v object.Value) i18n.Value {
 	case object.Symbol:
 		return string(x)
 	case object.Integer:
-		return int(x)
+		return clampInt(x)
 	case object.Float:
 		return float64(x)
 	case object.Bool:
@@ -324,17 +326,7 @@ func (t *i18nTemporal) field(name string) int {
 		return 0
 	}
 	if n, ok := t.vm.send(t.obj, name, nil, nil).(object.Integer); ok {
-		return int(n)
+		return clampInt(n)
 	}
 	return 0
-}
-
-// lastHash returns the trailing Hash argument (the keyword options) when the
-// last positional argument is a Hash, matching how rbgo passes keyword args.
-func lastHash(args []object.Value) (*object.Hash, bool) {
-	if len(args) == 0 {
-		return nil, false
-	}
-	h, ok := args[len(args)-1].(*object.Hash)
-	return h, ok
 }

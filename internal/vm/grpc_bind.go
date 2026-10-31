@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-//go:build !wasm
+//go:build !wasm && !rbgo_core
 
 package vm
 
@@ -623,7 +623,7 @@ func grpcDurationOf(v object.Value) time.Duration {
 // grpcInt coerces a Ruby Integer argument to an int (for a status code).
 func grpcInt(v object.Value) int {
 	if n, ok := v.(object.Integer); ok {
-		return int(n)
+		return clampInt(n)
 	}
 	raise("TypeError", "expected an Integer, got %s", v.Inspect())
 	return 0

@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+//go:build !rbgo_core
+
 package vm
 
 import (
@@ -43,17 +45,17 @@ func pagyVarsFromHash(h *object.Hash) pagy.Vars {
 	pagyEachOpt(h, func(key string, val object.Value) {
 		switch key {
 		case "count":
-			v.Count = int(intArg(val))
+			v.Count = clampInt(intArg(val))
 		case "page":
-			v.Page = int(intArg(val))
+			v.Page = clampInt(intArg(val))
 		case "items", "limit":
-			v.Items = int(intArg(val))
+			v.Items = clampInt(intArg(val))
 		case "outset":
-			v.Outset = int(intArg(val))
+			v.Outset = clampInt(intArg(val))
 		case "size":
-			v.Size = int(intArg(val))
+			v.Size = clampInt(intArg(val))
 		case "max_pages":
-			v.MaxPages = int(intArg(val))
+			v.MaxPages = clampInt(intArg(val))
 		case "cycle":
 			v.Cycle = val.Truthy()
 		case "ends":

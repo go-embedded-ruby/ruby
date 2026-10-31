@@ -212,6 +212,7 @@ p C::Fresh::Z`, "4")
 // (eval.c top_include, ruby/ruby v3_4_0:1862-1866). The RSpec include MATCHER
 // this VM publishes on Object stays reachable, told apart by its arguments.
 func TestTopLevelInclude(t *testing.T) {
+	skipOnCore(t, "it includes RSpec, not part of core")
 	checkSrc(t, "mixes into Object", `
 module M; CONST_IN_M = 42; def hello; :hi; end; end
 include M

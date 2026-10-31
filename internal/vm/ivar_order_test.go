@@ -19,6 +19,7 @@ import "testing"
 // fills the ivars map directly and leaves ivarOrder empty therefore produces
 // ivars that read back and do not enumerate, with nothing to indicate it.
 func TestYAMLBuiltIvarsAreEnumerable(t *testing.T) {
+	skipOnCoreBuild(t, "yaml is not part of core")
 	checkCases(t, []runCase{
 		{`require "yaml"
 class P; attr_accessor :a, :b; end

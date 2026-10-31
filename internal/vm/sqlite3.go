@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-//go:build !wasm
+//go:build !wasm && !rbgo_core && ((darwin && (amd64 || arm64)) || (freebsd && (386 || amd64 || arm || arm64)) || (linux && (386 || amd64 || arm || arm64 || loong64 || ppc64le || riscv64 || s390x)) || (netbsd && amd64) || (openbsd && (amd64 || arm64)) || windows)
 
 package vm
 
@@ -265,7 +265,7 @@ func (vm *VM) registerSQLite3Database(mod *RClass) {
 	d("busy_timeout=", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		ms := 0
 		if len(args) > 0 {
-			ms = int(sqlite3IntArg(args[0]))
+			ms = clampInt(sqlite3IntArg(args[0]))
 		}
 		if err := self(v).BusyTimeout(ms); err != nil {
 			raiseSQLite3Error(err)

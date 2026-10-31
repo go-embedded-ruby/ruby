@@ -18,12 +18,36 @@ permissions:
 jobs:
   ratchet:
     name: ruby/spec ratchet
-    runs-on: ubuntu-latest
+    # ⛔ PINNED, and this is the one lane in this repository that must be.
+    # BASELINE pins everything else about the measurement -- the corpus SHA, a
+    # real path rather than a symlink, TIMEOUT raised to 60s, an isolated
+    # snapshot, three agreeing sweeps -- and then `ubuntu-latest` re-pointed
+    # without notice and the gate changed its answer.
+    #
+    # Measured (#838): run 40355659600 at commit e54df08, re-run 28 hours later.
+    #   attempt 1, 2026-10-26, Image: ubuntu-24.04 -> success
+    #   attempt 2, 2026-10-27, Image: ubuntu-26.04 -> FAILURE
+    #       core/process/setrlimit_spec.rb: 28 passing, baseline 29
+    # Same commit, same go-version, same SPEC_SHA. `setrlimit` measures
+    # resource limits, which is among the first things to differ between two
+    # Ubuntu majors. Four pull requests sat blocked behind it, none of them the
+    # cause.
+    #
+    # A gate whose environment is a moving label is a reading, not a gate; and
+    # the failure is the quiet kind, because nobody re-runs a green lane.
+    # Moving to 26.04 stays possible -- as a deliberate change with its own
+    # measurement and its own BASELINE delta, like a SPEC_SHA bump. Re-recording
+    # blind is what must not happen: the same run also showed kernel/require +1,
+    # equally environmental, and `UPDATE_BASELINE=1` would bank it as progress.
+    #
+    # The other lanes keep `ubuntu-latest` deliberately: they build and test,
+    # where an image roll is news worth having, not a baseline to protect.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
-          go-version: 1.27.2
+          go-version: 1.27.3
       - run: go version
       - name: What the runner has to start with
         run: |

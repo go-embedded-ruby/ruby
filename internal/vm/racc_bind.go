@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+//go:build !rbgo_core
+
 package vm
 
 import (
@@ -29,7 +31,7 @@ const raccNilCell = -1 << 30
 // raccIntSlice, which maps nil to raccNilCell instead.
 func raccInt(v object.Value) int {
 	if n, ok := v.(object.Integer); ok {
-		return int(n)
+		return clampInt(n)
 	}
 	return 0
 }
@@ -46,7 +48,7 @@ func raccIntSlice(v object.Value) []int {
 	out := make([]int, len(arr.Elems))
 	for i, e := range arr.Elems {
 		if n, ok := e.(object.Integer); ok {
-			out[i] = int(n)
+			out[i] = clampInt(n)
 		} else {
 			out[i] = raccNilCell
 		}

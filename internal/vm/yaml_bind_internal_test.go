@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+//go:build !rbgo_core
+
 package vm
 
 import (
@@ -15,25 +17,6 @@ import (
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
-
-// rubyErr runs fn and returns the RubyError it panics with (failing the test if
-// it does not panic with one). It is the white-box analogue of the black-box
-// runErr helper, used to assert the binding's raise() paths directly.
-func rubyErr(t *testing.T, fn func()) RubyError {
-	t.Helper()
-	var got RubyError
-	func() {
-		defer func() {
-			re, ok := recover().(RubyError)
-			if !ok {
-				t.Fatalf("expected a RubyError panic, got %v", recover())
-			}
-			got = re
-		}()
-		fn()
-	}()
-	return got
-}
 
 // TestYAMLBindErrMessage covers yamlErrMessage's SyntaxError and generic-error
 // branches.

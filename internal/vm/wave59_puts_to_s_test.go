@@ -118,6 +118,7 @@ print "\n"`
 // Enumerator#to_s being over-defined to #inspect (#756 step 4). Pinning the
 // current answer rather than ruby's keeps this test about THIS change.
 func TestWrapperTypesRenderUnchanged(t *testing.T) {
+	skipOnCore(t, "it renders URI, IPAddr and REXML values, not part of core")
 	src := `require "date"; require "set"; require "uri"; require "ipaddr"; require "matrix"
 require "rexml/document"
 def show(label, v)

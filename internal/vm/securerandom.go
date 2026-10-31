@@ -99,7 +99,7 @@ func countArg(args []object.Value, def int) int {
 	if _, isNil := args[0].(object.Nil); isNil {
 		return def
 	}
-	return int(intArg(args[0]))
+	return clampInt(intArg(args[0]))
 }
 
 // secureRandRead is the crypto/rand.Read entry point behind a seam so tests can

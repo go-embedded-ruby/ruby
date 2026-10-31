@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+//go:build !rbgo_core
+
 package vm
 
 import (
@@ -102,10 +104,10 @@ func (vm *VM) registerActiveSupportInflector(as *RClass) {
 		return object.NewString(vm.asInflections.ForeignKey(strArg(args[0]), true))
 	})
 	sm("ordinal", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(inflector.Ordinal(int(intArg(args[0]))))
+		return object.NewString(inflector.Ordinal(clampInt(intArg(args[0]))))
 	})
 	sm("ordinalize", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(inflector.Ordinalize(int(intArg(args[0]))))
+		return object.NewString(inflector.Ordinalize(clampInt(intArg(args[0]))))
 	})
 	sm("parameterize", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		return object.NewString(inflector.Parameterize(strArg(args[0]), "-", false))
@@ -309,7 +311,7 @@ func (vm *VM) registerASString() {
 		return object.NewString(coreext.Squish(str(self)))
 	})
 	vm.cString.define("truncate", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(coreext.Truncate(str(self), int(intArg(args[0])), "", ""))
+		return object.NewString(coreext.Truncate(str(self), clampInt(intArg(args[0])), "", ""))
 	})
 	d("camelize", -1, func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		upper := true
@@ -352,14 +354,14 @@ func (vm *VM) registerASArray() {
 		return object.Bool(coreext.ArrayBlank(boxSlice(elems(self))))
 	})
 	vm.cArray.define("in_groups", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		n := int(intArg(args[0]))
+		n := clampInt(intArg(args[0]))
 		if len(args) > 1 && isFalse(args[1]) {
 			return rubyFromGroups(coreext.InGroupsNoFill(boxSlice(elems(self)), n))
 		}
 		return rubyFromGroups(coreext.InGroups(boxSlice(elems(self)), n, fillArg(args)))
 	})
 	vm.cArray.define("in_groups_of", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		n := int(intArg(args[0]))
+		n := clampInt(intArg(args[0]))
 		if len(args) > 1 && isFalse(args[1]) {
 			return rubyFromGroups(coreext.InGroupsOfNoFill(boxSlice(elems(self)), n))
 		}
@@ -418,10 +420,10 @@ func (vm *VM) registerASInteger() {
 	d := func(name string, argc int, fn NativeFn) { vm.cInteger.defineArgc(name, argc, fn) }
 
 	d("ordinalize", 0, func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(coreext.Ordinalize(int(self.(object.Integer))))
+		return object.NewString(coreext.Ordinalize(clampInt(self.(object.Integer))))
 	})
 	d("multiple_of?", 1, func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Bool(coreext.MultipleOf(int(self.(object.Integer)), int(intArg(args[0]))))
+		return object.Bool(coreext.MultipleOf(clampInt(self.(object.Integer)), clampInt(intArg(args[0]))))
 	})
 }
 
@@ -850,16 +852,6 @@ func hashArg(v object.Value) *object.Hash {
 	h, ok := v.(*object.Hash)
 	if !ok {
 		raise("TypeError", "no implicit conversion of %s into Hash", v.Inspect())
-	}
-	return h
-}
-
-// hashArgOrRaise returns v as a *Hash or raises the "wrong argument type X
-// (expected Hash)" TypeError that Hash.ruby2_keywords_hash(?) reports.
-func hashArgOrRaise(vm *VM, v object.Value) *object.Hash {
-	h, ok := v.(*object.Hash)
-	if !ok {
-		raise("TypeError", "wrong argument type %s (expected Hash)", vm.classOf(v).name)
 	}
 	return h
 }

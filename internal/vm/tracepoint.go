@@ -596,7 +596,7 @@ func (vm *VM) tracepointEnableForTarget(tp *tracePoint, target, targetLine objec
 		if tp.events&evLine == 0 {
 			raise("ArgumentError", "target_line is specified, but line event is not specified")
 		}
-		line = int(vm.toIntCoerce(targetLine))
+		line = clampInt(vm.toIntCoerce(targetLine))
 	}
 
 	set := map[*bytecode.ISeq]bool{}

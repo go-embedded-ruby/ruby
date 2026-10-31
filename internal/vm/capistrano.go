@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+//go:build !rbgo_core
+
 package vm
 
 import (
@@ -494,7 +496,7 @@ func capCommandResult(h *object.Hash) capistrano.CommandResult {
 	}
 	if v, ok := h.Get(object.SymVal("exit_status")); ok {
 		if n, ok := v.(object.Integer); ok {
-			res.ExitStatus = int(n)
+			res.ExitStatus = clampInt(n)
 		}
 	}
 	return res

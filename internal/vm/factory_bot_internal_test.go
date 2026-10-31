@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+//go:build !rbgo_core
+
 package vm
 
 import (
@@ -330,21 +332,4 @@ func TestFactoryBotHelpers(t *testing.T) {
 	if v := vm.send(&FactoryBotEvaluator{}, "respond_to_missing?", []object.Value{object.SymVal("x")}, nil); !v.Truthy() {
 		t.Errorf("evaluator respond_to_missing? not truthy")
 	}
-}
-
-// expectRaise runs fn and returns the class of the Ruby exception it raises (or
-// "" if none). A non-Ruby panic is re-raised.
-func expectRaise(t *testing.T, fn func()) (cls string) {
-	t.Helper()
-	defer func() {
-		if r := recover(); r != nil {
-			re, ok := r.(RubyError)
-			if !ok {
-				panic(r)
-			}
-			cls = re.Class
-		}
-	}()
-	fn()
-	return ""
 }

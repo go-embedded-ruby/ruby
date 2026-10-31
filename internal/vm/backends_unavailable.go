@@ -35,14 +35,10 @@ var wasmUnavailableFeatures = []string{
 }
 
 // raiseWasmUnavailable raises the LoadError a wasm build produces when a program
-// requires one of the network/OS backends compiled out of that build. It clears
-// the just-set loaded marker first (require.go marks the feature loaded before
-// invoking its hook), so a retried require re-raises rather than silently
-// returning false. The message mirrors MRI's "cannot load such file" LoadError,
-// annotated with the reason. It is only wired to a require hook on wasm (see
-// backends_wasm.go), but lives in a shared file so a native test can assert its
-// class and message directly.
+// requires one of the network/OS backends compiled out of that build: the shared
+// raiseBuildUnavailable (core.go), naming the wasm build. It is only wired to a
+// require hook on wasm (see backends_wasm.go), but lives in a shared file so a
+// native test can assert its class and message directly.
 func (vm *VM) raiseWasmUnavailable(feature string) object.Value {
-	delete(vm.loaded, "feature:"+feature)
-	return raise("LoadError", "cannot load such file -- %s (not available in the wasm build)", feature)
+	return vm.raiseBuildUnavailable(feature, "the wasm build")
 }

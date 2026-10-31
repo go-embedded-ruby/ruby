@@ -4,7 +4,10 @@
 
 package vm_test
 
-import "testing"
+import (
+	"strconv"
+	"testing"
+)
 
 // TestArrayFill covers Array#fill in every MRI form: the no-block filler forms
 // (obj / obj,start / obj,start,length / obj,range) and the block forms, including
@@ -62,6 +65,10 @@ func TestArrayFill(t *testing.T) {
 
 // TestArrayFillErrors covers Array#fill's error and boundary branches.
 func TestArrayFillErrors(t *testing.T) {
+	fill50 := "failed to allocate memory\n"
+	if strconv.IntSize == 32 {
+		fill50 = "argument too big\n"
+	}
 	cases := []struct{ src, want string }{
 		// Argument-count errors.
 		{`begin; [].fill; rescue ArgumentError; puts "AE"; end`, "AE\n"},
@@ -84,8 +91,10 @@ func TestArrayFillErrors(t *testing.T) {
 		// `NoMemoryError: failed to allocate memory`, and 1<<40 and 1<<35 are
 		// genuinely materialised (both passed 2 GB resident before the probe's cap
 		// stopped them), so the old bound was wrong in both directions.
-		{`begin; [1, 2, 3].fill(10, 1, 1 << 50); rescue NoMemoryError => e; puts e.message; end`,
-			"failed to allocate memory\n"},
+		// On a 32-bit target ARY_MAX_SIZE is (2**31-1)/8, below 1<<50, so the
+		// size test refuses first, as MRI's own does with a 32-bit long.
+		{`begin; [1, 2, 3].fill(10, 1, 1 << 50); rescue NoMemoryError, ArgumentError => e; puts e.message; end`,
+			fill50},
 		// A range whose begin is before the start of the array -> RangeError.
 		{`begin; [1, 2, 3].fill("x", -5..-3); rescue RangeError; puts "RE"; end`, "RE\n"},
 		// A block raising mid-fill leaves the already-filled elements in place.

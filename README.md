@@ -17,7 +17,9 @@ no libruby.
 examples ([what that counts](#runtime-conformance--rubyspec)) — a large and growing
 subset of the language, and **not** a drop-in replacement for CRuby. Read
 [What does not work yet](#what-does-not-work-yet) before you depend on it; the
-embedding API is currently **one function**.
+embedding API is small: `Run` for a one-shot program, and an `Interp` that keeps
+its state between evaluations, exchanges values with Go and lets Go define Ruby
+modules, classes and methods ([Embedding](#embedding-in-a-go-program)).
 
 This repository is the interpreter: a compiler that lowers Ruby to bytecode, and
 a stack VM (mruby/YARV lineage) that runs it. The Ruby **front-end** (lexer,
@@ -99,7 +101,11 @@ Seven more are bound from **outside** the `go-ruby-*` naming convention, at
 
 Beyond the `go-ruby-*` family, the scientific / container stack binds the
 pure-Go [go-ndarray](https://github.com/go-ndarray/ndarray),
-[go-fft](https://github.com/go-fft/fft), [go-images](https://github.com/go-images/images)
+[go-fft](https://github.com/go-fft/fft), [go-images](https://github.com/go-images/images),
+[go-numerics/special](https://github.com/go-numerics/special),
+[go-statistics/stats](https://github.com/go-statistics/stats),
+[go-numerics/integrate](https://github.com/go-numerics/integrate),
+[go-numerics/optimize](https://github.com/go-numerics/optimize)
 and [go-composites](https://github.com/go-composites) libraries the same way (see
 *Supported today* below), and the pure-Go [go-widgets](https://github.com/go-widgets)
 UI toolkit is bound through three adapters: `require "widgets"` (pixel-blitting
@@ -524,6 +530,70 @@ JRuby**):
   helpers (`psd`/`spectrogram`) — binding the pure-Go
   [go-fft](https://github.com/go-fft/fft) library, a `numpy.fft`-style transform
   with **no cgo / no FFTW**, returning `Complex` spectra.
+- **Special:** a `Special` module — all 67 functions of
+  [go-numerics/special](https://github.com/go-numerics/special), a
+  `scipy.special`-style set with **no cgo / no SciPy**: gamma
+  (`gamma`/`gammaln`/`gammasgn`/`digamma`/`polygamma`/`factorial`/`log_factorial`/
+  `factorial2`/`loggamma_sign`),
+  beta (`beta`/`betaln`/`binom`/`comb`/`perm`), error and normal
+  (`erf`/`erfc`/`erfcx`/`erfinv`/`erfcinv`/`ndtr`/`ndtri`/`log_ndtr`), logistic
+  (`expit`/`logit`/`log_expit`/`softplus`/`xlogy`/`xlog1py`), reductions
+  (`logsumexp`/`softmax`/`log_softmax`), `zeta` (Riemann, or Hurwitz with a
+  second argument), the incomplete gamma and beta functions with their inverses
+  (`gammainc`/`gammaincc`/`gammaincinv`/`gammainccinv`,
+  `betainc`/`betaincc`/`betaincinv`/`betainccinv`), Bessel
+  (`j0`/`j1`/`y0`/`y1`/`i0`/`i1`/`k0`/`k1`, the exponentially scaled
+  `i0e`/`i1e`/`k0e`/`k1e`, arbitrary order `jv`/`yv`/`iv`/`kv`/`ive`/`kve`,
+  integer order `jn`/`yn`/`in`/`kn`, and `jn_zeros`) and the complete elliptic
+  integrals (`ellipk`/`ellipkm1`/`ellipe`). Each is a **ufunc**, as scipy's is:
+  a Float answers a Float, an `NDArray` answers an `NDArray` of the same shape,
+  and a Float mixed with an `NDArray` broadcasts. Most names are scipy's own,
+  taken from the correspondence the Go module measures itself against — which is
+  why `softplus` and `gammaln`, not *log1pexp* and *log_gamma*. **63 of the 67**
+  carry such a pairing; the four that do not are named from a reading of scipy
+  or from the Go function, and say so: `gammasgn` and `kn` exist in scipy but
+  are unpaired in the module, `log_factorial` is scipy's `gammaln(n+1)`,
+  `loggamma_sign` has no scipy counterpart, and **`in` is not a scipy name at
+  all** — scipy cannot have one, `in` being a Python keyword, so `iv(0, x)` is
+  the faithful spelling and `in` answers exactly the same.
+- **Stats:** a `Stats` module — the 32 univariate distributions of
+  [go-statistics/stats](https://github.com/go-statistics/stats), a
+  `scipy.stats`-style set with **no cgo / no SciPy**. Continuous:
+  `norm`/`cauchy`/`expon`/`gumbel_r`/`halfnorm`/`laplace`/`logistic`/`rayleigh`/
+  `uniform`/`chi`/`chi2`/`gamma`/`invgamma`/`lognorm`/`lomax`/`pareto`/`t`/
+  `triang`/`vonmises`/`weibull_min`/`beta`/`f`/`ncx2`/`reciprocal`; discrete:
+  `bernoulli`/`geom`/`poisson`/`zipf`/`binom`/`nbinom`/`randint`/`hypergeom`.
+  Arguments follow scipy's order — the shape parameters, then `loc`, then
+  `scale` (continuous) — each optional with scipy's default. Every distribution
+  answers the same method set, `Stats::Continuous` and `Stats::Discrete`
+  differing only in the density: `pdf`/`logpdf` against `pmf`/`logpmf`, plus
+  `cdf`/`logcdf`/`sf`/`logsf`/`ppf`/`isf`, the moments
+  `mean`/`var`/`std`/`skew`/`kurtosis`/`median`/`entropy`/`moment`,
+  `interval`/`support`, and `rvs(size…, seed:)` — a Float with no size, an
+  `NDArray` with one. The per-point methods are ufuncs too, over a Float or an
+  `NDArray`. A parameter outside its domain is refused at construction with
+  `ArgumentError`, where scipy raises `ValueError`.
+- **Integrate:** an `Integrate` module — scipy.integrate's quadrature from
+  [go-numerics/integrate](https://github.com/go-numerics/integrate), with **no
+  cgo / no SciPy**: adaptive `quad` (finite or infinite limits, `points:` for a
+  known kink, `epsabs:`/`epsrel:`/`limit:`), the fixed rules `fixed_quad` and
+  `romberg` (`tol:`/`rtol:`/`divmax:`), the sampled rules `trapezoid`/`simpson`/
+  `romb`/`cumulative_trapezoid` (`x:` or `dx:`, `initial:`), the multiple
+  integrals `dblquad` and `nquad`, and `gauss_legendre` for a rule's nodes and
+  weights. The integrand is a **block**, which also takes `&f` for a Proc or
+  lambda; `dblquad`'s inner limits may be numbers or callables.
+- **Optimize:** an `Optimize` module — scipy.optimize's root finders and
+  minimisers from [go-numerics/optimize](https://github.com/go-numerics/optimize),
+  with **no cgo / no SciPy**: the bracketing finders
+  `brentq`/`brenth`/`bisect`/`ridder` and `newton` (secant, Newton–Raphson with
+  `fprime:`, Halley with `fprime2:`), `minimize_scalar`
+  (`method:` `brent`/`golden`/`bounded`, `bracket:`, `bounds:`) and `fminbound`,
+  `minimize` over several variables (`method:` `BFGS`/`CG`/`Nelder-Mead`/
+  `Powell`/`L-BFGS-B`, with `bounds:`), `curve_fit`, `approx_fprime` and
+  `bracket`. Return shapes are scipy's: one number answers a Float, a tuple an
+  Array (`curve_fit` is scipy's `(popt, pcov)`), and an `OptimizeResult` or
+  `RootResults` a Hash with symbol keys — which `full_output: true` asks a root
+  finder for.
 - **Set:** Ruby's `Set` — `new`/`[]`, `add`(`<<`)/`add?`/`delete`/`merge`/`clear`,
   `include?`/`member?`/`size`/`length`/`count`/`empty?`, `subset?`/`superset?`,
   `union`(`|`)/`intersection`(`&`)/`difference`(`-`), `each`/`to_a`/`to_set`.
@@ -539,9 +609,14 @@ JRuby**):
   `year`/`month`/`mday`/`wday`/`yday`/`cwday`, `leap?`, comparisons — binding
   [go-ruby-date](https://github.com/go-ruby-date/date).
 - **BigDecimal:** arbitrary-precision decimal — `+ - * / **`,
-  `sqrt`/`abs`/`ceil`/`floor`/`round`/`pow`, `to_f`/`to_i`, `zero?`, comparisons
-  — binding
+  `abs`/`ceil`/`floor`/`round`/`truncate`/`pow`, the divisions
+  `div`/`divmod`/`modulo`/`remainder`, the parts
+  `frac`/`fix`/`exponent`/`precision`/`sign`/`split`, `to_f`/`to_i`/`to_r`,
+  `zero?`/`nan?`/`finite?`/`infinite?`, comparisons — binding
   [go-ruby-bigdecimal](https://github.com/go-ruby-bigdecimal/bigdecimal).
+  MRI's `BigDecimal#sqrt(n)` is **not bound yet**
+  ([#825](https://github.com/go-embedded-ruby/ruby/issues/825)); this list said
+  it was until 2026-10-20.
 - **Bag:** a multiset / counter (element → multiplicity) — `add`(`<<`)/`delete`,
   `count`/`size`/`distinct`/`most_common`, `union`/`difference`/`intersection`,
   `include?`/`each`/`to_a` — binding
@@ -696,11 +771,22 @@ Otherwise:
 | --- | --- |
 | **linux, macOS, windows** | the full suite under `-race`. The **100 % coverage gate** is enforced on linux and macOS only — a few POSIX-only paths (opening `/dev/null` as a character device) are unreachable on windows, so its coverage is structurally below 100 % |
 | **amd64, arm64** | `go test ./...` on native runners |
+| **386, arm (32-bit)** | `go vet ./...` for `GOARCH=386` and `GOARCH=arm`, then `go test ./...` for `386`, run natively on the amd64 runner (`arch 386 (+ vet arm)` in `ci.yml`). Ruby semantics do not change with the word size: Integer stays a 64-bit Fixnum promoted to Bignum on every target. The `mysql2` tests are skipped there, because their in-process server, `dolthub/go-mysql-server`, does not compile for 32-bit targets; the binding itself does. One limit is the word size's: a buffered IO's position is a Go `int`, so on 32-bit targets it stops at 2**31-1 |
 | **wasip1/wasm** | built with `CGO_ENABLED=0 GOOS=wasip1 GOARCH=wasm` and **run** under [wazero](https://wazero.io), a pure-Go runtime — verified here: `wazero run rbgo.wasm -e 'puts (1..10).sum'` prints `55` |
 | **js/wasm (browser)** | `CGO_ENABLED=0 GOOS=js GOARCH=wasm go build ./...` plus `go vet` over `./cmd/wasm ./cmd/rbgo ./internal/vm`, then the playground module is **run** in node by `web/smoke.mjs` (`wasm (js, browser)` in `ci.yml`). Added with #684, which fixed the three `syscall` constants the `js` port does not define |
+| **rbgo_core** | `go vet` and the `internal/vm` suite with `-tags rbgo_core`, then the core playground module is built for js/wasm, its size bounded, and **run** in node by `web/smoke.mjs --core` (`rbgo_core (core build)` in `ci.yml`). See [the `rbgo_core` build](#the-rbgo_core-build-the-language-and-the-numeric-stack-no-gems) |
+| **every other target** | `go vet ./...`, default and `rbgo_core` builds, for **every GOOS/GOARCH pair `go tool dist list` names except plan9** — aix, android, darwin, dragonfly, freebsd, illumos, ios, js, linux (all 13 arches, mips and ppc64 included), netbsd, openbsd, solaris, wasip1, windows (`compile on every target` in `ci.yml`; android and ios link only through cgo, so their library packages are built instead). Compiling is all it checks there |
+
+What a target lacks, rbgo leaves out the way MRI does:
+
+- **The store gems** — SQLite3, Sequel, ActiveRecord's adapter, Bolt, Bleve, Etcd and Confd — need modernc.org/sqlite, which has a port for darwin/{amd64,arm64}, freebsd/{386,amd64,arm,arm64}, linux/{386,amd64,arm,arm64,loong64,ppc64le,riscv64,s390x}, netbsd/amd64, openbsd/{amd64,arm64} and windows. Elsewhere (wasm included) `require` still works and the modules exist, and the first real operation raises `NotImplementedError: sqlite3 is not supported on linux/mips64le` (or the gem and target in question).
+- **Errno**: a name the system's `<errno.h>` lacks is still a constant, naming `Errno::NOERROR`, as MRI's `undefined_error` does: `EMULTIHOP` and `ENOLINK` on OpenBSD, `ENOTRECOVERABLE` and `EOWNERDEAD` on NetBSD and DragonFly.
+- **`Process::RLIMIT_*`** exist only where the system has the resource: no `RLIMIT_AS` on OpenBSD, no `RLIMIT_MEMLOCK` on AIX, only `RLIMIT_AS` of the four optional ones on Solaris and illumos.
+- **`File#flock`** and PStore's lock use `flock(2)`; AIX has none, so there it is emulated with `fcntl(2)` record locks, exactly as MRI's `missing/flock.c` does.
+- **plan9 does not compile.** Its `syscall` package has no errno numbers (`syscall.EINVAL` is a string error there), no `Kill`, `Flock`, `Getrlimit` or `Stat_t`, and several gem drivers (nats, Kafka's franz-go, Thrift, gopher-lua) do not build for it; a port means a plan9 variant of rbgo's Errno, IO and Process layers.
 
 **Not on the pull-request path** — validated on a nightly schedule instead:
-`riscv64`, `loong64`, `ppc64le` and `s390x`, under QEMU
+`riscv64`, `loong64`, `ppc64le`, `s390x` and 32-bit `arm`, under QEMU
 (`arch-qemu-nightly.yml`) and natively on real hardware (`native-arch.yml`: the
 GCC Compile Farm, plus an IBM LinuxONE s390x host).
 
@@ -773,17 +859,109 @@ $ ./fib
 
 ## Embedding in a Go program
 
-The public API is deliberately tiny — **one function**:
+The public API has two halves: `Run`, which runs one program on a fresh VM, and
+`Interp`, an interpreter that stays alive between evaluations.
 
 ```go
 package ruby // github.com/go-embedded-ruby/ruby
 
 func Run(src string, out io.Writer) error
+
+func New(opts ...Option) *Interp            // WithStdout(w), WithStderr(w)
+func (in *Interp) Eval(src, file string, line int) (Value, error)
+func (in *Interp) Set(name string, v any) error
+func (in *Interp) Get(name string) (any, error)
+func (in *Interp) DefineModule(name string) (*Module, error)
+func (in *Interp) DefineClass(name string, super *Module) (*Module, error)
+func (m *Module) DefineMethod(name string, fn Func)
+func (m *Module) DefineSingletonMethod(name string, fn Func)
+type Func func(c *Call) (any, error)        // c.Self, c.Args, c.Kwargs, c.Block
 ```
 
+Everything else in this repository is under `internal/`, so this is the whole
+embedding surface. The reference is the package documentation (`go doc
+github.com/go-embedded-ruby/ruby`); what follows is what it is for.
+
+### `Interp`: one program, evaluated piece by piece
+
+`Eval` runs source as top-level code and returns the value of its last
+expression. The **top-level local variables persist** from one `Eval` to the
+next, as one binding — so do methods, classes, constants and globals, which live
+in the VM anyway:
+
+```go
+in := ruby.New(ruby.WithStdout(&out))
+in.Eval("x = 40", "cell1.rb", 1)
+v, _ := in.Eval("x + 2", "cell2.rb", 1)
+v.Inspect() // "42"
+```
+
+`file` and `line` are what `__FILE__`, `__LINE__`, backtraces and errors report.
+A Ruby exception — a `SyntaxError` included — comes back as an `*ruby.Error`
+with its `Class`, `Message`, `Backtrace`, and the `File`/`Line` of the innermost
+frame in the evaluated file, so an exception raised deep in a library is placed
+at the line of your source that led to it. `exit` is an `*Error` too
+(`ExitStatus()` reads its status), and the interpreter stays usable after any of
+them. `$stdout` and `$stderr` are separate streams, and `SetStdout`/`SetStderr`
+redirect them between evaluations. An `Interp` is not safe for concurrent use.
+
+### Values
+
+`Set` assigns a top-level local and `Get` reads one, converting:
+
+| Go | Ruby | back to Go |
+| --- | --- | --- |
+| `nil`, `bool` | `nil`, `true`/`false` | the same |
+| `int`…`int64`, `uint`…`uint64` | `Integer` | `int64` |
+| `*big.Int` | `Integer` | `int64`, or `*big.Int` when it does not fit |
+| `float32`, `float64` | `Float` | `float64` |
+| `complex64`, `complex128` | `Complex` | `complex128` |
+| `*big.Rat` | `Rational` | `*big.Rat` |
+| `string`, `[]byte` | `String` | `string` |
+| `ruby.Symbol` | `Symbol` | `ruby.Symbol` |
+| `*ndarray.Array` | `NDArray` — **the same array, no copy** | the same `*ndarray.Array` |
+| slices, arrays | `Array` | `[]any` |
+| maps | `Hash` | `map[any]any` |
+| any other Go value | an opaque object (`GoValue`, or the class `Bind` names) | the very same Go value |
+| `ruby.Value` | itself | — |
+
+A Ruby object with no Go counterpart comes back as a `ruby.Value`, which can be
+inspected, called (`v.Call("method", args...)`) and passed back in.
+
+### Defining Ruby from Go
+
+```go
+stats, _ := in.DefineModule("Stats")
+normal, _ := stats.DefineClass("Normal", nil)
+normal.Bind(&Normal{})                     // a *Normal crossing into Ruby is a Stats::Normal
+normal.DefineSingletonMethod("new", func(c *ruby.Call) (any, error) {
+	loc := c.Kwargs["loc"].Go()              // keyword arguments by name
+	...
+	return &Normal{...}, nil
+})
+normal.DefineMethod("pdf", func(c *ruby.Call) (any, error) {
+	n := c.Self.Go().(*Normal)               // the Go value back
+	...
+})
+stats.DefineSingletonMethod("minimize", func(c *ruby.Call) (any, error) {
+	y, err := c.Block.Call(x)                // call the block from Go
+	if err != nil {
+		return nil, err                        // re-raises the block's exception
+	}
+	...
+})
+```
+
+A `Func` returns its result (converted as above) or an error, which raises:
+`ruby.NewError("ArgumentError", "...")` raises that class, an error that came out
+of Ruby raises the same exception again, anything else is a `RuntimeError`. A
+`break`, `throw` or `return` in a block unwinds through the Go code that called
+it to where Ruby expects it.
+
+### `Run`
+
 `Run` parses, compiles and executes `src` on a **fresh VM**, writing the program's
-output to `out`. Everything else in this repository is under `internal/`, so this
-is the whole embedding surface today.
+output to `out`.
 
 ```console
 $ go get github.com/go-embedded-ruby/ruby@v0.1.0
@@ -833,14 +1011,15 @@ The contract, as measured rather than intended:
   whose cwd was its build directory came back with a 13-byte `PATH` and a cwd of
   `/private/tmp`. Because `require_relative` resolves against that same working
   directory (next bullet), one `Run` can also write a file that a later `Run`
-  loads. There is no exported way to hold a VM open, pre-load code into it, call
-  a Ruby method from Go, or pass Go values in.
+  loads. (Holding a VM open, pre-loading code, calling Ruby from Go and passing
+  Go values in is what `Interp` is for.)
 - **A program that exits is reported as success.** `exit`, `exit!` and `abort`
   stop the program and `Run` returns **`nil`**, so an embedder cannot tell
   “finished” from “stopped”: `abort "fatal"` writes `fatal` to `out` and reports
   no error, and `exit 3` loses the 3. Only a Ruby *exception* becomes a Go error.
   The `rbgo` CLI recovers the status through `internal/vm`, which is unreachable
-  from outside, so today there is no way for an embedder to obtain it.
+  from outside, so `Run` cannot report it; `Interp.Eval` returns it as an
+  `*Error` whose `ExitStatus()` holds it.
 - **`require_relative` resolves against the process working directory**, not
   against a script, because `Run` has no file to anchor to. From a different
   working directory the same program fails with
@@ -907,6 +1086,55 @@ On any wasm target the gem backends that need real sockets or OS facilities are
 compiled out (`grpc`, `nats`, `kafka`, `mysql2`, `mongo`/`bson`, `arrow`,
 `parquet`, `openstack`, `sidekiq`, `resque`, …); `require` of one raises a clean
 Ruby `LoadError` rather than failing to link.
+
+### The `rbgo_core` build: the language and the numeric stack, no gems
+
+`-tags rbgo_core` builds an interpreter that keeps the Ruby language and its
+numeric stack and leaves every gem binding out. It is the build for a page that
+runs Ruby in the browser — the go-ndarray playground loads it — and it works on
+every target, natively too:
+
+```console
+$ CGO_ENABLED=0 GOOS=js GOARCH=wasm go build -tags rbgo_core -ldflags='-s -w' -o web/rbgo.wasm ./cmd/wasm
+$ node web/smoke.mjs web/rbgo.wasm --core
+```
+
+| `cmd/wasm` (js/wasm) | default | `rbgo_core` |
+| --- | ---: | ---: |
+| unstripped | 107.4 MB | 28.2 MB |
+| stripped (`-ldflags='-s -w'`) | 104.5 MB | 27.5 MB |
+| stripped, `gzip -9` | 22.2 MB | 6.4 MB |
+| Go modules in the build (`go list -deps`) | 256 | 47, no gem |
+
+Measured 2026-10-18 with go1.27.2, on go-ndarray v0.12.0 and
+go-numerics/{integrate,optimize} v0.2.0. The core column grew from 23.1 MB
+when the lane was added: `Special`, `Stats`, `Integrate` and `Optimize` cost
+**+4.3 MB** between them, of which `Stats` alone is 2.7 MB (36 distributions,
+27,599 lines of Go) — the per-module attribution is in `ci.yml` beside the
+bound it moved, so the figure is answerable rather than absorbed.
+
+**What core is** (`internal/vm/core.go` holds the same list as `coreFeatures`):
+
+| | in core | out of core |
+| --- | --- | --- |
+| the language | every core class and module MRI defines without a `require`: Object, Kernel, Comparable, Enumerable, the numeric tower, String, Symbol, Array, Hash, Range, Struct, Data, Proc, Method, Binding, Regexp, Encoding, the whole Exception tree, Time, Random, Marshal, File/IO/Dir/Process/Signal/ENV, Thread/Fiber, ObjectSpace, GC, Enumerator, TracePoint, … | — |
+| preloaded by MRI | `set`, `rubygems` (Gem), `did_you_mean`, `pp`/`prettyprint` | — |
+| numeric stack | Math, `cmath`, `bigdecimal`, `prime`, `matrix`, `securerandom`, **NDArray** (go-ndarray), **FFT** (go-fft), **Special** (go-numerics/special), **Stats** (go-statistics/stats), **Integrate** + **Optimize** (go-numerics), rbgo's `bag` | Image (go-images) |
+| small standard libraries | `json`, `date`, `csv`, `digest`, `base64`, `strscan`, `tsort`, `abbrev`, `benchmark`, `scanf`, `logger`, `forwardable`, `delegate`, `singleton`, `ostruct`, `pathname`, `tempfile`, `tmpdir`, `fileutils`, `find`, `etc`, `timeout`, `monitor`, `observer`, `stringio`, `English`, `rbconfig`, `objspace`, `fiber`, `fcntl`, `io/nonblock`, `unicode_normalize` | the ones that need a network, a terminal, a server or a document toolchain: `openssl`, `socket`, `net/*`, `resolv`, `ipaddr`, `uri`, `yaml`, `erb`, `cgi`, `rexml`, `rss`, `rdoc`, `irb`, `reline`, `ripper`, `optparse`, `getoptlong`, `open3`, `syslog`, `shellwords`, `zlib`, `pstore` |
+| gems | — | every third-party gem: Rails and its frameworks, Rack/Sinatra/Hanami/Roda, the database, queue and cloud clients, the template engines, Nokogiri, Prawn, Sass, Rouge, Kramdown, the go-widgets bindings, RSpec/Minitest, Puppet, … |
+
+On the core build a `require` of anything outside core raises
+`LoadError: cannot load such file -- rails (not available in the rbgo_core build)`.
+It raises before `$LOAD_PATH` is searched, so a `rails.rb` lying on the load
+path is not run in its place, and the gem leaves nothing behind: `Rails`,
+`ERB` and the rest stay undefined. Without the tag nothing changes.
+
+How it is cut: a gem binding's file carries `//go:build !rbgo_core`, and the
+registrations, `classOf` cases, equality hooks and per-VM state that core code
+used to reach directly go through seams (`internal/vm/gems*.go`). Not calling a
+gem's register function was not enough: Go links the `init` of every package a
+compiled file imports, so the first attempt, which only skipped the calls, still
+weighed 64 MB.
 ## Layout
 
 ```
@@ -965,7 +1193,8 @@ SPECDIR=/path/to/ruby-spec CACHE=/path/to/ruby-spec scripts/conformance/rubyspec
 ### CI layering
 
 Per-PR CI is a **fast native gate**: the `-race` + 100 %-coverage suite on
-ubuntu/macos/windows plus native `amd64` and `arm64` lanes. Because rbgo is
+ubuntu/macos/windows plus native `amd64`, `arm64` and 32-bit `386` lanes (32-bit
+`arm` is vetted per PR and run nightly under QEMU). Because rbgo is
 pure-Go (CGO=0, no assembly), the four exotic 64-bit targets
 (`riscv64`/`loong64`/`ppc64le`/`s390x`) are validated **off the per-PR critical
 path** — nightly under QEMU, and on **real hardware via the GCC Compile Farm**

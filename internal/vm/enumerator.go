@@ -359,7 +359,7 @@ func (vm *VM) registerEnumerator() {
 			}
 			return elems[len(elems)-1]
 		}
-		n := int(intArg(args[0]))
+		n := clampInt(intArg(args[0]))
 		if n < 0 {
 			raise("ArgumentError", "negative array size")
 		}
@@ -643,10 +643,10 @@ func (vm *VM) registerEnumerator() {
 			}
 			return got[0]
 		}
-		return object.NewArrayFromSlice(vm.enumTake(e, int(intArg(args[0]))))
+		return object.NewArrayFromSlice(vm.enumTake(e, clampInt(intArg(args[0]))))
 	})
 	d("take", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewArrayFromSlice(vm.enumTake(self.(*Enumerator), int(intArg(args[0]))))
+		return object.NewArrayFromSlice(vm.enumTake(self.(*Enumerator), clampInt(intArg(args[0]))))
 	})
 	// #take_while collects elements while the block is truthy and stops at the
 	// first falsy one. MRI's rb_iter_break makes it terminate even for an unbounded

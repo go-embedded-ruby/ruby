@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-//go:build !wasm
+//go:build !wasm && !rbgo_core && ((darwin && (amd64 || arm64)) || (freebsd && (386 || amd64 || arm || arm64)) || (linux && (386 || amd64 || arm || arm64 || loong64 || ppc64le || riscv64 || s390x)) || (netbsd && amd64) || (openbsd && (amd64 || arm64)) || windows)
 
 package vm
 
@@ -272,12 +272,12 @@ func (vm *VM) registerSequelDataset(mod *RClass) {
 	})
 	d("limit", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		if len(args) == 2 {
-			return chain(v, self(v).ds.LimitOffset(int(pgIntArg(args[0])), int(pgIntArg(args[1]))))
+			return chain(v, self(v).ds.LimitOffset(clampInt(pgIntArg(args[0])), clampInt(pgIntArg(args[1]))))
 		}
-		return chain(v, self(v).ds.Limit(int(pgIntArg(pgArg0(args)))))
+		return chain(v, self(v).ds.Limit(clampInt(pgIntArg(pgArg0(args)))))
 	})
 	d("offset", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return chain(v, self(v).ds.Offset(int(pgIntArg(pgArg0(args)))))
+		return chain(v, self(v).ds.Offset(clampInt(pgIntArg(pgArg0(args)))))
 	})
 	d("join", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		table, cond := sequelJoinArgs(args)

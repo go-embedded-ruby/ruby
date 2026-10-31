@@ -141,7 +141,7 @@ func (vm *VM) registerBenchmark() {
 		}
 		width := 0
 		if len(args) > 1 {
-			width = int(intArg(args[1]))
+			width = clampInt(intArg(args[1]))
 		}
 		format := ""
 		if len(args) > 2 {
@@ -396,7 +396,7 @@ func labelToS(v object.Value) string {
 // benchWidth returns the leading integer label-width argument, defaulting to 0.
 func benchWidth(args []object.Value) int {
 	if len(args) > 0 {
-		return int(intArg(args[0]))
+		return clampInt(intArg(args[0]))
 	}
 	return 0
 }

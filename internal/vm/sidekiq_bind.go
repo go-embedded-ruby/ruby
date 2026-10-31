@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-//go:build !wasm
+//go:build !wasm && !rbgo_core
 
 package vm
 
@@ -389,7 +389,7 @@ func retryOption(v object.Value) any {
 	case object.Bool:
 		return bool(n)
 	case object.Integer:
-		return int(n)
+		return clampInt(n)
 	}
 	return true
 }

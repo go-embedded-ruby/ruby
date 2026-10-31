@@ -30,7 +30,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
-          go-version: 1.27.2
+          go-version: 1.27.3
       - run: go version
       - run: go vet ./...
       - run: go build ./...
@@ -106,8 +106,70 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
-          go-version: 1.27.2
+          go-version: 1.27.3
       - run: go env GOARCH && go test ./...
+
+  # 32-bit gate: int is 32 bits. 386 runs natively on the amd64 runner (the
+  # kernel executes 32-bit x86 binaries), not under qemu-i386, whose emulation
+  # loses x87/SSE state across preemption. 32-bit arm is vetted here (a cheap
+  # compile of every package and test) and run under qemu in the nightly
+  # (arch-qemu-nightly.yml). The mysql2 tests are 64-bit only: their in-process
+  # server, dolthub/go-mysql-server, does not compile for 32-bit targets.
+  arch-386:
+    name: arch 386 (+ vet arm)
+    runs-on: ubuntu-latest
+    env:
+      CGO_ENABLED: "0"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: 1.27.3
+      - name: Vet (GOARCH=386, GOARCH=arm)
+        run: |
+          GOARCH=386 go vet ./...
+          GOARCH=arm go vet ./...
+      - name: Test (GOARCH=386)
+        run: GOARCH=386 go test -timeout=60m ./...
+
+  # Every GOOS/GOARCH pair Go supports must at least compile rbgo, its tests
+  # and the rbgo_core build: a target that does not compile is one nobody can
+  # embed rbgo on, and nothing else here would notice (the lanes above run six
+  # of them). go vet type-checks every package with its tests for the target.
+  # android and ios link only through cgo, so there the library packages are
+  # built (no link) instead. plan9 is excluded: its syscall package has no
+  # errno numbers and no POSIX process or file-lock calls, which rbgo's IO,
+  # Errno and Process layers are written against (see README "Platforms").
+  every-target:
+    name: compile on every target (${{ matrix.goos }})
+    runs-on: ubuntu-latest
+    env:
+      CGO_ENABLED: "0"
+    strategy:
+      fail-fast: false
+      matrix:
+        goos: [aix, android, darwin, dragonfly, freebsd, illumos, ios, js, linux, netbsd, openbsd, solaris, wasip1, windows]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: 1.27.3
+      - name: Vet (or build) every GOARCH of ${{ matrix.goos }}, both builds
+        shell: bash
+        run: |
+          fail=0
+          for t in $(go tool dist list | grep "^${{ matrix.goos }}/"); do
+            arch=${t#*/}
+            for tags in "" rbgo_core; do
+              case "${{ matrix.goos }}" in
+                android|ios) cmd="go build -tags=$tags . ./internal/..." ;;
+                *)           cmd="go vet -tags=$tags ./..." ;;
+              esac
+              echo "== $t [$tags]: $cmd"
+              GOOS=${{ matrix.goos }} GOARCH=$arch $cmd || { echo "::error::$t [$tags] does not compile"; fail=1; }
+            done
+          done
+          exit $fail
 
   # WebAssembly (WASI preview 1) gate: the same interpreter compiled for
   # GOOS=wasip1 GOARCH=wasm and RUN under a real wasm runtime. The database /
@@ -123,7 +185,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
-          go-version: 1.27.2
+          go-version: 1.27.3
       - run: go version
       - name: Build rbgo.wasm (CGO=0, GOOS=wasip1)
         run: CGO_ENABLED=0 GOOS=wasip1 GOARCH=wasm go build -o rbgo.wasm ./cmd/rbgo
@@ -175,7 +237,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
-          go-version: 1.27.2
+          go-version: 1.27.3
       - uses: actions/setup-node@v7
         with:
           node-version: '24'
@@ -191,6 +253,100 @@ jobs:
         run: CGO_ENABLED=0 GOOS=js GOARCH=wasm go build -o web/rbgo.wasm ./cmd/wasm
       - name: Run Ruby in a real JS host (node + Go's wasm_exec.js)
         run: node web/smoke.mjs web/rbgo.wasm
+
+  # The rbgo_core build (README: "The rbgo_core build"): the language and the
+  # numeric stack, no gem. It is what the go-ndarray playground loads, and it is
+  # a build tag, so nothing else compiles it: without this lane a gem binding
+  # that a core file starts calling directly would break it unnoticed, or pull
+  # the gem back into the binary. The lane vets and tests it natively, builds the
+  # browser module, refuses one that grew or links a gem again, and runs it.
+  core:
+    name: rbgo_core (core build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: 1.27.3
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - run: go version && node --version
+      - name: Vet the core build (native and js/wasm)
+        run: |
+          go vet -tags rbgo_core ./...
+          CGO_ENABLED=0 GOOS=js GOARCH=wasm go vet -tags rbgo_core ./cmd/wasm ./internal/vm
+      - name: Test the core build
+        run: go test -tags rbgo_core -timeout=60m ./internal/vm ./cmd/wasm
+      - name: Build the core playground module
+        run: CGO_ENABLED=0 GOOS=js GOARCH=wasm go build -tags rbgo_core -ldflags='-s -w' -o web/rbgo-core.wasm ./cmd/wasm
+      - name: No gem is linked, and the module stays small
+        shell: bash
+        run: |
+          set -euo pipefail
+          # 23.1 MB when this lane was added, 27.5 MB once Special, Stats,
+          # Integrate and Optimize arrived (#819): +4_284_384 in all. Measured
+          # 2026-10-18 on one worktree, js/wasm, -s -w, go-ndarray v0.12.0 and
+          # go-numerics/{integrate,optimize} v0.2.0.
+          #
+          # The cost is attributed rather than absorbed, and the two obvious ways
+          # to attribute it DISAGREE -- which is the useful part, so both are here.
+          #
+          #                  one module      added in turn
+          #                  alone           down the branch
+          #     Special        +591_000          +591_000
+          #     Stats        +2_685_365        +2_438_092
+          #     Integrate      +267_470          +266_797
+          #     Optimize     +1_020_511          +987_989
+          #                  ----------        ----------
+          #                  +4_564_346        +4_283_878
+          #
+          # Isolated OVERCOUNTS: the four share go-ndarray, the special/nd layer
+          # and the argument helpers, so each column pays for the same code and
+          # the sum exceeds the real +4_284_384 by 279_962 -- that residual IS
+          # the shared part, which neither method reports on its own. Cumulative
+          # UNDERCOUNTS all but the first, because whoever goes first pays for
+          # the shared code and the rest ride free: Special is identical in both
+          # columns precisely because it goes first, and its sum lands 506 bytes
+          # from the real total. Neither is "the" per-module cost.
+          #
+          # What both agree on, and what to read: Stats ~59% of the growth, which
+          # is what 36 distributions and 27_599 lines of Go cost; Optimize ~22%,
+          # Special ~13%, Integrate ~6%; the four bindings themselves are ~1_500
+          # lines.
+          #
+          # The same two columns measured on go-ndarray v0.11.0 gave a shared
+          # residual of 279_063 against 279_962 here -- 899 bytes apart across a
+          # dependency upgrade, which is the method agreeing with itself. An
+          # earlier revision of this comment presented the cumulative column as
+          # "each module added to origin/main alone". It was not, and a session
+          # that measured Special in isolation could only report the two as 7%
+          # apart; they were two different quantities.
+          #
+          # Note also that the build is NOT byte-reproducible across worktrees:
+          # the same commit gave 23_173_500 in one and 23_172_890 in another, 610
+          # bytes apart. Only same-worktree comparisons mean anything, which is
+          # why every figure above comes from one.
+          #
+          # The bound leaves room for growth in the interpreter itself, not for a
+          # gem coming back -- and a gem is caught by the module-path check BELOW,
+          # by name and exactly. This number only has to notice growth nobody
+          # intended, so it sits ~1.5 MB above the measurement.
+          size=$(wc -c < web/rbgo-core.wasm)
+          echo "rbgo-core.wasm: $size bytes"
+          if [ "$size" -gt 29000000 ]; then
+            echo "::error::the rbgo_core module is $size bytes, over the 29000000 bound"
+            exit 1
+          fi
+          mods=$(CGO_ENABLED=0 GOOS=js GOARCH=wasm go list -tags rbgo_core -deps -f '{{with .Module}}{{.Path}}{{end}}' ./cmd/wasm | sort -u)
+          bad=$(echo "$mods" | grep -E 'google.golang.org/protobuf|go-scss|go-rouge|go-opentype|go-widgets|go-images|go-kramdown|go-nokogiri|go-ruby-(rails|railties|actionpack|activerecord|rack|sinatra|yaml|uri|erb|optparse)/' || true)
+          if [ -n "$bad" ]; then
+            echo "::error::the rbgo_core build links gem modules:"
+            echo "$bad"
+            exit 1
+          fi
+      - name: Run the core module in a real JS host
+        run: node web/smoke.mjs web/rbgo-core.wasm --core
 
   # The RBGO_BUILD_IT lane. Three integration tests in cmd/rbgo drive `rbgo build`
   # end to end — native, --closed, and --closed --target wasm — and every one of
@@ -246,7 +402,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
-          go-version: 1.27.2
+          go-version: 1.27.3
       - uses: actions/setup-node@v7
         with:
           node-version: '24'

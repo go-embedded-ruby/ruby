@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+//go:build !rbgo_core
+
 package vm
 
 import (
@@ -52,7 +54,7 @@ func sinatraOptPattern(args []object.Value) string {
 func sinatraInt(v object.Value, def int) int {
 	switch n := v.(type) {
 	case object.Integer:
-		return int(n)
+		return clampInt(n)
 	case *object.String:
 		if i, err := strconv.Atoi(n.Str()); err == nil {
 			return i
@@ -80,7 +82,7 @@ func sinatraHaltArgs(args []object.Value) []any {
 	for _, a := range args {
 		switch n := a.(type) {
 		case object.Integer:
-			out = append(out, int(n))
+			out = append(out, clampInt(n))
 		case *object.String:
 			out = append(out, n.Str())
 		case *object.Array:
@@ -130,7 +132,7 @@ func sinatraSettingValue(v object.Value) any {
 	case object.Bool:
 		return bool(n)
 	case object.Integer:
-		return int(n)
+		return clampInt(n)
 	case *object.String:
 		return n.Str()
 	case object.Symbol:
@@ -150,7 +152,7 @@ func sinatraResult(vm *VM, ret object.Value) any {
 	case *object.String:
 		return n.Str()
 	case object.Integer:
-		return int(n)
+		return clampInt(n)
 	case *object.Array:
 		parts := make([]string, len(n.Elems))
 		for i, el := range n.Elems {

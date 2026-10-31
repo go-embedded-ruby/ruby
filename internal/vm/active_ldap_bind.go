@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+//go:build !rbgo_core
+
 package vm
 
 import (
@@ -165,7 +167,7 @@ func alFindOptions(args []object.Value) activeldap.FindOptions {
 		}
 	}
 	if v, ok := alKw(h, "limit"); ok {
-		opts.Limit = int(intArg(v))
+		opts.Limit = clampInt(intArg(v))
 	}
 	if v, ok := alKw(h, "attributes"); ok {
 		opts.Attributes = rubyStrList(v)

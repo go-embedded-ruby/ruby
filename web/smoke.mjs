@@ -110,5 +110,26 @@ check("no error from the NDArray snippet", ndarray.error, "");
 const bad = globalThis.rbgoEval("1 +");
 check("a syntax error is reported, not fatal", bad.error !== "", true);
 
+// The rbgo_core build (`-tags rbgo_core`, given as `--core`): the numeric stack
+// and the small standard libraries load, every gem raises the core build's
+// LoadError, and nothing of the gem is left defined after the failed require.
+if (process.argv.includes("--core")) {
+  const core = globalThis.rbgoEval(
+    'require "json"; require "set"; require "bigdecimal"; require "matrix"; ' +
+    'puts JSON.generate([Complex(1, 2).abs.round(3), Rational(1, 3).to_s, Matrix[[1, 2], [3, 4]].det]); ' +
+    '%w[rails nokogiri yaml erb uri openssl sass].each do |g| ' +
+    '  begin; require g; puts "#{g}: loaded"; rescue LoadError => e; puts e.message; end; end; ' +
+    'p [defined?(Rails), defined?(Nokogiri), defined?(ERB), defined?(URI), defined?(Image)]',
+  );
+  check("no error from the core snippet", core.error, "");
+  const lines = core.output.split("\n");
+  check("json/bigdecimal/matrix work", lines[0], '[2.236,"1/3",-2]');
+  for (const [i, g] of ["rails", "nokogiri", "yaml", "erb", "uri", "openssl", "sass"].entries()) {
+    check(`require "${g}" raises the core LoadError`, lines[1 + i],
+      `cannot load such file -- ${g} (not available in the rbgo_core build)`);
+  }
+  check("no gem constant is half-defined", lines[8], "[nil, nil, nil, nil, nil]");
+}
+
 console.log(failed === 0 ? "smoke: all checks passed" : `smoke: ${failed} check(s) failed`);
 process.exit(failed === 0 ? 0 : 1);

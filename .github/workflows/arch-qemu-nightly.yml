@@ -1,7 +1,8 @@
 name: arch-qemu-nightly
 
 # Scheduled QEMU validation of the four EXOTIC 64-bit targets that GitHub-hosted
-# runners cannot run natively: riscv64, loong64, ppc64le, s390x.
+# runners cannot run natively: riscv64, loong64, ppc64le, s390x — and of 32-bit
+# arm (vetted per PR in ci.yml's arch-386 job, whose 386 suite runs natively).
 #
 # These lanes used to run on every PR/push, where qemu-user emulation (~50-100x
 # slower than native) was the CI bottleneck (~10 min/lane). They have been moved
@@ -39,11 +40,13 @@ jobs:
           - { goarch: loong64, qemu: qemu-loongarch64-static }
           - { goarch: ppc64le, qemu: qemu-ppc64le-static }
           - { goarch: s390x,   qemu: qemu-s390x-static }
+          # 32-bit: int is 32 bits. (386 runs natively per PR in ci.yml.)
+          - { goarch: arm,     qemu: qemu-arm-static }
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
-          go-version: 1.27.2
+          go-version: 1.27.3
       # This has not hung here. It hung in go-crdt/crdt, on the same runner
       # image and the same one-line install, for the better part of an hour and
       # more than once — and bounding it is what identified the culprit: three
@@ -57,10 +60,21 @@ jobs:
       # first, and they are only refreshed if that was not enough. apt is also
       # told to give up on a stuck mirror rather than sit on it, which is what
       # made the outer timeout the only thing stopping it.
-      - name: Install qemu-user-static
+      # ⛔ `qemu-user-static` is a VIRTUAL package on Ubuntu 26.04, which
+      # `ubuntu-latest` became on 2026-10-19, and apt refuses to choose between its
+      # two providers:
+      #
+      #   E: Package 'qemu-user-static' has no installation candidate
+      #
+      # ⚠ Installing a provider is NOT the fix: `qemu-user-binfmt` registers binfmt
+      # handlers, it does not ship the `qemu-<arch>-static` binaries this lane
+      # invokes. `qemu-user` ships the dynamic `qemu-<arch>`, which is all that
+      # `go test -exec` needs, so both are installed and BOTH NAMES are accepted
+      # below. go-tex/engine#645 has the full account.
+      - name: Install qemu user-mode emulators
         run: |
           apt=(-y -qq -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
-          if timeout 240 sudo apt-get install "${apt[@]}" qemu-user-static; then
+          if timeout 240 sudo apt-get install "${apt[@]}" qemu-user qemu-user-binfmt; then
             exit 0
           fi
           for attempt in 1 2; do
@@ -68,11 +82,11 @@ jobs:
             timeout 240 sudo apt-get update "${apt[@]}" || true
             sudo rm -f /var/lib/apt/lists/lock /var/cache/apt/archives/lock /var/lib/dpkg/lock*
             sudo dpkg --configure -a || true
-            if timeout 240 sudo apt-get install "${apt[@]}" qemu-user-static; then
+            if timeout 240 sudo apt-get install "${apt[@]}" qemu-user qemu-user-binfmt; then
               exit 0
             fi
           done
-          echo "::error::qemu-user-static could not be installed"
+          echo "::error::qemu-user qemu-user-binfmt could not be installed"
           exit 1
       - name: Test under qemu (${{ matrix.goarch }})
         # qemu-user emulation is ~50-100x slower than native, so the wall here is
@@ -89,4 +103,20 @@ jobs:
         # margin, which ordinary runner variance crosses. 60m puts s390x at
         # about half the wall, which is what "generous headroom" was meant to
         # say. (On real s390x silicon the same suite runs natively in seconds.)
-        run: GOARCH=${{ matrix.goarch }} go test -timeout=60m -exec=${{ matrix.qemu }} ./...
+        run: |
+          base="${{ matrix.qemu }}"
+          q=""
+          for cand in "$base" "${base%-static}"; do
+            command -v "$cand" >/dev/null 2>&1 && q="$cand" && break
+          done
+          # ⛔ A missing emulator FAILS this lane. A lane that reports success for
+          # an architecture it never ran is the one outcome this matrix exists to
+          # rule out.
+          if [ -z "$q" ]; then
+            echo "::error::no qemu user emulator for ${{ matrix.goarch }} (looked for $base and ${base%-static})"
+            exit 1
+          fi
+          # Printed on purpose: without it, "ran under emulation" and "skipped" are
+          # indistinguishable from a green tick.
+          echo "running ${{ matrix.goarch }} under $q"
+          GOARCH=${{ matrix.goarch }} go test -timeout=60m -exec="$q" ./...

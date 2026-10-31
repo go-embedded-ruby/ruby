@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+//go:build !rbgo_core
+
 package vm
 
 import (
@@ -142,7 +144,7 @@ func (vm *VM) registerZlib() {
 
 	// Zlib.deflate(data, level = DEFAULT_COMPRESSION) — one-shot compress.
 	deflateOneShot := func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		level := int(intAt(args, 1, int64(gozlib.DefaultCompression)))
+		level := clampInt(intAt(args, 1, int64(gozlib.DefaultCompression)))
 		out, err := gozlib.Deflate(bytesArg(args, 0), level)
 		if err != nil {
 			raiseZlib(err)
@@ -162,7 +164,7 @@ func (vm *VM) registerZlib() {
 
 	// Zlib.gzip(data, level: DEFAULT_COMPRESSION) / Zlib.gunzip(data).
 	modFn("gzip", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		level := int(intAt(args, 1, int64(gozlib.DefaultCompression)))
+		level := clampInt(intAt(args, 1, int64(gozlib.DefaultCompression)))
 		out, err := gozlib.GzipCompress(bytesArg(args, 0), level)
 		if err != nil {
 			raiseZlib(err)
@@ -190,7 +192,7 @@ func (vm *VM) registerZlib() {
 	// initialize(level = DEFAULT_COMPRESSION): an out-of-range level raises
 	// Zlib::StreamError, matching MRI.
 	deflate.define("initialize", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		level := int(intAt(args, 0, int64(gozlib.DefaultCompression)))
+		level := clampInt(intAt(args, 0, int64(gozlib.DefaultCompression)))
 		d, err := gozlib.NewDeflaterLevel(level)
 		if err != nil {
 			raiseZlib(err)
@@ -212,7 +214,7 @@ func (vm *VM) registerZlib() {
 	// #deflate(data, flush = NO_FLUSH): feed data, returning the bytes produced so
 	// far (any bytes buffered by an earlier #<<, then the new output).
 	deflate.define("deflate", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		flush := int(intAt(args, 1, int64(gozlib.NoFlush)))
+		flush := clampInt(intAt(args, 1, int64(gozlib.NoFlush)))
 		out, err := selfDeflater(self).Deflate(bytesArg(args, 0), flush)
 		if err != nil {
 			raiseZlib(err)

@@ -213,7 +213,9 @@ func TestNDArrayContract(t *testing.T) {
 		{m + `p m`, "array([[0., 1., 2.],\n       [3., 4., 5.]])\n"}, // repr(np.arange(6.).reshape(2, 3))
 		{m + `puts m.to_s`, "array([[0., 1., 2.],\n       [3., 4., 5.]])\n"},
 		{`p NDArray.arange(3)`, "array([0., 1., 2.])\n"},
-		{`p NDArray.zeros(0)`, "array([])\n"},
+		// NumPy always prints the dtype of an empty array (arrayprint.py,
+		// _array_repr_implementation: dtype= when arr.size == 0).
+		{`p NDArray.zeros(0)`, "array([], dtype=float64)\n"},
 		{m + `p [m.shape, m.ndim, m.size]`, "[[2, 3], 2, 6]\n"},
 	}
 	for _, c := range cases {

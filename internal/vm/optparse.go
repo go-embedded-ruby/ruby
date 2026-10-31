@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+//go:build !rbgo_core
+
 package vm
 
 import (
@@ -98,7 +100,7 @@ func (vm *VM) registerOptionParser() {
 			}
 			if len(args) >= 2 {
 				if n, ok := args[1].(object.Integer); ok {
-					op.p.SummaryWidth = int(n)
+					op.p.SummaryWidth = clampInt(n)
 				}
 			}
 			if len(args) >= 3 {
@@ -190,7 +192,7 @@ func (vm *VM) registerOptionParser() {
 		return object.IntValue(int64(opOf(v).p.SummaryWidth))
 	})
 	d("summary_width=", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		opOf(v).p.SummaryWidth = int(intArg(args[0]))
+		opOf(v).p.SummaryWidth = clampInt(intArg(args[0]))
 		return args[0]
 	})
 	d("summary_indent", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {

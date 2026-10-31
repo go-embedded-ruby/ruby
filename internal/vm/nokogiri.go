@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+//go:build !rbgo_core
+
 package vm
 
 import (
@@ -331,7 +333,7 @@ func (vm *VM) registerNokogiriNodeSet(mod *RClass) {
 		if len(args) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
 		}
-		i := int(sqlite3IntArg(args[0]))
+		i := clampInt(sqlite3IntArg(args[0]))
 		if i < 0 {
 			i += self(v).Length()
 		}

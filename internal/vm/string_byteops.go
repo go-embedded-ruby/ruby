@@ -85,7 +85,7 @@ func (vm *VM) strByteindex(self *object.String, args []object.Value) object.Valu
 	if len(args) > 1 {
 		// rb_str_byteindex_m reads the offset with NUM2LONG, which accepts an
 		// Integer or anything answering #to_int.
-		off = int(vm.toIntCoerce(args[1]))
+		off = clampInt(vm.toIntCoerce(args[1]))
 		if off < 0 {
 			off += n
 		}
@@ -128,7 +128,7 @@ func (vm *VM) strByterindex(self *object.String, args []object.Value) object.Val
 	off := n
 	if len(args) > 1 {
 		// rb_str_byterindex_m likewise reads the offset with NUM2LONG.
-		off = int(vm.toIntCoerce(args[1]))
+		off = clampInt(vm.toIntCoerce(args[1]))
 		if off < 0 {
 			off += n
 		}
@@ -259,7 +259,7 @@ func (vm *VM) strBytesplice(self *object.String, args []object.Value) object.Val
 // the start and end to fall on character boundaries.
 func bytespliceIndexLen(self *object.String, idxV, lenV object.Value) (int, int) {
 	n := self.Len()
-	idx := int(toInt(idxV))
+	idx := clampInt(toInt(idxV))
 	raw := idx
 	if idx < 0 {
 		idx += n
@@ -267,7 +267,7 @@ func bytespliceIndexLen(self *object.String, idxV, lenV object.Value) (int, int)
 	if idx < 0 || idx > n {
 		raise("IndexError", "index %d out of string", raw)
 	}
-	length := int(toInt(lenV))
+	length := clampInt(toInt(lenV))
 	if length < 0 {
 		raise("IndexError", "negative length %d", length)
 	}
@@ -310,7 +310,7 @@ func bytespliceSrcRange(src *object.String, r *object.Range) string {
 func rangeToByteSpan(r *object.Range, n int) (int, int) {
 	beg := 0
 	if !object.IsNil(r.Lo) {
-		beg = int(toInt(r.Lo))
+		beg = clampInt(toInt(r.Lo))
 		if beg < 0 {
 			beg += n
 		}
@@ -320,7 +320,7 @@ func rangeToByteSpan(r *object.Range, n int) (int, int) {
 	}
 	end := n
 	if !object.IsNil(r.Hi) {
-		end = int(toInt(r.Hi))
+		end = clampInt(toInt(r.Hi))
 		if end < 0 {
 			end += n
 		}

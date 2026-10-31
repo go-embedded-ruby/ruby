@@ -93,9 +93,16 @@ func (vm *VM) bootstrap() {
 	registerNumericComplexCompat(vm, cNumeric)
 	vm.registerMath()
 	vm.registerFFT()
+	vm.registerSpecial()
+	vm.registerStats()
+	vm.registerIntegrate()
+	vm.registerOptimize()
 	vm.registerNDArray()
 	vm.registerArrayEdges()
-	vm.registerImage()
+	// Image (go-images) is the first of the gems the rbgo_core build leaves out
+	// (core.go says what core is). Each such group is called through gems.go
+	// from the place its calls stood, so the default build's order is unchanged.
+	vm.registerImageGem()
 	vm.registerSet()
 	vm.registerPrettyPrint()
 	vm.registerSingleLine()
@@ -207,7 +214,7 @@ func (vm *VM) bootstrap() {
 			need = -need - 1
 		}
 		if len(args) > 0 {
-			need = int(intArg(args[0]))
+			need = clampInt(intArg(args[0]))
 			// A lambda enforces its arity, so currying it to an arity it cannot
 			// satisfy — fewer than its required positionals, or more than it will
 			// accept when it has no splat — raises, exactly as calling it would. A
@@ -755,164 +762,41 @@ func (vm *VM) bootstrap() {
 		return object.Bool(!ok || s == 0)
 	})
 
-	vm.registerFile()             // needs the exception hierarchy (Errno::ENOENT < StandardError)
-	vm.registerIO()               // IO/StringIO + $stdout/$stderr/$stdin (needs IOError/EOFError)
-	vm.registerARGF()             // ARGF / $< — the concatenated ARGV input stream (needs File + $stdin)
-	vm.registerIOBuffer()         // IO::Buffer (in-memory byte buffer); after registerIO so IO exists
-	vm.registerDir()              // Dir (reuses the Errno module set up by registerFile)
-	vm.registerTmpdir()           // Dir.tmpdir / Dir.mktmpdir (layers onto Dir; require "tmpdir")
-	vm.registerProcess()          // Process module — identity + clock_gettime
-	vm.registerSpawn()            // IO.pipe / read_nonblock / select + Process.spawn/waitpid2 + Kernel.fork/exec
-	vm.registerObjectSpace()      // ObjectSpace module — finalizer API + reflective no-ops
-	vm.registerGC()               // GC module + GC::Profiler — observable-contract shim over Go's GC
-	vm.registerOpenSSL()          // OpenSSL (real digest/HMAC/random + PKI/TLS shell); needs StandardError
-	vm.registerSocket()           // TCPSocket/TCPServer (net) + OpenSSL::SSL::SSLSocket (crypto/tls); after registerOpenSSL (upgrades its SSL shell)
-	vm.registerNetHTTP()          // net/http + net/https loadable shell; needs StandardError
-	vm.registerNetHTTPTransport() // real Net::HTTP over the socket transport; after registerNetHTTP + registerSocket
-	vm.registerWebMock()          // WebMock stub registry (require "webmock") intercepting the bound Net::HTTP transport; after registerNetHTTP + registerNetHTTPTransport
-	vm.registerVCR()              // VCR record/replay of the bound Net::HTTP via cassettes (require "vcr"), backed by go-ruby-vcr; after registerNetHTTP + registerNetHTTPTransport (it routes the real transport)
-	vm.registerNetPOP()           // Net::POP3/Net::POPMail (require "net/pop"), backed by go-ruby-net-pop codec; socket = injected IO seam; after registerNetHTTP (Net module) + registerSocket/registerOpenSSL
-	vm.registerNetSFTP()          // Net::SFTP client (require "net/sftp"), backed by go-ruby-net-sftp codec; SSH channel = injected IO seam; nests under Net, after registerNetHTTP
-	vm.registerNetFTP()           // real Net::FTP over the socket transport; after registerNetHTTP (Net module) + registerSocket/registerOpenSSL
-	vm.registerNetLDAP()          // Net::LDAP client (require "net/ldap"/"net-ldap"/"ldap"), backed by go-ruby-ldap over github.com/go-ldap/ldap/v3; nests under Net, after registerNetHTTP (Net module); needs StandardError for Net::LDAP::Error
-	vm.registerActiveLdap()       // ActiveLdap ORM: Connection/Model/Record + ldap_mapping/find/save/to_ldif (require "active_ldap"), backed by go-ruby-activeldap; Directory seam is the library MockDirectory or a Net::LDAP-shaped object (go-ruby-ldap); after registerNetLDAP; needs StandardError for ActiveLdap::Error
-	vm.registerResolv()           // Resolv (real IPv4/IPv6 parse; DNS sockets stubbed); needs StandardError
-	vm.registerTimeout()          // Timeout module (loadable shell); needs RuntimeError
-	vm.registerTimecop()          // Timecop module (require "timecop"), backed by go-ruby-timecop; drives vm.clock behind Time.now/Date.today/DateTime.now
-	vm.registerDateErrors()       // Date::Error < ArgumentError (Date class itself registered early); needs ArgumentError
-	vm.registerJSON()             // JSON module (go-ruby-json backend); needs StandardError for JSON::JSONError
-	vm.registerMultiJson()        // MultiJson module (require "multi_json"), backed by go-ruby-multi-json for the adapter registry + errors; parse/generate route through rbgo's ordered JSON so key order + symbol keys survive; needs StandardError + ArgumentError
-	vm.registerYAML()             // YAML/Psych loadable shell; needs StandardError
-	vm.registerBCrypt()           // BCrypt (require "bcrypt"), backed by go-ruby-bcrypt; needs StandardError + String
-	vm.registerJWT()              // JWT (require "jwt"), backed by go-ruby-jwt; needs StandardError
-	vm.registerRbNaCl()           // RbNaCl (require "rbnacl"), backed by go-ruby-sodium; needs StandardError
-	vm.registerAge()              // Age (require "age"), backed by go-ruby-age; needs StandardError
-	vm.registerPrawn()            // Prawn::Document (require "prawn"), backed by go-ruby-prawn (fpdf); needs StandardError for Prawn::Errors
-	vm.registerBleve()            // Bleve module (require "bleve"), backed by go-ruby-bleve; needs StandardError (Bleve::Error)
-	vm.registerFaraday()          // Faraday HTTP client (require "faraday"), backed by go-ruby-faraday; needs StandardError for Faraday::Error
-	vm.registerPuma()             // Puma module (require "puma"), backed by go-ruby-puma; threaded Rack web server over net/http; needs StandardError (Puma::Error) + StringIO (rack.input)
-	vm.registerBolt()             // Bolt::DB/Tx/Bucket/Cursor (require "bolt"), backed by go-ruby-bbolt; needs StandardError for Bolt::Error
-	vm.registerSimpleCov()        // SimpleCov module + SimpleCov::Result/SourceFile/Formatter (require "simplecov"), backed by go-ruby-simplecov result engine; live line-coverage collection is a deferred VM feature (coverage supplied via SimpleCov.add_coverage); needs Object + Time
-	vm.registerSAML()             // SAML / OneLogin::RubySaml (require "saml"/"ruby-saml"), backed by go-ruby-saml; needs StandardError for SAML::Error
-	vm.registerWebAuthn()         // WebAuthn module (require "webauthn"), backed by go-ruby-webauthn; needs StandardError (WebAuthn::Error)
-	vm.registerACME()             // Acme::Client / Order / Authorization / Challenge / CertificateRequest (require "acme" / "acme/client"), backed by go-ruby-acme (x/crypto/acme); transport is a host seam; needs StandardError for the Acme::Error tree
-	vm.registerGRPC()             // GRPC module (require "grpc"), backed by go-ruby-grpc over google.golang.org/grpc; in-process bufconn transport; needs StandardError (GRPC::Error)
-	vm.registerNATS()             // NATS module (require "nats"), backed by go-ruby-nats over nats.go; needs StandardError for the NATS::Error tree
-	vm.registerKafka()            // Kafka module (require "kafka"), backed by go-ruby-kafka (twmb/franz-go); needs StandardError for Kafka::Error
-	vm.registerEtcd()             // Etcd/Etcdv3 client (require "etcd"/"etcdv3"), backed by go-ruby-etcd over go.etcd.io/etcd/client/v3; needs StandardError for Etcd::Error
-	vm.registerVault()            // Vault/OpenBao client (require "vault"/"openbao"), backed by go-ruby-openbao; transport wired to the bound Net::HTTP; needs StandardError for Vault::VaultError; after registerNetHTTP + registerNetHTTPTransport
-	vm.registerRolify()           // rolify / resourcify class macros (require "rolify"), backed by go-ruby-rolify; role store seam = the reference MemoryStore
-	vm.registerMySQL()            // Mysql2::Client/Result/Statement (require "mysql2" / "mysql"), backed by go-ruby-mysql over go-sql-driver; needs Enumerable for Result and StandardError for Mysql2::Error
-	vm.registerMongo()            // Mongo::Client/Database/Collection/Cursor + BSON::ObjectId (require "mongo"), backed by go-ruby-mongodb; needs StandardError for Mongo::Error
-	vm.registerParquet()          // Parquet::ArrowFileReader/ArrowFileWriter (require "parquet"), backed by go-ruby-parquet; needs StandardError for Parquet::Error
-	vm.registerHTTParty()         // HTTParty HTTP client (require "httparty"), backed by go-ruby-httparty; needs StandardError for HTTParty::Error
-	vm.registerConnectionPool()   // ConnectionPool + ConnectionPool::Wrapper (require "connection_pool"), backed by go-ruby-connection-pool; needs RuntimeError + Timeout::Error
-	vm.registerErubi()            // Erubi::Engine / CaptureEndEngine + Erubi.h (require "erubi"), template->Ruby-source compiler backed by go-ruby-erubi
-	vm.registerReline()           // Reline module + Reline::HISTORY (require "reline"), line-editor backed by go-ruby-reline; the terminal I/O is wired to rbgo IO objects via Reline.input=/output=
-	vm.registerHTTPrb()           // HTTP module — chainable http.rb client (require "http"), backed by go-ruby-http; needs StandardError for HTTP::Error
-	vm.registerExcon()            // Excon module — persistent HTTP client (require "excon"), backed by go-ruby-excon; needs StandardError for Excon::Error
-	vm.registerTyphoeus()         // Typhoeus module — parallel HTTP client + Hydra (require "typhoeus"), backed by go-ruby-typhoeus; net/http+goroutines
-	vm.registerPundit()           // Pundit mixin (require "pundit"), backed by go-ruby-pundit; policy dispatch + safe_constantize are rbgo seams
-	vm.registerFriendlyId()       // FriendlyId slug macro (require "friendly_id"), backed by go-ruby-friendly-id; base-attr read / uniqueness / history are rbgo seams
-	vm.registerCanCanCan()        // CanCan::Ability mixin (require "cancancan" / "cancan"), backed by go-ruby-cancancan; attr read + block eval are rbgo seams
-	vm.registerMsgpack()          // MessagePack module (go-ruby-msgpack backend); needs StandardError for MessagePack::Error
-	vm.registerTOML()             // TOML/TomlRB module (go-ruby-toml backend); needs StandardError for TomlRB::ParseError
-	vm.registerTZInfo()           // TZInfo module (go-ruby-tzinfo backend); needs StandardError for TZInfo::InvalidTimezoneIdentifier
-	vm.registerChronic()          // Chronic module (go-ruby-chronic backend); needs StandardError
-	vm.registerMoney()            // Money module (go-ruby-money backend); needs StandardError for Money::Currency::UnknownCurrency
-	vm.registerAddressable()      // Addressable module (go-ruby-addressable backend); needs StandardError
-	vm.registerPublicSuffix()     // PublicSuffix module (go-ruby-public-suffix backend); needs StandardError for PublicSuffix::Error tree
-	vm.registerMIMETypes()        // MIME::Types module (go-ruby-mime-types backend)
-	vm.registerCommonmark()       // Commonmark.render_html / String#to_html (require "commonmark"), backed by go-commonmark
-	vm.registerMustache()         // Mustache.render + Mustache view class (require "mustache"); needs StandardError for Mustache::Error
-	vm.registerJbuilder()         // Jbuilder.encode / json.<name> DSL (require "jbuilder"), backed by go-ruby-jbuilder
-	vm.registerBuilder()          // Builder::XmlMarkup (require "builder"), backed by go-ruby-builder
-	vm.registerSQLite3()          // SQLite3::Database/Statement (require "sqlite3"), backed by go-ruby-sqlite3 (modernc); needs StandardError for SQLite3::Exception
-	vm.registerPG()               // PG::Connection/Result (require "pg"), backed by go-ruby-pg v3 protocol; socket = injected IO seam; needs StandardError for PG::Error
-	vm.registerNetIMAP()          // Net::IMAP (require "net/imap"), backed by go-ruby-net-imap builder+parser; socket = injected IO seam; after socket/openssl so a TCPSocket/SSLSocket can be the TLS seam
-	vm.registerNetSMTP()          // Net::SMTP (require "net/smtp"), backed by go-ruby-net-smtp codec over rbgo's real socket/TLS transport; after registerSocket/registerNetHTTP (Net module + transport)
-	vm.registerSidekiq()          // Sidekiq::Client/Job(Worker) + module (require "sidekiq"), backed by go-ruby-sidekiq over go-redis/v9; Redis client dialled from Sidekiq.redis/ENV; perform body is Ruby seam; needs StandardError for Sidekiq::Error
-	vm.registerResque()           // Resque module + Job/Worker/Failure (require "resque"), backed by go-ruby-resque over go-redis/v9; @queue resolver + self.perform are Ruby seams; needs StandardError for Resque::Error
-	vm.registerSequel()           // Sequel query builder + Database (require "sequel"), backed by go-ruby-sequel; executor seam wired to SQLite3::Database (real execution)
-	vm.registerNokogiri()         // Nokogiri::HTML/XML -> Document/Node/NodeSet (require "nokogiri"), backed by go-nokogiri; needs StandardError for Nokogiri::SyntaxError
-	vm.registerNokogiriXSLT()     // Nokogiri::XSLT(str) -> Stylesheet#transform/apply_to (require "nokogiri"), backed by go-xslt over go-nokogiri; needs registerNokogiri first
-	vm.registerRSpec()            // RSpec matcher + expect surface (require "rspec"), backed by go-ruby-rspec; needs Exception for ExpectationNotMetError
-	vm.registerFactoryBot()       // FactoryBot.define/build/create/attributes_for/build_list/create_list/generate (require "factory_bot"), backed by go-ruby-factory-bot; the class-instantiation+attribute-assignment (BuildFunc), persistence (PersistFunc, save!) and dynamic-attribute/sequence/callback blocks are the rbgo object-model seams run INLINE under the GVL; needs StandardError for KeyError/ArgumentError raised on unknown/duplicate factories
-	vm.registerRuboCop()          // RuboCop::Runner#inspect/autocorrect + Cop::Offense (require "rubocop"), backed by go-ruby-rubocop over go-ruby-parser; needs StandardError for RuboCop::Error
-	vm.registerFacter()           // Facter.value/[]/fact/add/to_hash/clear (require "facter"), backed by go-facter; per-VM Collection; Facter.add … setcode block runs INLINE under the GVL when the custom fact resolves
-	vm.registerHocon()            // Hocon.parse / Hocon::ConfigFactory + Config accessors (require "hocon"), backed by go-ruby-hocon over go-hocon; needs StandardError for Hocon::ConfigError
-	vm.registerConfd()            // Confd.render(template, vars) (require "confd"), backed by go-ruby-confd over abtreece/confd; seeds confd's in-memory backend from a Ruby Hash ("/"-path keys, nested Hashes flattened) and runs confd's real text/template engine (getv/getvs/exists/base64Encode/json/…); needs StandardError for Confd::Error
-	vm.registerFastGettext()      // FastGettext translation module (require "fast_gettext"), backed by go-ruby-fast-gettext; per-VM Instance holds domains/locale; _/n_/s_/p_ helpers
-	vm.registerDeepMerge()        // DeepMerge.deep_merge!/deep_merge + Hash#deep_merge!/#deep_merge (require "deep_merge"), backed by go-ruby-deep-merge; Ruby key identity preserved; bad option combos raise DeepMerge::InvalidParameter
-	vm.registerRack()             // Rack::Request/Response/Utils (require "rack" / "rack/utils"), backed by go-ruby-rack; deterministic env/query/escape, no socket
-	vm.registerWEBrick()          // WEBrick::HTTPServer/HTTPRequest/HTTPResponse/HTTPServlet/HTTPStatus (require "webrick"), backed by go-ruby-webrick; deterministic parse/build/mount-dispatch, no socket; the mount_proc block / servlet do_* method is the rbgo seam run inline under the GVL; needs StandardError (WEBrick::HTTPStatus family)
-	vm.registerGrape()            // Grape::Router/Validator/Formatter (require "grape"), backed by go-ruby-grape; endpoint-block exec + Rack env are host seams; needs StandardError for Grape::Exceptions
-	vm.registerSinatra()          // Sinatra::Base class-DSL + #call Rack adapter (require "sinatra/base"), backed by go-ruby-sinatra over go-ruby-rack; route/filter block eval is the rbgo seam; needs Rack + StandardError (Sinatra::NotFound), so registered after registerRack
-	vm.registerRoda()             // Roda class routing-tree DSL (route do |r| … end) + #call Rack adapter (require "roda"), backed by go-ruby-roda over go-ruby-rack; the route/matcher block eval is the rbgo seam, the routing tree is the library; needs Rack + StandardError (Roda::RodaError)
-	vm.registerAsync()            // Async{} structured concurrency + Async::Task/Barrier/Semaphore/Condition/Notification/Queue/LimitedQueue/Waiter (require "async"), backed by go-ruby-async on its CoScheduler; the task-body block eval is the rbgo seam; needs StandardError (Async::Stop / Async::TimeoutError)
-	vm.registerWarden()           // Warden::Manager/Proxy/Strategies (require "warden"), backed by go-ruby-warden over go-ruby-rack; strategy valid?/authenticate! bodies are the rbgo seam; needs Rack + StandardError (Warden::NotAuthenticated), so registered after registerRack
-	vm.registerOmniAuth()         // OmniAuth::Builder/Strategy/AuthHash + OmniAuth.config (require "omniauth"), backed by go-ruby-omniauth over go-ruby-rack; provider request_phase/uid/info bodies are the rbgo seam; needs Rack + StandardError (OmniAuth::Error), so registered after registerRack
-	vm.registerActiveModel()      // ActiveModel::Validations mixin + Errors/Error + Naming/Name + Validator/EachValidator (require "active_model"), backed by go-ruby-activemodel; Attr/Dispatcher/Condition seams wired to rbgo (ivar get/set + method dispatch + Ruby if/unless procs)
-	vm.registerAASM()             // AASM mixin: `include AASM` + `aasm do state/event/transitions … end` DSL, per-event fire/fire!/may_fire? + per-state predicates, obj.aasm reader (require "aasm"), backed by go-ruby-aasm; guards/callbacks run INLINE under the GVL, state/persist seams wired to the object's column ivar + save; needs StandardError for AASM::Error
-	vm.registerActiveStorage()    // ActiveStorage::Blob/Service/Attachment + Attached::One/Many (require "active_storage"), backed by go-ruby-activestorage; ModelStore/Service/Signer/Random/Clock seams wired to a deterministic in-process config (MemStore + DiskService temp dir); needs StandardError for ActiveStorage::Error
-	vm.registerActionCable()      // ActionCable::Server/Connection::Base/Channel::Base + ActionCable.server (require "action_cable"), backed by go-ruby-actioncable; the transport/channel-action/factory seams eval Ruby bodies + the async adapter default keep the byte-exact actioncable-v1-json wire protocol in the library; needs StandardError (ActionCable::Error)
-	vm.registerActionPack()       // ActionController::Base + ActionController::Parameters + ActionDispatch::Routing::RouteSet/Request/Response (require "action_controller" / "action_dispatch"), backed by go-ruby-actionpack; the action body (RunAction), the before/after/around filters, rescue_from and the view render (Renderer -> an ActionView-style context) are the rbgo seams run inline under the GVL; the route compiler/recognizer/generator, filter/rescue pipeline and strong-params semantics are the library; needs StandardError + Rack, so registered after registerRack/registerActionCable
-	vm.registerDevise()           // Devise::Config/Resource/Encryptor/TokenGenerator + Strategies::DatabaseAuthenticatable (require "devise"), backed by go-ruby-devise over go-ruby-bcrypt + go-ruby-warden; the model #[]/#[]=/#save + finder callable are the rbgo seams, and the strategy plugs into the bound Warden registry; needs StandardError (Devise::Error). Registered after registerWarden + registerBCrypt (dependency order)
-	vm.registerActiveRecord()     // ActiveRecord::Model/Relation/Record + Base.establish_connection (require "active_record"), backed by go-ruby-activerecord; adapter seam wired to go-ruby-sqlite3 so queries run; needs StandardError for ActiveRecordError
-	vm.registerKaminari()         // Kaminari::PaginatableArray/PaginatableRelation + Array#page + Model/relation #page (require "kaminari"), backed by go-ruby-kaminari; the Relation seam wires #count/#offset/#limit to an ActiveRecord relation, so registered after registerActiveRecord
-	vm.registerPaperTrail()       // PaperTrail::Version/RecordTrail/Request + has_paper_trail macro (require "paper_trail"), backed by go-ruby-paper-trail; snapshot=model @ivars, store=shared MemoryStore, clock=time.Now, whodunnit/enabled=PaperTrail.request seams
-	vm.registerRansack()          // Ransack module + Ransack::Search/Sort (require "ransack"), backed by go-ruby-ransack; Model.ransack(q).result / Ransack.search(subject, q); the record-source Backend seam fetches the subject's rows via #all and runs the engine's in-memory Match/Apply evaluator; must run after registerActiveRecord so ActiveRecord::Base gains .ransack/.search
-	vm.registerRQRCode()          // RQRCode::QRCode (require "rqrcode"), backed by go-ruby-rqrcode; needs StandardError for RQRCode::QRCode*Error
-	vm.registerPagy()             // Pagy (require "pagy"), backed by go-ruby-pagy; needs StandardError for Pagy::OverflowError / Pagy::VariableError
-	vm.registerDotenv()           // Dotenv module (require "dotenv"), backed by go-ruby-dotenv; wires ENV read/write + shell seams
-	vm.registerHCL2()             // HCL2 module (require "hcl2"), backed by go-ruby-hcl2; needs StandardError for HCL2::Error
-	vm.registerI18n()             // I18n module (require "i18n"), backed by go-ruby-i18n; needs ArgumentError for the I18n::ArgumentError tree
-	vm.registerZeitwerk()         // Zeitwerk::Loader/Inflector (require "zeitwerk"), backed by go-ruby-zeitwerk; wires DefineAutoload->Module#autoload, Load->require; needs StandardError/NameError for the Zeitwerk error tree
-	vm.registerRSS()              // RSS::Parser.parse -> RSS::Rss / RSS::RDF / RSS::Atom::Feed (require "rss"), backed by go-ruby-rss; needs StandardError for RSS::Error
-	vm.registerRDoc()             // RDoc::Markup + ToHtml/ToMarkdown/ToRdoc formatters (require "rdoc"), backed by go-ruby-rdoc; needs StandardError for RDoc::Error
-	vm.registerThor()             // Thor CLI framework: option parsing + dispatch + help (require "thor"), backed by go-ruby-thor; needs StandardError for Thor::Error
-	vm.registerRacc()             // Racc::Parser LALR(1) runtime (require "racc/parser"), backed by go-ruby-racc; needs StandardError for Racc::ParseError
-	vm.registerKramdown()         // Kramdown::Document (require "kramdown"), backed by go-kramdown
-	vm.registerImages()           // Images::Image/Canvas/Color (require "images"), backed by go-ruby-images (MiniMagick/ruby-vips processing + chunky_png canvas + scikit-image ops); needs StandardError for Images::Error
-	vm.registerOpentype()         // Opentype module + Opentype::Font/Face (require "opentype"), backed by go-ruby-opentype over the go-opentype text stack (font parsing, sized faces, complex-script shaping, Unicode Bidi); every adapter method installed via its Methods()/Call() surface; needs StandardError for Opentype::Error
-	vm.registerWidgets()          // Widgets module (require "widgets"), backed by go-ruby-widgets/widgets over the go-widgets pixel-blitting toolkit: constructors + flex/fixed/grid/border/card composition + layout/render (RGBA buffer)/dispatch, addressed by integer handles; needs StandardError for Widgets::Error
-	vm.registerTui()              // Tui module + Tui::Widget (require "tui"), backed by go-ruby-widgets/tui over the go-widgets terminal-cell toolkit: constructors/composition + render (ANSI)/render_cells/decode_cells/dispatch; needs StandardError for Tui::Error
-	vm.registerMvvm()             // Mvvm module + Mvvm::Observable/Command/ObservableList (require "mvvm"), backed by go-ruby-widgets/mvvm over the go-widgets data-binding layer; notifications pull through drain_events; needs StandardError for Mvvm::Error
-	vm.registerShrine()           // Shrine file-attachment (require "shrine"), backed by go-ruby-shrine; Storage(Memory/FileSystem)/Uploader/UploadedFile/Attacher; needs StandardError for Shrine::Error + StringIO for #open
-	vm.registerLiquid()           // Liquid::Template.parse(...).render (require "liquid"), backed by go-liquid; needs StandardError for Liquid::Error
-	vm.registerSass()             // Sass.compile / compile_string / compile_file + SassC::Engine (require "sass"), backed by go-ruby-sass over the pure-Go go-scss engine; needs StandardError for Sass::CompileError / SassC::SyntaxError
-	vm.registerRouge()            // Rouge.highlight / Rouge::Lexer.find (require "rouge"), backed by go-rouge; needs StandardError for Rouge::Error
-	vm.registerSlim()             // Slim::Template.new{src}.render (require "slim"), compile-to-source via go-ruby-slim; needs StandardError for Slim::Error
-	vm.registerHaml()             // Haml::Template.new(src).render (require "haml"), compile-to-source via go-ruby-haml; needs StandardError for Haml::Error
-	vm.registerDryTypes()         // Dry::Types type system (require "dry/types"), backed by go-ruby-dry-types; needs StandardError for Dry::Types::CoercionError
-	vm.registerDryStruct()        // Dry::Struct base class (require "dry/struct"), backed by go-ruby-dry-struct; pins go-ruby-dry-types
-	vm.registerDryValidation()    // Dry::Schema / Dry::Validation::Contract (require "dry/validation"), backed by go-ruby-dry-validation; pins go-ruby-dry-types
-	vm.registerOAuth2()           // OAuth2::Client / AccessToken / Response (require "oauth2"), backed by go-ruby-oauth2; HTTP round-trip is a net-http host seam
-	vm.registerOIDC()             // OpenIDConnect::Client / Verifier / ProviderMetadata (require "openid_connect" / "oidc"), backed by go-ruby-oidc; reuses OAuth2+JWT; HTTP seam is a Ruby callable Doer
-	vm.registerOpenStack()        // OpenStack.connect -> OpenStack::Connection + the six service accessors (compute/network/block_storage/object_storage/image/identity) with per-resource CRUD (require "openstack"), backed by go-ruby-openstack over gophercloud; resources cross as Ruby Hashes, the HTTP transport is the vm.osTransport injection seam; needs StandardError for the OpenStack::Error tree
-	vm.registerFileUtils()        // FileUtils (real fs ops over os); needs Errno (registerFile)
-	vm.registerGetoptLong()       // GetoptLong loadable shell; needs StandardError
-	vm.registerSignal()           // Signal.trap/list/signame + Kernel#trap (handlers recorded, not delivered)
-	vm.registerOpen3()            // Open3 loadable shell (popen/capture raise; spawning pending)
-	vm.registerRipper()           // ripper loadable shell (Ripper.sexp etc. raise); needs StandardError
-	vm.registerSyslog()           // Syslog loadable shell (feature probe)
-	vm.registerCGI()              // CGI.escape/unescape (real over net/url) + HTML helpers
-	vm.registerERB()              // ERB class skeleton + ERB::Util (backed by go-ruby-erb); prelude adds the Ruby API
-	vm.registerIRB()              // IRB module + REPL (require "irb"), backed by go-ruby-irb; evaluates each statement through rbgo; needs Binding + IO
-	vm.registerStringScanner()    // StringScanner (require "strscan"), backed by go-ruby-strscan; needs StandardError
-	vm.registerOptionParser()     // OptionParser (require "optparse"), backed by go-ruby-optparse; prelude adds the ParseError tree
-	vm.registerURI()              // URI module (require "uri"), backed by go-ruby-uri; needs StandardError (URI::Error) + Regexp (make_regexp)
-	vm.registerCSV()              // CSV class (require "csv"), backed by go-ruby-csv; needs StandardError (CSV::MalformedCSVError) + Date/Time
-	vm.registerREXML()            // REXML module (require "rexml/document"), backed by go-ruby-rexml; needs StandardError (REXML::ParseException)
-	vm.registerMatrix()           // Matrix/Vector (require "matrix"), backed by go-ruby-matrix; needs StandardError (ExceptionForMatrix::Err*)
-	vm.registerArrow()            // Arrow module (require "arrow"), backed by go-ruby-arrow; needs StandardError (Arrow::Error)
-	vm.registerShellwords()       // Shellwords (require "shellwords"), backed by go-ruby-shellwords; installs Shellwords + String/Array core extensions lazily on require
-	vm.registerMonitor()          // Monitor/MonitorMixin (single-thread synchronize); needs StandardError
-	vm.registerObservable()       // Observable mixin (require "observer"), backed by go-ruby-observer; rbgo wires dispatch + respond_to?
-	vm.registerZlib()             // needs the exception hierarchy (Zlib::Error < StandardError)
-	vm.registerFiber()            // needs the exception hierarchy (FiberError < StandardError)
-	vm.registerThread()           // needs StandardError/StopIteration (ThreadError, ClosedQueueError)
-	vm.registerServerGems()       // browser-pointless server/ops/testing gems, guarded off on GOOS=js GOARCH=wasm (see servergems_*.go)
+	vm.registerFile()        // needs the exception hierarchy (Errno::ENOENT < StandardError)
+	vm.registerIO()          // IO/StringIO + $stdout/$stderr/$stdin (needs IOError/EOFError)
+	vm.registerARGF()        // ARGF / $< — the concatenated ARGV input stream (needs File + $stdin)
+	vm.registerIOBuffer()    // IO::Buffer (in-memory byte buffer); after registerIO so IO exists
+	vm.registerDir()         // Dir (reuses the Errno module set up by registerFile)
+	vm.registerTmpdir()      // Dir.tmpdir / Dir.mktmpdir (layers onto Dir; require "tmpdir")
+	vm.registerProcess()     // Process module — identity + clock_gettime
+	vm.registerSpawn()       // IO.pipe / read_nonblock / select + Process.spawn/waitpid2 + Kernel.fork/exec
+	vm.registerObjectSpace() // ObjectSpace module — finalizer API + reflective no-ops
+	vm.registerGC()          // GC module + GC::Profiler — observable-contract shim over Go's GC
+	// The registerXxxGem(s) groups below are the gems the rbgo_core build leaves
+	// out (core.go). Their calls live in gems.go, each group called from the
+	// place its calls stood, so the order is unchanged on the default build.
+	vm.registerNetworkGems() // openssl, socket, net/*, resolv and the gems over them
+	vm.registerTimeout()     // Timeout module (loadable shell); needs RuntimeError
+	vm.registerTimecopGem()
+	vm.registerDateErrors()     // Date::Error < ArgumentError (Date class itself registered early); needs ArgumentError
+	vm.registerJSON()           // JSON module (go-ruby-json backend); needs StandardError for JSON::JSONError
+	vm.registerThirdPartyGems() // the third-party gems, and yaml
+	vm.registerFileUtils()      // FileUtils (real fs ops over os); needs Errno (registerFile)
+	vm.registerGetoptLongGem()
+	vm.registerSignal()        // Signal.trap/list/signame + Kernel#trap (handlers recorded, not delivered)
+	vm.registerToolingGems()   // open3, ripper, syslog, cgi, erb, irb
+	vm.registerStringScanner() // StringScanner (require "strscan"), backed by go-ruby-strscan; needs StandardError
+	vm.registerOptparseURIGems()
+	vm.registerCSV() // CSV class (require "csv"), backed by go-ruby-csv; needs StandardError (CSV::MalformedCSVError) + Date/Time
+	vm.registerREXMLGem()
+	vm.registerMatrix() // Matrix/Vector (require "matrix"), backed by go-ruby-matrix; needs StandardError (ExceptionForMatrix::Err*)
+	vm.registerArrowShellwordsGems()
+	vm.registerMonitor()    // Monitor/MonitorMixin (single-thread synchronize); needs StandardError
+	vm.registerObservable() // Observable mixin (require "observer"), backed by go-ruby-observer; rbgo wires dispatch + respond_to?
+	vm.registerZlibGem()
+	vm.registerFiber()      // needs the exception hierarchy (FiberError < StandardError)
+	vm.registerThread()     // needs StandardError/StopIteration (ThreadError, ClosedQueueError)
+	vm.registerServerGems() // browser-pointless server/ops/testing gems, guarded off on GOOS=js GOARCH=wasm (see servergems_*.go); none on the rbgo_core build
 
 	// Exception instance protocol: initialize stores @message; message/to_s
 	// return it (or the class name when unset).
@@ -1262,7 +1146,7 @@ func (vm *VM) bootstrap() {
 		if hasBase {
 			// The base itself is coerced with #to_int, and a valid radix is 0
 			// (auto-detect) or 2..36 — anything else is MRI's "invalid radix".
-			base = int(vm.toIntCoerce(args[1]))
+			base = clampInt(vm.toIntCoerce(args[1]))
 			if base != 0 && (base < 2 || base > 36) {
 				return fail("ArgumentError", "invalid radix %d", base)
 			}
@@ -1970,7 +1854,7 @@ func (vm *VM) bootstrap() {
 	classCmpOp := func(want func(int) bool) NativeFn {
 		return func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 			if c, ok := classCmp(self, args[0]).(object.Integer); ok {
-				return object.Bool(want(int(c)))
+				return object.Bool(want(clampInt(c)))
 			}
 			return object.NilV
 		}
@@ -2446,7 +2330,7 @@ func (vm *VM) bootstrap() {
 	vm.cString.defineArgc("sum", -1, func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		bits := 16
 		if len(args) > 0 {
-			bits = int(toInt(args[0]))
+			bits = clampInt(toInt(args[0]))
 		}
 		return object.IntValue(stringSum(strOf(self), bits))
 	})
@@ -2739,7 +2623,7 @@ func (vm *VM) bootstrap() {
 		nChars := utf8.RuneCountInString(s)
 		start := 0
 		if len(args) > 1 { // optional character offset (negative counts from the end)
-			start = int(vm.repeatLong(args[1]))
+			start = clampInt(vm.repeatLong(args[1]))
 			if start < 0 {
 				start += nChars
 			}
@@ -2777,7 +2661,7 @@ func (vm *VM) bootstrap() {
 		nChars := utf8.RuneCountInString(s)
 		limit := nChars
 		if len(args) > 1 { // optional character offset (negative counts from the end)
-			limit = int(vm.repeatLong(args[1]))
+			limit = clampInt(vm.repeatLong(args[1]))
 			if limit < 0 {
 				limit += nChars
 			}
@@ -2852,7 +2736,7 @@ func (vm *VM) bootstrap() {
 		if len(args) > 0 {
 			// The base is coerced through #to_int (MRI's rb_num2long), so a Float
 			// or a #to_int object works and a non-integer raises TypeError.
-			base = int(vm.integerArg(args[0]).Int64())
+			base = clampInt(vm.integerArg(args[0]).Int64())
 		}
 		return stringToInt(strOf(self), base)
 	})
@@ -3150,7 +3034,7 @@ func (vm *VM) bootstrap() {
 		ins := []rune(insStr)
 		r := []rune(s.Str())
 		idx := vm.repeatLong(args[0])
-		at := int(idx)
+		at := clampInt(idx)
 		if at < 0 {
 			at += len(r) + 1
 		}
@@ -3371,7 +3255,7 @@ func (vm *VM) bootstrap() {
 				rng = vm.coerceRangeBounds(rng)
 				beg := 0
 				if _, isNil := rng.Lo.(object.Nil); !isNil {
-					beg = int(intArg(rng.Lo))
+					beg = clampInt(intArg(rng.Lo))
 					if beg < 0 {
 						if beg += len(a); beg < 0 {
 							raise("RangeError", "%s out of range", rng.Inspect())
@@ -3380,7 +3264,7 @@ func (vm *VM) bootstrap() {
 				}
 				end := len(a)
 				if _, isNil := rng.Hi.(object.Nil); !isNil {
-					end = int(intArg(rng.Hi))
+					end = clampInt(intArg(rng.Hi))
 					if end < 0 {
 						end += len(a)
 					}
@@ -3393,7 +3277,7 @@ func (vm *VM) bootstrap() {
 				}
 				continue
 			}
-			appendAt(int(vm.repeatLong(idxV)))
+			appendAt(clampInt(vm.repeatLong(idxV)))
 		}
 		return object.NewArrayFromSlice(out)
 	})
@@ -3532,7 +3416,7 @@ func (vm *VM) bootstrap() {
 			raise("ArgumentError", "wrong number of arguments (given %d, expected 0..1)", len(args))
 		}
 		if len(args) > 0 { // pop(n) removes and returns the last n as an array
-			n := int(vm.toIntCoerce(args[0]))
+			n := clampInt(vm.toIntCoerce(args[0]))
 			if n < 0 {
 				raise("ArgumentError", "negative array size")
 			}
@@ -3558,7 +3442,7 @@ func (vm *VM) bootstrap() {
 			raise("ArgumentError", "wrong number of arguments (given %d, expected 0..1)", len(args))
 		}
 		if len(args) > 0 { // shift(n) removes and returns the first n as an array
-			n := int(vm.toIntCoerce(args[0]))
+			n := clampInt(vm.toIntCoerce(args[0]))
 			if n < 0 {
 				raise("ArgumentError", "negative array size")
 			}
@@ -3600,7 +3484,7 @@ func (vm *VM) bootstrap() {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1+)")
 		}
 		raw := vm.repeatLong(args[0])
-		idx := int(raw)
+		idx := clampInt(raw)
 		ins := args[1:]
 		if len(ins) == 0 {
 			return a
@@ -3701,7 +3585,7 @@ func (vm *VM) bootstrap() {
 		if n := len(a.Elems); n > 0 {
 			k := 1
 			if len(args) > 0 {
-				k = int(vm.repeatLong(args[0]))
+				k = clampInt(vm.repeatLong(args[0]))
 			}
 			k = ((k % n) + n) % n
 			a.Elems = append(append([]object.Value{}, a.Elems[k:]...), a.Elems[:k]...)
@@ -3865,7 +3749,7 @@ func (vm *VM) bootstrap() {
 			}
 			return a.Elems[vm.drawIndex(rng, n)]
 		}
-		count := int(vm.repeatLong(pos[0]))
+		count := clampInt(vm.repeatLong(pos[0]))
 		if count < 0 {
 			raise("ArgumentError", "negative sample number")
 		}
@@ -3899,7 +3783,7 @@ func (vm *VM) bootstrap() {
 		if len(args) == 3 {
 			raw := vm.repeatLong(args[0])
 			start := normIndex(raw, len(a.Elems))
-			length := int(vm.repeatLong(args[1]))
+			length := clampInt(vm.repeatLong(args[1]))
 			if start < 0 {
 				raise("IndexError", "index %d too small for array; minimum: -%d", raw, len(a.Elems))
 			}
@@ -4142,14 +4026,14 @@ func (vm *VM) bootstrap() {
 	vm.cArray.defineArgc("flatten", -1, func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		depth := -1
 		if len(args) > 0 && !object.IsNil(args[0]) {
-			depth = int(vm.repeatLong(args[0])) // #to_int coercion (a nil depth is unbounded)
+			depth = clampInt(vm.repeatLong(args[0])) // #to_int coercion (a nil depth is unbounded)
 		}
 		return object.NewArrayFromSlice(vm.flattenDepth(self.(*object.Array).Elems, depth))
 	})
 	vm.cArray.defineArgc("flatten!", -1, func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		depth := -1
 		if len(args) > 0 && !object.IsNil(args[0]) {
-			depth = int(vm.repeatLong(args[0])) // #to_int coercion (a nil depth is unbounded)
+			depth = clampInt(vm.repeatLong(args[0])) // #to_int coercion (a nil depth is unbounded)
 		}
 		a := self.(*object.Array)
 		vm.checkArrayFrozen(a)
@@ -4202,7 +4086,7 @@ func (vm *VM) bootstrap() {
 		if blk == nil {
 			return enumFor(self, "each_slice", args...)
 		}
-		n := int(intArg(args[0]))
+		n := clampInt(intArg(args[0]))
 		if n <= 0 {
 			raise("ArgumentError", "invalid slice size")
 		}
@@ -4225,7 +4109,7 @@ func (vm *VM) bootstrap() {
 		if blk == nil {
 			return enumFor(self, "each_cons", args...)
 		}
-		n := int(intArg(args[0]))
+		n := clampInt(intArg(args[0]))
 		if n <= 0 {
 			raise("ArgumentError", "invalid size")
 		}
@@ -4327,7 +4211,7 @@ func (vm *VM) bootstrap() {
 		return object.NewArrayFromSlice(out)
 	})
 	vm.cArray.defineArgc("combination", 1, func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
-		k := int(intArg(args[0]))
+		k := clampInt(intArg(args[0]))
 		elems := self.(*object.Array).Elems
 		var combos []object.Value
 		if k >= 0 && k <= len(elems) {
@@ -4371,7 +4255,7 @@ func (vm *VM) bootstrap() {
 				n := len(self.(*object.Array).Elems)
 				kk := n
 				if len(args) > 0 {
-					kk = int(vm.toIntCoerce(args[0]))
+					kk = clampInt(vm.toIntCoerce(args[0]))
 				}
 				return object.NormInt(permutationCountBig(n, kk))
 			}, args...)
@@ -4379,7 +4263,7 @@ func (vm *VM) bootstrap() {
 		elems := self.(*object.Array).Elems
 		k := len(elems)
 		if len(args) > 0 {
-			k = int(vm.toIntCoerce(args[0]))
+			k = clampInt(vm.toIntCoerce(args[0]))
 		}
 		var perms []object.Value
 		if k >= 0 && k <= len(elems) {
@@ -4411,12 +4295,12 @@ func (vm *VM) bootstrap() {
 		return self
 	})
 	vm.cArray.defineArgc("repeated_combination", 1, func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
-		k := int(vm.repeatLong(args[0]))
+		k := clampInt(vm.repeatLong(args[0]))
 		// No block: a lazy Enumerator that re-reads self when iterated (MRI sees
 		// later mutations of the array), with an explicit combinatorial #size.
 		if blk == nil {
 			return enumForSized(self, "repeated_combination", func(vm *VM) object.Value {
-				kk := int(vm.repeatLong(args[0]))
+				kk := clampInt(vm.repeatLong(args[0]))
 				if kk < 0 {
 					return object.IntValue(0)
 				}
@@ -4456,10 +4340,10 @@ func (vm *VM) bootstrap() {
 		return self
 	})
 	vm.cArray.defineArgc("repeated_permutation", 1, func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
-		k := int(vm.repeatLong(args[0]))
+		k := clampInt(vm.repeatLong(args[0]))
 		if blk == nil {
 			return enumForSized(self, "repeated_permutation", func(vm *VM) object.Value {
-				kk := int(vm.repeatLong(args[0]))
+				kk := clampInt(vm.repeatLong(args[0]))
 				if kk < 0 {
 					return object.IntValue(0)
 				}
@@ -4530,7 +4414,7 @@ func (vm *VM) bootstrap() {
 		}
 		shift := 1
 		if len(args) > 0 {
-			shift = int(vm.repeatLong(args[0]))
+			shift = clampInt(vm.repeatLong(args[0]))
 		}
 		shift = ((shift % n) + n) % n
 		out := make([]object.Value, n)
@@ -4631,7 +4515,7 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cArray.defineArgc("take", 1, func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
-		n := int(intArg(args[0]))
+		n := clampInt(intArg(args[0]))
 		if n < 0 {
 			raise("ArgumentError", "attempt to take negative size")
 		}
@@ -4644,7 +4528,7 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cArray.defineArgc("drop", 1, func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
-		n := int(vm.toIntCoerce(args[0]))
+		n := clampInt(vm.toIntCoerce(args[0]))
 		if n < 0 {
 			raise("ArgumentError", "attempt to drop negative size")
 		}
@@ -4795,14 +4679,14 @@ func (vm *VM) bootstrap() {
 	vm.cArray.defineArgc("min_by", -1, func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		a := self.(*object.Array)
 		if blk != nil && len(args) > 0 && !object.IsNil(args[0]) {
-			return vm.arrayByExtremeN(a, blk, int(coerceInt(vm, args[0])), -1)
+			return vm.arrayByExtremeN(a, blk, clampInt(coerceInt(vm, args[0])), -1)
 		}
 		return vm.arrayByExtreme(a, blk, "min_by", -1)
 	})
 	vm.cArray.defineArgc("max_by", -1, func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		a := self.(*object.Array)
 		if blk != nil && len(args) > 0 && !object.IsNil(args[0]) {
-			return vm.arrayByExtremeN(a, blk, int(coerceInt(vm, args[0])), 1)
+			return vm.arrayByExtremeN(a, blk, clampInt(coerceInt(vm, args[0])), 1)
 		}
 		return vm.arrayByExtreme(a, blk, "max_by", 1)
 	})
@@ -5658,7 +5542,7 @@ func (vm *VM) bootstrap() {
 	vm.cHash.defineArgc("flatten", -1, func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		depth := 1
 		if len(args) > 0 {
-			depth = int(intArg(args[0]))
+			depth = clampInt(intArg(args[0]))
 		}
 		h := self.(*object.Hash)
 		pairs := make([]object.Value, 0, len(h.Keys))
@@ -5758,7 +5642,7 @@ func (vm *VM) bootstrap() {
 		}
 		// The count is coerced with #to_int (so a Float truncates and a mock_int
 		// works); a negative count is an error, like Array#first.
-		n := int(vm.toIntCoerce(args[0]))
+		n := clampInt(vm.toIntCoerce(args[0]))
 		if n < 0 {
 			raise("ArgumentError", "negative array size")
 		}
@@ -5847,7 +5731,7 @@ func (vm *VM) bootstrap() {
 			if object.IsNil(r.Lo) {
 				raise("RangeError", "cannot get the minimum of beginless range")
 			}
-			n := int(vm.toIntCoerce(args[0]))
+			n := clampInt(vm.toIntCoerce(args[0]))
 			if n < 0 {
 				raise("ArgumentError", "negative array size")
 			}
@@ -5962,7 +5846,7 @@ func (vm *VM) bootstrap() {
 	// full materialised range, so it is bounded only.
 	vm.cRange.defineArgc("take", 1, func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		r := self.(*object.Range)
-		n := int(intArg(args[0]))
+		n := clampInt(intArg(args[0]))
 		if n < 0 {
 			raise("ArgumentError", "attempt to take negative size")
 		}
@@ -5985,7 +5869,7 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cRange.defineArgc("drop", 1, func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		elems := vm.rangeElemsV(self.(*object.Range))
-		n := int(intArg(args[0]))
+		n := clampInt(intArg(args[0]))
 		if n < 0 {
 			raise("ArgumentError", "attempt to drop negative size")
 		}
@@ -6115,7 +5999,7 @@ func (vm *VM) bootstrap() {
 					}
 				}
 				elems := strRangeElems(loS.Str(), r.Hi.(*object.String).Str(), r.Exclusive)
-				for i := 0; i < len(elems); i += int(n) {
+				for i := 0; i < len(elems); i += clampInt(n) {
 					vm.callBlock(blk, []object.Value{elems[i]})
 				}
 				return r
@@ -6205,7 +6089,7 @@ func (vm *VM) bootstrap() {
 		// (and `rb_usascii_str_new2("0")` for zero), and bignum.c's rb_big2str does
 		// the same, so every Integer#to_s is US-ASCII — core/integer/to_s_spec
 		// asserts it. rbgo tagged the digits UTF-8.
-		return object.NewStringBytesEnc([]byte(bigVal(self).Text(int(base))), "US-ASCII")
+		return object.NewStringBytesEnc([]byte(bigVal(self).Text(clampInt(base))), "US-ASCII")
 	})
 	// Bitwise / shift operators (arbitrary precision via big.Int, so a left shift
 	// promotes to a Bignum and bitwise ops work on Bignums too).
@@ -6617,9 +6501,9 @@ func (vm *VM) bootstrap() {
 	setupData(vm) // Data.define immutable value objects (Ruby 3.2+); shares structVals storage
 	// These depend on Struct (Etc::Passwd/Group) and the core collections, so they
 	// run after setupStruct and the prelude-defined Enumerable/Hash/Array.
-	vm.registerEtc()        // Etc module (real pw/grp via os/user; systmpdir); needs Struct + Enumerable
-	vm.registerConcurrent() // concurrent-ruby shell (collections alias core; ThreadLocalVar)
-	vm.registerENV()        // ENV: Hash-like view of the process environment over os
+	vm.registerEtc()           // Etc module (real pw/grp via os/user; systmpdir); needs Struct + Enumerable
+	vm.registerConcurrentGem() // concurrent-ruby shell (collections alias core; ThreadLocalVar); a gem, so not in the rbgo_core build
+	vm.registerENV()           // ENV: Hash-like view of the process environment over os
 	// Numeric edge methods (Integer#[]/#size/#ord/#round, Float#round(half:),
 	// #next_float/#prev_float): run last so the round overrides win.
 	vm.registerNumericEdges()
@@ -6984,7 +6868,7 @@ func absSign(a int64) (int64, bool) {
 func floatRound(f float64, args []object.Value, fn func(float64) float64) object.Value {
 	ndigits := 0
 	if len(args) > 0 {
-		ndigits = int(intArg(args[0]))
+		ndigits = clampInt(intArg(args[0]))
 	}
 	pow := math.Pow(10, float64(ndigits))
 	r := fn(f*pow) / pow
@@ -7026,7 +6910,7 @@ func clampCount(n int64, max int) int {
 	if n > int64(max) {
 		return max
 	}
-	return int(n)
+	return clampInt(n)
 }
 
 // arrayIndex normalizes a (possibly negative) index and reports whether it is in
@@ -7039,7 +6923,7 @@ func arrayIndex(a *object.Array, i int64) (int, bool) {
 	if i < 0 || i >= n {
 		return 0, false
 	}
-	return int(i), true
+	return clampInt(i), true
 }
 
 // arrayArefSpan resolves Array#[]/#slice/#slice! arguments to a location in a.
@@ -7178,7 +7062,7 @@ func (vm *VM) drawIndex(rng object.Value, bound int) int {
 	if idx < 0 || idx >= int64(bound) {
 		raise("RangeError", "random number too big %d", idx)
 	}
-	return int(idx)
+	return clampInt(idx)
 }
 
 // fisherYates shuffles s in place using rng (nil = the default generator),
@@ -7204,7 +7088,7 @@ func (vm *VM) arrayArefSpan(a *object.Array, args []object.Value) (start, length
 	}
 	if len(args) == 2 { // a[start, len] — start and length convert via #to_int.
 		s := normIndex(vm.arrayArefLong(args[0]), len(a.Elems))
-		l := int(vm.arrayArefLong(args[1]))
+		l := clampInt(vm.arrayArefLong(args[1]))
 		if s < 0 || s > len(a.Elems) || l < 0 {
 			return 0, 0, true, false
 		}
@@ -7243,7 +7127,7 @@ func (vm *VM) arrayArefLong(v object.Value) int64 {
 // span extends past the array, MRI raises RangeError. Verified against MRI 4.0.6.
 func (vm *VM) arrayArefArithSeq(a *object.Array, e *Enumerator) object.Value {
 	n := len(a.Elems)
-	step := int(vm.repeatLong(e.asStep))
+	step := clampInt(vm.repeatLong(e.asStep))
 	if step == 0 {
 		// A fractional step (e.g. .step(0.5)) truncates to 0; MRI rejects it here.
 		raise("ArgumentError", "slice step cannot be zero")
@@ -8043,7 +7927,7 @@ func stringIndexEnc(s string, args []object.Value, binary bool) object.Value {
 		if start < 0 || start > n || length < 0 {
 			return object.NilV
 		}
-		end := start + int(length)
+		end := start + clampInt(length)
 		if end > n {
 			end = n
 		}
@@ -8090,7 +7974,7 @@ func byteslice(vm *VM, self *object.String, args []object.Value) object.Value {
 		if start < 0 || start > n || length < 0 {
 			return object.NilV
 		}
-		end := start + int(length)
+		end := start + clampInt(length)
 		if end > n {
 			end = n
 		}
@@ -8209,9 +8093,9 @@ func (vm *VM) arraySpliceAssign(a *object.Array, start, length int, value object
 // the upper bound; callers range-check).
 func normIndex(i int64, n int) int {
 	if i < 0 {
-		return int(i) + n
+		return clampInt(i) + n
 	}
-	return int(i)
+	return clampInt(i)
 }
 
 // affixString coerces a String#delete_prefix/#delete_suffix argument to a
@@ -8646,7 +8530,7 @@ func (vm *VM) stringAssignRegexp(s *object.String, re *Regexp, groupArgs []objec
 	vm.lastMatch = m
 	gi := 0
 	if len(groupArgs) > 0 {
-		gi = int(vm.repeatLong(groupArgs[0]))
+		gi = clampInt(vm.repeatLong(groupArgs[0]))
 		ng := md.NGroups()
 		if gi < 0 {
 			gi += ng + 1
@@ -8688,7 +8572,7 @@ func (vm *VM) stringAssignSpan(args []object.Value, n int) (start, length int) {
 	if len(args) == 3 {
 		idx := vm.repeatLong(args[0]) // #to_int is invoked exactly once
 		start = normIndex(idx, n)
-		length = int(vm.repeatLong(args[1]))
+		length = clampInt(vm.repeatLong(args[1]))
 		if start < 0 || start > n {
 			raise("IndexError", "index %d out of string", idx)
 		}
@@ -8779,7 +8663,7 @@ func (vm *VM) stringSliceBangRegexp(s *object.String, re *Regexp, rest []object.
 	if len(rest) > 0 {
 		// The capture index converts via #to_int; a negative index counts back
 		// from the last group; an out-of-range index yields nil (not IndexError).
-		gi = int(vm.repeatLong(rest[0]))
+		gi = clampInt(vm.repeatLong(rest[0]))
 		ng := md.NGroups()
 		if gi < 0 {
 			gi += ng + 1
@@ -8821,7 +8705,7 @@ func (vm *VM) stringSliceBangSubstr(s *object.String, sub string) object.Value {
 func (vm *VM) sliceSpan(args []object.Value, n int) (start, length int, ok bool) {
 	if len(args) == 2 {
 		start = normIndex(vm.repeatLong(args[0]), n)
-		length = int(vm.repeatLong(args[1]))
+		length = clampInt(vm.repeatLong(args[1]))
 		if start < 0 || start > n || length < 0 {
 			return 0, 0, false
 		}
@@ -9129,7 +9013,7 @@ func (vm *VM) spaceship(a, b object.Value) int {
 	if !ok {
 		raise("ArgumentError", "comparison of %s with %s failed", vm.classOf(a).name, vm.classOf(b).name)
 	}
-	return int(n)
+	return clampInt(n)
 }
 
 // sortSlice stably sorts out in place: by <=> when blk is nil, otherwise using
@@ -9168,7 +9052,7 @@ func (vm *VM) blockCmpToZero(r object.Value) int {
 	if !ok {
 		raise("ArgumentError", "comparison of %s with 0 failed", vm.classOf(r).name)
 	}
-	return int(n)
+	return clampInt(n)
 }
 
 // arrayByExtreme implements min_by/max_by: the element whose block key is
@@ -9426,7 +9310,7 @@ func arrayFill(vm *VM, self object.Value, args []object.Value, blk *Proc) object
 	// start / length form. A nil (or absent) start is 0; a nil (or absent) length
 	// fills through to the current end.
 	if len(rest) >= 1 && !object.IsNil(rest[0]) {
-		beg = int(vm.toIntCoerce(rest[0]))
+		beg = clampInt(vm.toIntCoerce(rest[0]))
 		if beg < 0 {
 			if beg += alen; beg < 0 {
 				beg = 0
@@ -9435,7 +9319,11 @@ func arrayFill(vm *VM, self object.Value, args []object.Value, blk *Proc) object
 	}
 	if len(rest) >= 2 && !object.IsNil(rest[1]) {
 		length := vm.fillLength(rest[1])
-		end = beg + length
+		// beg + length can pass math.MaxInt and wrap negative (on a 32-bit target
+		// at 2**31), which would skip arrayFillRange's size check and fill
+		// nothing. Each term is first capped just past maxFillSize, which keeps
+		// the int64 sum exact enough: any end past maxFillSize is refused alike.
+		end = clampInt(min(int64(beg), maxFillSize+1) + min(int64(length), maxFillSize+1))
 	} else {
 		end = alen
 	}
@@ -9449,7 +9337,7 @@ func (vm *VM) fillLength(v object.Value) int {
 	if _, ok := v.(*object.Bignum); ok {
 		raise("RangeError", "array size too big")
 	}
-	return int(vm.toIntCoerce(v))
+	return clampInt(vm.toIntCoerce(v))
 }
 
 // fillRangeBounds turns a Range into the exclusive [beg, end) index interval for
@@ -9460,7 +9348,7 @@ func (vm *VM) fillRangeBounds(r *object.Range, alen int) (beg, end int) {
 	if object.IsNil(r.Lo) {
 		beg = 0
 	} else {
-		beg = int(vm.toIntCoerce(r.Lo))
+		beg = clampInt(vm.toIntCoerce(r.Lo))
 		if beg < 0 {
 			if beg += alen; beg < 0 {
 				raise("RangeError", "%s out of range", r.Inspect())
@@ -9470,7 +9358,7 @@ func (vm *VM) fillRangeBounds(r *object.Range, alen int) (beg, end int) {
 	if object.IsNil(r.Hi) {
 		return beg, alen
 	}
-	end = int(vm.toIntCoerce(r.Hi))
+	end = clampInt(vm.toIntCoerce(r.Hi))
 	if end < 0 {
 		end += alen
 	}
@@ -10900,7 +10788,7 @@ func (vm *VM) digRest(v object.Value, keys []object.Value) object.Value {
 // string (default " ") to a rune width. Extra padding for center goes right.
 func (vm *VM) padString(self *object.String, args []object.Value, side byte) (string, string) {
 	s := self.Str()
-	width := int(vm.repeatLong(args[0])) // #to_int coercion of the width
+	width := clampInt(vm.repeatLong(args[0])) // #to_int coercion of the width
 	pad := " "
 	enc := self.EncName()
 	if len(args) > 1 {
@@ -10932,6 +10820,7 @@ func (vm *VM) padString(self *object.String, args []object.Value, side byte) (st
 
 // makePad builds n runes from the (non-empty) pad string, repeating/truncating.
 func makePad(pad string, n int) string {
+	checkAlloc(int64(n), 4) // a []rune of n
 	runes := []rune(pad)
 	out := make([]rune, n)
 	for i := 0; i < n; i++ {
@@ -11609,9 +11498,15 @@ func (vm *VM) rangeStepByPlus(blk *Proc, r *object.Range, step object.Value) {
 
 func shiftInt(a *big.Int, n int64) object.Value {
 	if n >= 0 {
+		// The result needs n/8 bytes. Checking n/2 instead keeps n within a
+		// 32-bit uint wherever the check passes (hostAllocMax is 2**30 there),
+		// so uint(n) cannot wrap: 1 << 2**62 used to shift by 0 on 386.
+		checkAlloc(n/2, 1)
 		return object.NormInt(new(big.Int).Lsh(a, uint(n)))
 	}
-	return object.NormInt(new(big.Int).Rsh(a, uint(-n)))
+	// Past a's bit length every right shift gives the same 0 or -1, so the
+	// amount is capped there: uint(-n) would wrap on a 32-bit target.
+	return object.NormInt(new(big.Int).Rsh(a, uint(min(-n, int64(a.BitLen())+1))))
 }
 
 // integerShift implements Integer#<< (right=false) and Integer#>> (right=true).

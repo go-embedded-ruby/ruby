@@ -52,7 +52,7 @@ func (vm *VM) installPrime() {
 
 	// Prime.take(n) / Prime.first(n) — the first n primes as an Array.
 	takeFn := func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		n := int(intArg(args[0]))
+		n := clampInt(intArg(args[0]))
 		return primesToArray(prime.Take(n))
 	}
 	sm("take", takeFn)

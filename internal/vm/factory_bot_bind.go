@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+//go:build !rbgo_core
+
 package vm
 
 import (
@@ -214,7 +216,7 @@ func (vm *VM) factoryBotList(args []object.Value, create bool) object.Value {
 		raise("ArgumentError", "wrong number of arguments (given %d, expected 2..)", len(args))
 	}
 	name := nameArg(args[0])
-	n := int(fbInt(args[1]))
+	n := clampInt(fbInt(args[1]))
 	opts := factoryBotCallOpts(args[2:])
 	var (
 		list []any

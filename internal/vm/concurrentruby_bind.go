@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+//go:build !rbgo_core
+
 package vm
 
 import (
@@ -251,9 +253,9 @@ func (o *ConcurrentBarrier) Truthy() bool    { return true }
 func concurrentInt(v object.Value) int {
 	switch n := v.(type) {
 	case object.Integer:
-		return int(n)
+		return clampInt(n)
 	case *object.Bignum:
-		return int(n.I.Int64())
+		return clampInt(n.I.Int64())
 	}
 	raise("TypeError", "expected an Integer, got %s", v.Inspect())
 	panic("unreachable")

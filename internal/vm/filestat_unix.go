@@ -74,7 +74,7 @@ func statSys(fi fs.FileInfo) statFields {
 // rbgo defines, so the operation is passed through unchanged.
 var (
 	lockFdFn  = func(path string) (int, error) { return unix.Open(path, unix.O_RDONLY, 0) }
-	flockFn   = func(fd, op int) error { return unix.Flock(fd, op) }
+	flockFn   = func(fd, op int) error { return sysFlock(fd, op) }
 	closeFdFn = func(fd int) error { return unix.Close(fd) }
 )
 
