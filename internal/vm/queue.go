@@ -37,7 +37,8 @@ func (q *RQueue) Inspect() string { return q.ToS() }
 func (q *RQueue) Truthy() bool    { return true }
 
 func (vm *VM) registerQueue() {
-	cQueue := newClass("Queue", vm.cObject)
+	// Qualified name, bare constant: see registerMutex for why (#759 / #756).
+	cQueue := newClass("Thread::Queue", vm.cObject)
 	vm.consts["Queue"] = cQueue
 	vm.consts["Thread"].(*RClass).consts["Queue"] = cQueue
 	cQueue.smethods["new"] = &Method{name: "new", owner: cQueue, native: func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
@@ -120,7 +121,7 @@ func (vm *VM) registerQueue() {
 }
 
 func (vm *VM) registerSizedQueue(cQueue *RClass) {
-	cSized := newClass("SizedQueue", cQueue)
+	cSized := newClass("Thread::SizedQueue", cQueue)
 	vm.consts["SizedQueue"] = cSized
 	vm.consts["Thread"].(*RClass).consts["SizedQueue"] = cSized
 	cSized.smethods["new"] = &Method{name: "new", owner: cSized, native: func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
