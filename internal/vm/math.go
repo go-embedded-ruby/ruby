@@ -175,6 +175,50 @@ func (vm *VM) registerMath() {
 	unaryDom("atanh", math.Atanh, unit)
 	unaryDom("acosh", math.Acosh, func(x float64) bool { return x < 1 })
 
+	// unaryStrict installs a single-argument function that also CHECKS ITS
+	// ARITY, with an optional domain restriction.
+	//
+	// ⛔ The arity check is here and not in `unary` above, and that asymmetry is
+	// deliberate. Measured 2026-10-31: rbgo answers `Math.cbrt(9, 3)` with
+	// 2.080083823051904, where MRI raises ArgumentError "wrong number of
+	// arguments (given 2, expected 1)" — the extra argument is silently
+	// dropped, for every function `unary` installs. That is a pre-existing
+	// divergence across the whole module, and it cannot be repaired by a
+	// blanket check here: `Math.log` legitimately takes one OR two arguments,
+	// `atan2`/`hypot`/`ldexp` take two, so each arity is its own fact and
+	// changing twenty of them at once moves what the gate measures. It is
+	// tracked separately.
+	//
+	// What must not happen is a NEW method inheriting the old leniency because
+	// its neighbours have it. core/math/log1p_spec.rb:27 asserts the
+	// ArgumentError outright, so the two functions below are strict and the
+	// older ones stay as they are until that divergence is measured on its own.
+	unaryStrict := func(name string, f func(float64) float64, bad func(float64) bool) {
+		install(name, func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+			if len(args) != 1 {
+				raise("ArgumentError", "wrong number of arguments (given %d, expected 1)", len(args))
+			}
+			x := mathFloat(vm, args[0])
+			if bad != nil && bad(x) {
+				mathDomainError(name)
+			}
+			return object.Float(f(x))
+		})
+	}
+
+	// log1p(x) is log(1+x) and expm1(x) is exp(x)-1, computed so that the result
+	// keeps its precision for |x| far below 1 — where `log(1 + 1e-16)` and
+	// `exp(1e-16) - 1` lose every significant digit to the leading 1 and return
+	// 0.0. core/math/log1p_spec.rb:10 and core/math/expm1_spec.rb:10 assert
+	// exactly that: the answer must be close to 1e-16 and must not be 0.0.
+	// Go's math.Log1p and math.Expm1 are the same primitives C gives MRI.
+	//
+	// The domain: log1p is real for x >= -1 (log1p(-1) is -Infinity, which is a
+	// value and not an error), so DomainError belongs to x < -1 — which is what
+	// the spec exercises with -1-1e-15. expm1 has no domain restriction.
+	unaryStrict("log1p", math.Log1p, func(x float64) bool { return x < -1 })
+	unaryStrict("expm1", math.Expm1, nil)
+
 	// logFamily installs a base-2/e/10 logarithm: it raises DomainError - name for
 	// a negative argument and combines the mantissa/exponent split from mathLogArg
 	// so a huge Bignum keeps full precision instead of overflowing to Infinity.
