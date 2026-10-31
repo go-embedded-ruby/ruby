@@ -751,7 +751,7 @@ Otherwise:
 
 | | how it differs from MRI 4.0.5 |
 | --- | --- |
-| `RUBY_VERSION` | rbgo reports `"3.4.1"`; the differential oracle it is developed against is MRI 4.0.5 |
+| `RUBY_VERSION` | rbgo reports `"3.4.1"`; the differential oracle it is developed against is MRI 4.0.5, and the latest MRI release is 4.0.9 (2026-10-23). The Ruby 4.0 **`Ruby` namespace** *is* implemented — all nine of `Ruby::{VERSION,RELEASE_DATE,PLATFORM,PATCHLEVEL,REVISION,COPYRIGHT,ENGINE,ENGINE_VERSION,DESCRIPTION}` are the **same objects** as their `RUBY_`-prefixed globals, as `version.c` defines them, so `Ruby::VERSION.equal?(RUBY_VERSION)` is `true`. The conformance shim resolves `ruby_version_is` at the reported `3.4.1`, so the ten examples asserting that in `core/builtin_constants` are **not counted by the gate**: measured here, that file yields 17 at 3.4.1 and 27 at 4.0.9 ([#799](https://github.com/go-embedded-ruby/ruby/issues/799)) |
 | `Numeric#to_int` | not defined — `Complex(2.9, 0).to_int` raises `NoMethodError`; MRI returns `2` |
 | `File::Stat#==` | `a == b` is `false` for two stats of the same file (MRI: `true`); `a.==(b)` answers `true` |
 | `File#stat` on a file unlinked while open | raises `Errno::ENOENT`; MRI answers from the open descriptor. rbgo's streams are buffered by path and hold no descriptor |
