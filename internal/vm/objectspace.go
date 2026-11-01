@@ -205,10 +205,29 @@ func (vm *VM) registerObjectSpace() {
 	// #object_id: immediate ids decode arithmetically (fixnum 2n+1 -> n, and the
 	// fixed nil/true/false ids), and reference ids are resolved through the
 	// object_id memo. An id that maps to no live object raises RangeError, as MRI.
+	//
+	// Ruby 4.0 deprecates it. gc.c at v4.0.9, os_id2ref (gc.c:2167), opens with
+	//
+	//	rb_category_warn(RB_WARN_CATEGORY_DEPRECATED, "ObjectSpace._id2ref is deprecated");
+	//
+	// so the warning is category-gated and an ordinary run stays silent —
+	// Warning[:deprecated] is off by default. ruby/spec reaches it because the
+	// conformance shim turns the category on (spec_helper.rb:60), which is also
+	// why `core/objectspace/_id2ref_spec.rb` can assert it with a bare
+	// `complain(…)` and no `verbose: true`.
+	//
+	// ⛔ The warning comes AFTER the argument count is checked, and that order is
+	// upstream's rather than a choice: `rb_define_module_function(rb_mObjSpace,
+	// "_id2ref", os_id2ref, 1)` (gc.c:5560) declares a FIXED arity of 1, so
+	// rb_error_arity fires in the dispatcher and os_id2ref — with the warning in
+	// its first line — is never entered for a wrong count. Warning first would
+	// make `ObjectSpace._id2ref` with no argument complain and then raise, which
+	// MRI does not do.
 	def("_id2ref", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		if len(args) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
 		}
+		vm.warnDeprecated("ObjectSpace._id2ref is deprecated")
 		id := intArg(args[0])
 		if id&1 == 1 { // odd => fixnum id 2n+1
 			return object.IntValue(id >> 1)

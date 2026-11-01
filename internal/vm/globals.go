@@ -205,7 +205,7 @@ func (vm *VM) specialGvar(name string) (object.Value, bool) {
 	case "$-a", "$-l", "$-p":
 		return object.Bool(false), true
 	case "$=":
-		vm.warnDeprecatedGvar("variable $= is no longer effective")
+		vm.warnDeprecated("variable $= is no longer effective")
 		return object.Bool(false), true
 	}
 	// $~, $&, $`, $' and $N fall through so the match-data resolver in gvar
@@ -268,11 +268,17 @@ func (vm *VM) warningEnabled() bool {
 	return truthyValue(vm.verboseSlot("$VERBOSE"))
 }
 
-// warnDeprecatedGvar emits a special-variable deprecation warning through
-// Warning.warn, but only while Warning[:deprecated] is enabled — error.c v3_4_0
-// deprecation_warning_enabled() requires both a non-nil $VERBOSE and the
-// category, and the category is off by default, so an ordinary run is silent.
-func (vm *VM) warnDeprecatedGvar(msg string) {
+// warnDeprecated is error.c's rb_category_warn(RB_WARN_CATEGORY_DEPRECATED,
+// …): a deprecation warning through Warning.warn, emitted only while
+// Warning[:deprecated] is enabled — deprecation_warning_enabled() requires both
+// a non-nil $VERBOSE and the category, and the category is off by default, so
+// an ordinary run is silent.
+//
+// It was `warnDeprecatedGvar`, which named its first caller rather than what it
+// does; nothing in it is specific to a global variable. Renamed when
+// ObjectSpace._id2ref needed the same thing, rather than copied — a shadowing
+// copy is how a method ends up with two bodies and one of them dead.
+func (vm *VM) warnDeprecated(msg string) {
 	if !vm.warnEnabled() {
 		return
 	}
@@ -420,7 +426,7 @@ func (vm *VM) checkStrGvar(name string, v object.Value) object.Value {
 	if _, ok := v.(*object.String); !ok {
 		raise("TypeError", "value of %s must be String", name)
 	}
-	vm.warnDeprecatedGvar("non-nil '" + name + "' is deprecated")
+	vm.warnDeprecated("non-nil '" + name + "' is deprecated")
 	return v
 }
 
@@ -443,7 +449,7 @@ func (vm *VM) checkFieldSepGvar(name string, v object.Value) object.Value {
 		}
 		raise("TypeError", "value of %s must be String or Regexp", name)
 	}
-	vm.warnDeprecatedGvar("non-nil '" + name + "' is deprecated")
+	vm.warnDeprecated("non-nil '" + name + "' is deprecated")
 	return v
 }
 
