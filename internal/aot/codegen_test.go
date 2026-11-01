@@ -71,7 +71,16 @@ func TestCompileSupported(t *testing.T) {
 		{"getivar", "def m = @x\nm", "m", "getIvar(self,"},
 		{"setivar", "def m(a)\n  @x = a\nend\nm(1)", "m", "setIvar(self,"},
 		{"getconst", "def m = Foo\nm", "m", "vm.aotConst("},
-		{"setconst", "def m\n  X = 1\n  X\nend\nm", "m", "vm.consts["},
+		// ⛔ This case used to read `def m\n  X = 1\n  X\nend\nm`, which is NOT
+		// valid Ruby: MRI refuses a constant assignment inside a method body with
+		// "dynamic constant assignment", and so does this compiler now. The arm
+		// was being exercised through a source no Ruby program can contain.
+		//
+		// Where OpSetConst legally reaches a child ISeq is a BLOCK whose lexical
+		// chain does not cross a `def` — `[1].each { X = 1 }` at the top level is
+		// accepted by MRI — or a class/module body. methodISeq takes Children[0]
+		// whatever kind it is, so the block serves directly.
+		{"setconst", "[1].each { X = 1 }\nX", "block in <main>", "vm.consts["},
 		{"getgvar", "def m = $g\nm", "m", "vm.gvarGet("},
 		{"splat_concat", "def m(a, b) = [a, *[b, b]]\nm(1, 2)", "m", "aotConcat("},
 		{"splat", "def m(a, b) = [a, *[b, b]]\nm(1, 2)", "m", "aotSplat("},
