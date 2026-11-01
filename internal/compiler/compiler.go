@@ -52,6 +52,11 @@ type builder struct {
 	// non-block scopes, so isBlock alone cannot tell them apart — and that
 	// difference is exactly what the dynamic-constant refusal turns on.
 	isMethod bool
+	// writtenParams records that this block's parameter list was WRITTEN — `|x|`,
+	// `|&b|`, `|k: 1|`, or even an empty `||` or `()` — rather than synthesised by
+	// the parser from `it` / `_1`..`_9` in the body. It is what makes `_1` inside
+	// the block a SyntaxError instead of a method call; see compileCall.
+	writtenParams bool
 	// forScope marks the each-block a `for` loop is compiled into. It is a block
 	// iseq, but `for` opens no Ruby scope: a variable first assigned inside the
 	// body belongs to the scope AROUND the loop, so declarations hop out of it.
@@ -1343,6 +1348,27 @@ func (c *Compiler) compileCall(v *ast.Call) {
 		b.emit(bytecode.OpPushConst, b.addConst(object.IntValue(int64(b.curLine))), 0)
 		return
 	}
+	// ⛔ `_1`..`_9` inside a block that WROTE its parameter list is a SyntaxError,
+	// not a method call. MRI's lexer reserves the nine names for the
+	// numbered-parameter mechanism, so a block cannot have both: `proc { |x| _1 }`
+	// is rejected at parse time with "ordinary parameter is defined", and so are
+	// the empty-list forms `proc { || _1 }` and `-> () { _1 }` — writing `||` at
+	// all is what declares the list, not what it contains.
+	// language/numbered_parameters_spec.rb:49 pins all eight shapes.
+	//
+	// Reaching here means the name resolved to no local, so it was about to be
+	// compiled as a receiverless send and fail at RUNTIME with NameError — which
+	// is what rbgo did, and only for the shapes that were actually called:
+	// `proc { |x| _1 }` on its own raised nothing at all.
+	//
+	// A `for` body is excluded: forScope is the each-block `for` lowers into, and
+	// `for` opens no Ruby scope, so the numbered-parameter rules do not reach it.
+	// Confined to the bare, argumentless, receiverless, blockless name, matching
+	// the shape of the __LINE__ and block_given? intrinsics above.
+	if v.Recv == nil && v.Block == nil && len(callArgs) == 0 &&
+		isNumberedParamName(v.Name) && b.isBlock && b.writtenParams && !b.forScope {
+		c.fail("ordinary parameter is defined")
+	}
 	// block_given? is a frame intrinsic, not a real dispatch.
 	if v.Recv == nil && v.Block == nil && v.Name == "block_given?" && len(callArgs) == 0 {
 		b.emit(bytecode.OpBlockGiven, 0, 0)
@@ -2122,6 +2148,8 @@ func (c *Compiler) compileBlock(blk *ast.Block) int {
 		b.emit(bytecode.OpPop, 0, 0)
 		b.patch(skip, b.here())
 	}
+	// Recorded BEFORE the body is compiled, because the body is where `_1` is met.
+	b.writtenParams = !blockParamsAreImplicit(blk)
 	c.ctxs = append(c.ctxs, &loopCtx{kind: ctxBlock})
 	c.compileBody(blk.Body)
 	c.ctxs = c.ctxs[:len(c.ctxs)-1]
