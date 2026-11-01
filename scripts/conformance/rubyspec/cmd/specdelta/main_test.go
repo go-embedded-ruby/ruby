@@ -189,6 +189,53 @@ func TestReportsMovementAndRegression(t *testing.T) {
 	}
 }
 
+// The loudest movement prints first, whichever direction it points, because a
+// reader wants the biggest change and not the alphabetically first one. With a
+// single file the comparator is never called, so this needs two — and it is the
+// documented ordering, which is reason enough to pin it.
+func TestTheBiggestMovementIsReportedFirst(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake engines are POSIX shell scripts")
+	}
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "core", "w"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// `zz` moves by one and `aa` by five, so alphabetical order and movement
+	// order disagree — which is what makes the assertion mean anything.
+	for name, body := range map[string]string{
+		"aa_spec.rb": "#\n",
+		"zz_spec.rb": "#\n",
+	} {
+		if err := os.WriteFile(filepath.Join(root, "core", "w", name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// One engine scores by file name; the other adds 5 to aa and 1 to zz.
+	low := fakeEngine(t, root, "low", `case "$1" in
+  *aa_spec.rb) echo 'RBGO_RESULT pass=10 fail=0 error=0 skip=0' ;;
+  *)           echo 'RBGO_RESULT pass=10 fail=0 error=0 skip=0' ;;
+esac
+`)
+	high := fakeEngine(t, root, "high", `case "$1" in
+  *aa_spec.rb) echo 'RBGO_RESULT pass=15 fail=0 error=0 skip=0' ;;
+  *)           echo 'RBGO_RESULT pass=11 fail=0 error=0 skip=0' ;;
+esac
+`)
+	var out, errOut bytes.Buffer
+	if code := main1([]string{"-root", root, "-dir", "core/w", low, high}, &out, &errOut); code != 0 {
+		t.Fatalf("exit = %d, want 0; err %q", code, errOut.String())
+	}
+	iAA := strings.Index(out.String(), "aa_spec.rb")
+	iZZ := strings.Index(out.String(), "zz_spec.rb")
+	if iAA < 0 || iZZ < 0 {
+		t.Fatalf("both files must appear:\n%s", out.String())
+	}
+	if iAA > iZZ {
+		t.Errorf("+5 must print before +1:\n%s", out.String())
+	}
+}
+
 // A file that produces no RESULT line is named as such rather than counted as
 // zero — the distinction the ratchet's "FAILED TO LOAD" verdict exists for, and
 // the one that made an endless range look like a load failure in #853.
@@ -210,6 +257,79 @@ func TestAFileThatDidNotRunIsNamed(t *testing.T) {
 	main1([]string{"-root", root, "-dir", "core/y", ok, mute}, &out, &errOut)
 	if !strings.Contains(out.String(), "DID NOT RUN on the treatment") {
 		t.Errorf("a silent engine is not named:\n%s", out.String())
+	}
+}
+
+// ⛔ A single run per engine cannot tell a FLAKE from a difference. The first
+// real use of this tool reported `core/random/bytes_spec.rb` as -1 between two
+// binaries differing only in a version string; three runs of each gave control
+// 9, 9, 8 and treatment 8, 9, 9 — a coin flip, attributed to the change.
+//
+// So above `-repeat 1` an engine that disagrees with ITSELF marks the file
+// UNSTABLE, its delta is excluded from the verdict, and the exit status stops
+// depending on which way the coin landed.
+func TestAnUnstableFileIsExcludedFromTheVerdict(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake engines are POSIX shell scripts")
+	}
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "core", "z"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "core", "z", "c_spec.rb"), []byte("#\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stable := fakeEngine(t, root, "stable", "echo 'RBGO_RESULT pass=9 fail=0 error=0 skip=0'\n")
+	// Scores 8 the first time it is asked and 9 after: a flake, in the direction
+	// that looks like a regression on the first run.
+	flaky := fakeEngine(t, root, "flaky", `if [ -f "`+root+`/seen" ]; then
+  echo 'RBGO_RESULT pass=9 fail=0 error=0 skip=0'
+else
+  : > "`+root+`/seen"
+  echo 'RBGO_RESULT pass=8 fail=1 error=0 skip=0'
+  printf 'RBGO_DETAIL\tfail\tX\ta\tb\n'
+fi
+`)
+
+	// With one run the flake reads as a regression — which is the defect this
+	// flag exists for, asserted so the difference between the two modes is
+	// visible rather than claimed.
+	var out, errOut bytes.Buffer
+	if code := main1([]string{"-root", root, "-dir", "core/z", stable, flaky}, &out, &errOut); code != 1 {
+		t.Errorf("-repeat 1: exit = %d, want 1 (the flake reads as a regression); err %q", code, errOut.String())
+	}
+
+	// With three, the engine contradicts itself and the file is set aside.
+	if err := os.Remove(filepath.Join(root, "seen")); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := main1([]string{"-root", root, "-dir", "core/z", "-repeat", "3", stable, flaky}, &out, &errOut); code != 0 {
+		t.Errorf("-repeat 3: exit = %d, want 0 (unstable, excluded); out %q", code, out.String())
+	}
+	if !strings.Contains(out.String(), "UNSTABLE") {
+		t.Errorf("the unstable file is not named:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "0 regressed") {
+		t.Errorf("an excluded delta still counted as a regression:\n%s", out.String())
+	}
+
+	// A stable engine must NOT be called unstable, or every file would be.
+	out.Reset()
+	errOut.Reset()
+	if code := main1([]string{"-root", root, "-dir", "core/z", "-repeat", "3", stable, stable}, &out, &errOut); code != 0 {
+		t.Errorf("stable pair: exit = %d, want 0; out %q", code, out.String())
+	}
+	if strings.Contains(out.String(), "UNSTABLE") {
+		t.Errorf("a stable engine was called unstable:\n%s", out.String())
+	}
+
+	// And -repeat below 1 is a usage refusal, not a silent no-op.
+	out.Reset()
+	errOut.Reset()
+	if code := main1([]string{"-root", root, "-dir", "core/z", "-repeat", "0", stable, stable}, &out, &errOut); code != 2 {
+		t.Errorf("-repeat 0: exit = %d, want 2; err %q", code, errOut.String())
 	}
 }
 

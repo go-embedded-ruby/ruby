@@ -91,6 +91,13 @@ func main1(args []string, out, errOut io.Writer) int {
 	dir := fs.String("dir", "", "a directory under -root to walk (recursively), e.g. core/set")
 	timeout := fs.Duration("timeout", 60*time.Second, "per-file limit for one engine")
 	quiet := fs.Bool("quiet", false, "print only the files that moved")
+	// ⛔ One run per engine cannot tell a FLAKE from a difference, and the first
+	// real use of this tool reported `core/random/bytes_spec.rb` as -1 between two
+	// binaries that differ only in a version string. Three runs of each: control
+	// 9, 9, 8 and treatment 8, 9, 9 — a coin flip, attributed to the change.
+	// With -repeat above 1 a file whose own engine disagrees with itself is named
+	// UNSTABLE and kept out of the regression verdict.
+	repeat := fs.Int("repeat", 1, "run each file this many times per engine; above 1, detect flaky files")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -115,21 +122,33 @@ func main1(args []string, out, errOut io.Writer) int {
 		return 2
 	}
 
+	if *repeat < 1 {
+		fmt.Fprintln(errOut, "specdelta: -repeat must be at least 1")
+		return 2
+	}
 	type row struct {
-		file string
-		a, b result
+		file     string
+		a, b     result // the LOWEST pass count seen, so a verdict is never built on a lucky run
+		unstable bool   // an engine disagreed with itself across repeats
 	}
 	rows := make([]row, 0, len(files))
 	refused := false
 	for _, f := range files {
 		r := row{file: f}
-		var errA, errB error
-		r.a, errA = run(engines[0], *root, f, *timeout)
-		r.b, errB = run(engines[1], *root, f, *timeout)
-		for i, e := range []error{errA, errB} {
-			if e != nil {
-				fmt.Fprintf(errOut, "specdelta: %s on %s: %v\n", engines[i], f, e)
+		for i, engine := range engines {
+			lowest, varied, err := runRepeatedly(engine, *root, f, *timeout, *repeat)
+			if err != nil {
+				fmt.Fprintf(errOut, "specdelta: %s on %s: %v\n", engines[i], f, err)
 				refused = true
+				continue
+			}
+			if varied {
+				r.unstable = true
+			}
+			if i == 0 {
+				r.a = lowest
+			} else {
+				r.b = lowest
 			}
 		}
 		rows = append(rows, r)
@@ -156,7 +175,9 @@ func main1(args []string, out, errOut io.Writer) int {
 		if d != 0 {
 			moved++
 		}
-		if d < 0 {
+		// ⛔ An unstable file is kept OUT of the verdict: its delta is noise, and
+		// counting it would make the exit status depend on a coin flip.
+		if d < 0 && !r.unstable {
 			regressed++
 		}
 		totalA += r.a.pass
@@ -171,6 +192,9 @@ func main1(args []string, out, errOut io.Writer) int {
 			note = "  DID NOT RUN on the treatment"
 		case r.a.killed || r.b.killed:
 			note = "  KILLED on timeout"
+		}
+		if r.unstable {
+			note += "  ⛔ UNSTABLE: an engine disagreed with itself, delta excluded"
 		}
 		if r.a.tallyDisagrees() || r.b.tallyDisagrees() {
 			note += "  ⛔ fewer detail lines than its own fail+error tally"
@@ -233,6 +257,34 @@ func specFiles(root, dir string) ([]string, error) {
 	}
 	sort.Strings(out)
 	return out, nil
+}
+
+// runRepeatedly runs one file under one engine `times` over, and returns the
+// LOWEST-scoring result plus whether the engine disagreed with itself.
+//
+// The lowest rather than the mean or the last, because the question a reader
+// asks of this table is "did anything get worse", and the answer must not rest
+// on a lucky run. With times == 1 `varied` is always false, which is why the
+// regression verdict is only trustworthy above 1 — said in the flag's help.
+func runRepeatedly(engine, root, file string, timeout time.Duration, times int) (result, bool, error) {
+	var lowest result
+	varied := false
+	for i := 0; i < times; i++ {
+		r, err := run(engine, root, file, timeout)
+		if err != nil {
+			return lowest, false, err
+		}
+		switch {
+		case i == 0:
+			lowest = r
+		case r.pass != lowest.pass || r.ran != lowest.ran:
+			varied = true
+			if r.pass < lowest.pass {
+				lowest = r
+			}
+		}
+	}
+	return lowest, varied, nil
 }
 
 // run executes one spec file under one engine, from the corpus root so the
