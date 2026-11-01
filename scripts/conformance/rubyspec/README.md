@@ -80,7 +80,63 @@ and be recorded as not loading, which bakes the load into the gate. The CI job
 (`.github/workflows/rubyspec-ratchet.yml`) enforces the baseline on every push
 and pull request, and raises `TIMEOUT` to 60s for exactly this reason.
 
+## `cmd/phantom` — is a pass the behaviour, or the method's absence?
+
+A spec that asserts an exception class cannot tell why it got one.
+`core/array/rfind_spec.rb` has
+
+```ruby
+it "raises a NoMethodError if the ifnone argument does not respond to #call …" do
+  -> { [1, 2, 3].rfind(42) { |x| false } }.should.raise(NoMethodError)
+end
+```
+
+which means *"42 is not callable"*. On a build where `Array#rfind` does not exist,
+`[1,2,3].rfind(42)` raises NoMethodError for **that** reason and the example
+passes — a pass for a method the interpreter does not have.
+
+`cmd/phantom` names those. For every `describe "X#y"` or `describe "X.y"` holding
+a NoMethodError expectation it asks a real rbgo whether the method exists at all
+(`method_defined?`/`private_method_defined?`, or `respond_to?` for the `.` form —
+no instance is constructed), and reports the ones that do not.
+
+```bash
+go run ./scripts/conformance/rubyspec/cmd/phantom -root /tmp/rubyspec-corpus -rbgo /tmp/rbgo-rubyspec
+```
+
+Measured on `main` after #849: **59 attributable expectations over 2206 spec
+files, 0 candidates** — so **no pass anywhere in the corpus is bought by a
+missing method**, and any future non-zero is the signal.
+
+It was 1 before #849 (`Array#rfind`), and that one is instructive: the example
+read *"raises a NoMethodError if the ifnone argument does not respond to
+#call"*, and on a build without `rfind` it passed because `rfind` itself was
+undefined. `BASELINE` recorded that file as `0`, so the counted total never held
+it — the pass only appeared with the shim at 4.0, which is where this tool will
+matter when the version moves.
+
+The 2206 is the same population `BASELINE` sums, which is the check that this
+tool and the gate are looking at the same corpus.
+
+It withdraws any describe block that **also asserts the absence**, because such
+an example is asserting exactly what it got: `core/complex/negative_spec.rb`
+("Complex#negative? is undefined") is conformance, not a phantom, and MRI really
+does not define it. 23 of the 82 attributable expectations are of that kind.
+
+Its limits are printed on every run rather than left in a comment: it reads the
+describe string, skips operator methods, and stops attribution at a sibling
+`describe` judged by indentation — so it can MISS a candidate but will not invent
+one, and its count is a lower bound. Like `cmd/ratchet` it refuses rather than
+guesses: exit 2 if the corpus cannot be read, if the interpreter cannot be run,
+or if its own control fails (a method that certainly exists must come back
+present, and one that cannot exist must come back absent).
 ## Which examples the version string selects — `cmd/guards`
+
+`cmd/guards` and `cmd/phantom` answer different questions about the same
+number and neither replaces the other: guards says **which examples the
+version string lets into the population**, phantom says **whether a pass in
+that population is behaviour or an absence**. Both are analysis tools rather
+than gates, and both print their own control first.
 
 `spec_helper.rb` sets `CUR_VERSION`, and the corpus guards whole blocks and
 individual values on it. Moving that string moves the population **in both
@@ -116,3 +172,7 @@ The shim is not full MSpec: a few matchers (`complain`, `output`,
 examples count as skipped rather than passing. The measured totals are therefore
 a conservative lower bound on rbgo's true conformance — which is exactly what a
 ratchet should be.
+
+`cmd/phantom` is the other half of that honesty: the stubbed matchers make the
+total too LOW, and a pass bought by an absence would make it too high. Neither is
+visible in the number itself.
