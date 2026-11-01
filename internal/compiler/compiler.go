@@ -3361,13 +3361,19 @@ func isNumberedParamName(name string) bool {
 // `for` bodies are followed like any other block (forScope is a block scope),
 // which matches upstream: `for` opens no Ruby scope, so an assignment in a
 // `for` inside a method is in the method.
+// ⛔ The walk ALWAYS terminates on a non-block scope, so the exit it takes is
+// the `break`: every builder chain is rooted at `<main>`, `<class:…>`,
+// `<module:…>`, `<singleton class>` or `<binding>`, none of which is a block.
+// Written with a bare `return false` after the loop instead, that return was
+// unreachable — the coverage ratchet caught it at 83.3% and naming it here is
+// cheaper than the next person rediscovering why it cannot be tested.
 func (c *Compiler) inDefBody() bool {
 	for b := c.cur(); b != nil; b = b.parent {
 		if b.isMethod {
 			return true
 		}
 		if !b.isBlock {
-			return false // a class body, a module body, or the top level
+			break // a class body, a module body, or the top level
 		}
 	}
 	return false
