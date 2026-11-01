@@ -48,6 +48,10 @@ type builder struct {
 	children    []*bytecode.ISeq
 	parent      *builder
 	isBlock     bool
+	// isMethod marks a `def` body. A method body and a class body are both
+	// non-block scopes, so isBlock alone cannot tell them apart — and that
+	// difference is exactly what the dynamic-constant refusal turns on.
+	isMethod bool
 	// forScope marks the each-block a `for` loop is compiled into. It is a block
 	// iseq, but `for` opens no Ruby scope: a variable first assigned inside the
 	// body belongs to the scope AROUND the loop, so declarations hop out of it.
@@ -927,9 +931,11 @@ func (c *Compiler) compileNode1(n ast.Node) {
 		c.compileNode(v.Recv)
 		b.emit(bytecode.OpGetScopedConst, b.addName(v.Name), 0)
 	case *ast.ConstAssign:
+		c.refuseDynamicConstAssign()
 		c.compileNode(v.Value)
 		b.emit(bytecode.OpSetConst, b.addName(v.Name), 0)
 	case *ast.ScopedConstAssign:
+		c.refuseDynamicConstAssign()
 		if sc, be, ok := scopedConstOpAssign(v); ok {
 			c.compileScopedConstOpAssign(sc, be)
 			break
@@ -3224,8 +3230,10 @@ func (c *Compiler) storeMultiTarget(target ast.Node) {
 	case *ast.VarRef:
 		c.storeLocal(t.Name)
 	case *ast.ConstRef:
+		c.refuseDynamicConstAssign()
 		b.emit(bytecode.OpSetConst, b.addName(t.Name), 0)
 	case *ast.ScopedConst:
+		c.refuseDynamicConstAssign()
 		// Foo::BAR = value. SetScopedConst pops [recv, value]; the receiver must
 		// sit under the value already on top, so stash and reload around it.
 		tmp := b.localSlot("")
@@ -3332,6 +3340,52 @@ func (c *Compiler) bindLocal(name string) (slot, depth int) {
 // else — `_0` and `_10` are ordinary identifiers, and so is `@_1`.
 func isNumberedParamName(name string) bool {
 	return len(name) == 2 && name[0] == '_' && name[1] >= '1' && name[1] <= '9'
+}
+
+// inDefBody reports whether the scope being compiled sits inside a `def` body,
+// and it is MRI's own boundary for the dynamic-constant refusal rather than a
+// convenient approximation of it.
+//
+// The walk passes THROUGH block scopes, so a constant assigned in a block, a
+// lambda, or a `Class.new { … }` inside a method is still inside that method —
+// `def d; Class.new { X = 1 }; end` is refused upstream. It STOPS at a class or
+// module body and at the top level, which is why `class C; define_method(:m) {
+// X = 1 }; end` is NOT refused even though the block will run as a method body.
+//
+// ⛔ Those two were measured, not reasoned about, and they are the pair that
+// shows the rule is purely syntactic: it is about an enclosing `def` KEYWORD,
+// not about whether the code will execute as a method. Reasoning from "will
+// this run as a method?" gets the Class.new row and the define_method row both
+// backwards.
+//
+// `for` bodies are followed like any other block (forScope is a block scope),
+// which matches upstream: `for` opens no Ruby scope, so an assignment in a
+// `for` inside a method is in the method.
+func (c *Compiler) inDefBody() bool {
+	for b := c.cur(); b != nil; b = b.parent {
+		if b.isMethod {
+			return true
+		}
+		if !b.isBlock {
+			return false // a class body, a module body, or the top level
+		}
+	}
+	return false
+}
+
+// refuseDynamicConstAssign is MRI's "dynamic constant assignment": a constant
+// cannot be assigned where the assignment would run more than once with a
+// different meaning, which upstream decides lexically — anywhere inside a `def`.
+// It is a SyntaxError, raised before the value is compiled, because upstream
+// raises it before the program runs at all.
+//
+// It covers the plain form, the scoped form (`C::X = 1` is refused inside a
+// `def` TOO — being explicit about the namespace does not buy it), the
+// op-assign forms, and a constant used as a multiple-assignment target.
+func (c *Compiler) refuseDynamicConstAssign() {
+	if c.inDefBody() {
+		c.fail("dynamic constant assignment")
+	}
 }
 
 func (c *Compiler) storeLocal(name string) {
@@ -3731,6 +3785,7 @@ func (c *Compiler) compileMethodDef(v *ast.MethodDef) {
 	}
 	c.push(newBuilder(v.Name, params))
 	b := c.cur()
+	b.isMethod = true
 	b.splatIndex = splatIndex
 	// Keyword params get local slots right after the positionals, so the body
 	// resolves them by name; record their names/required flags for the VM.
