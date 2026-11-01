@@ -112,6 +112,52 @@ func TestRecursiveStructureInspect(t *testing.T) {
 	}
 }
 
+// ⛔ `(1..).to_set` DID NOT CRASH — IT NEVER CAME BACK, which is worse.
+//
+// Measured on main: `rbgo -e '(1..).to_set'` had to be killed (`timeout 6` →
+// exit 124). Enumerable#to_set enumerated the endless range forever, allocating
+// as it went. One expression from any untrusted Ruby an embedding host
+// evaluates, and the host is gone — and unlike a stack overflow there is
+// nothing to recover from, because nothing faults.
+//
+// Every other member of the family was already guarded (`to_a`, `last`, `max`,
+// `size`), which is how this one hid: `Range#to_set` is new in Ruby 4.0, so
+// there was no 3.4-era guard to copy, and its spec sits behind a
+// `ruby_version_is "4.0"` block the gate cannot reach at 3.4.1. The sweep
+// recorded `core/range/to_set_spec.rb` as "failed to load" — it had not failed,
+// the per-file TIMEOUT had killed it.
+//
+// The message is MRI's, character for character (range.c at v4.0.9,
+// `range_to_set`), and core/range/to_set_spec.rb:22 asserts it.
+//
+// There is no timeout in this test and there does not need to be one: if the
+// guard goes away, `go test` hangs here instead of failing, which is itself the
+// signal — and the four rows below it are what keep the guard from being
+// "fixed" into refusing a bounded range.
+func TestEndlessRangeToSetRaisesInsteadOfHanging(t *testing.T) {
+	cases := []struct{ src, want string }{
+		{`begin; (1..).to_set; rescue => e; puts "#{e.class}: #{e.message}"; end`,
+			"RangeError: cannot convert endless range to a set\n"},
+		{`begin; (1...).to_set; rescue => e; puts "#{e.class}: #{e.message}"; end`,
+			"RangeError: cannot convert endless range to a set\n"},
+
+		// Bounded ranges are untouched, with and without a block.
+		{`p (1..4).to_set`, "Set[1, 2, 3, 4]\n"},
+		{`p (1...4).to_set`, "Set[1, 2, 3]\n"},
+		{`p (1..3).to_set { |x| x * x }`, "Set[1, 4, 9]\n"},
+
+		// A beginless range still fails the way it did, from the iteration
+		// rather than from this guard: the check is on `end`, not on either end.
+		{`begin; (..0).to_set; rescue => e; puts "#{e.class}: #{e.message}"; end`,
+			"TypeError: can't iterate from NilClass\n"},
+	}
+	for _, c := range cases {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q\n got=%q\nwant=%q", c.src, got, c.want)
+		}
+	}
+}
+
 // ⛔ THE FIVE TYPES THE TEST ABOVE DID NOT COVER, each of which killed the
 // process.
 //

@@ -1107,6 +1107,44 @@ end
 class Range
   include Enumerable
 
+  # ⛔ to_set REFUSES AN ENDLESS RANGE, because otherwise it hangs.
+  #
+  # `(1..).to_set` enumerated forever through Enumerable#to_set, allocating as
+  # it went: measured on main, `rbgo -e '(1..).to_set'` had to be killed
+  # (`timeout 6` → exit 124). One expression, from any untrusted Ruby an
+  # embedding host evaluates, and the host never comes back — the same threat
+  # model as the repr recursion fixed in #852, and worse, because there is no
+  # stack to overflow and so nothing to recover from.
+  #
+  # Every OTHER member of this family was already guarded, which is how this one
+  # hid: `(1..).to_a` raises "cannot convert endless range to an array",
+  # `(1..).last` and `(1..).max` each raise, `(1..).size` answers Infinity.
+  # `Range#to_set` is **new in Ruby 4.0**, so there was no 3.4-era guard to copy
+  # — and its spec sits behind a `ruby_version_is "4.0"` block, so the gate
+  # cannot see it while the shim resolves at 3.4.1 (#799). The sweep recorded the
+  # file as "failed to load"; it had not failed, it had been killed by the
+  # per-file TIMEOUT.
+  #
+  # MRI's own, range.c at v4.0.9:
+  #
+  #   static VALUE
+  #   range_to_set(int argc, VALUE *argv, VALUE range)
+  #   {
+  #       if (NIL_P(RANGE_END(range))) {
+  #           rb_raise(rb_eRangeError, "cannot convert endless range to a set");
+  #       }
+  #       return rb_call_super(argc, argv);
+  #   }
+  #
+  # The message is asserted character for character by
+  # core/range/to_set_spec.rb:22. Unconditional rather than version-gated: no
+  # spec asserts the old behaviour — nothing can assert a hang — so the only
+  # thing a version gate would preserve is the way to wedge the interpreter.
+  def to_set(klass = Set, *args, &block)
+    raise RangeError, "cannot convert endless range to a set" if self.end.nil?
+    super
+  end
+
   # Range#== is true when other is a Range (or subclass) with == begin, == end
   # and the same exclude_end? flag, dispatching #== on the endpoints so that
   # custom Comparable endpoints and Range subclasses compare by value (MRI's
