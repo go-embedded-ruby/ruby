@@ -1532,9 +1532,27 @@ func (vm *VM) strRindexRegexp(re *Regexp, subject, enc string, limit int) object
 
 // gvar reads a global variable. The match-data specials derive from $~ (the
 // last match); any other name reads as nil (uninitialised global).
+//
+// This is the INTERNAL accessor, the one that never warns. The Ruby-level read
+// is gvarGet, and the difference is explained there.
 func (vm *VM) gvar(name string) object.Value {
+	v, _ := vm.gvarResolve(name)
+	return v
+}
+
+// gvarResolve is gvar plus the one thing a caller cannot otherwise recover: a
+// flag saying the name fell through to the ordinary-user-global branch and
+// nothing had ever been assigned to it. Only that branch is "uninitialised";
+// `$&` without a match and `$1` outside a match resolve to nil through getters
+// MRI defines, so they are not.
+//
+// It exists because the warning needs to know WHICH branch answered, and
+// re-deriving that from outside would mean a second pass over specialGvar — a
+// second name table to keep in step, and a second firing of the `$=`
+// deprecation warning, which specialGvar emits as a side effect.
+func (vm *VM) gvarResolve(name string) (object.Value, bool) {
 	if v, handled := vm.specialGvar(name); handled {
-		return v
+		return v, false
 	}
 	// English match-data aliases ($MATCH -> $&, …) rewrite to the cryptic form so
 	// the match-data resolution below applies (specialGvar reported them
@@ -1547,21 +1565,21 @@ func (vm *VM) gvar(name string) object.Value {
 		last = object.NilV
 	}
 	if name == "$~" {
-		return last
+		return last, false
 	}
 	md, ok := last.(*MatchData)
 	switch name {
 	case "$&":
 		if ok {
-			return md.mdString(md.md.Str(0))
+			return md.mdString(md.md.Str(0)), false
 		}
 	case "$`":
 		if ok {
-			return md.mdString(md.md.Pre())
+			return md.mdString(md.md.Pre()), false
 		}
 	case "$'":
 		if ok {
-			return md.mdString(md.md.Post())
+			return md.mdString(md.md.Post()), false
 		}
 	case "$+":
 		// The last capture group that participated (highest-numbered match), or
@@ -1569,23 +1587,24 @@ func (vm *VM) gvar(name string) object.Value {
 		if ok {
 			for i := md.md.NGroups(); i >= 1; i-- {
 				if md.md.Begin(i) >= 0 {
-					return md.mdString(md.md.Str(i))
+					return md.mdString(md.md.Str(i)), false
 				}
 			}
 		}
 	default:
 		if n, isGroup := gvarGroup(name); isGroup {
 			if ok && n <= md.md.NGroups() {
-				return groupValue(md, n)
+				return groupValue(md, n), false
 			}
-			return object.NilV
+			return object.NilV, false
 		}
 		// Any other name is an ordinary user global: nil until assigned.
 		if v, set := vm.globals[name]; set {
-			return v
+			return v, false
 		}
+		return object.NilV, true
 	}
-	return object.NilV
+	return object.NilV, false
 }
 
 // gvarGroup parses "$N" (N a positive integer) into its group number.

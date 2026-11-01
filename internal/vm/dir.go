@@ -591,12 +591,11 @@ func cwdStillNamed(wd string) error {
 // not the Errno::ENOENT this used to raise for every failure. Both the class and
 // the "chdir_path" label were witnessed against MRI 4.0.5.
 func raiseChdirErr(err error, path string) {
-	var eno syscall.Errno
-	if errors.As(err, &eno) {
-		if name, ok := errnoClasses[int64(eno)]; ok {
-			raise("Errno::"+name, "%s @ chdir_path - %s", errnoStrerror(int64(eno)), path)
+	if eno, ok := errnoOfError(err); ok {
+		if name, ok := errnoClasses[eno]; ok {
+			raise("Errno::"+name, "%s @ chdir_path - %s", errnoStrerror(eno), path)
 		}
-		raise("SystemCallError", "%s @ chdir_path - %s", errnoStrerror(int64(eno)), path)
+		raise("SystemCallError", "%s @ chdir_path - %s", errnoStrerror(eno), path)
 	}
 	raise("Errno::ENOENT", "No such file or directory @ chdir_path - %s", path)
 }
@@ -670,7 +669,7 @@ func raiseRmdirErr(err error, path string) {
 	switch {
 	case os.IsPermission(err):
 		raise("Errno::EACCES", "Permission denied @ dir_s_rmdir - %s", path)
-	case errors.Is(err, syscall.ENOTEMPTY):
+	case errIsErrno(err, "ENOTEMPTY"):
 		raise("Errno::ENOTEMPTY", "Directory not empty @ dir_s_rmdir - %s", path)
 	default:
 		raise("Errno::ENOENT", "No such file or directory @ dir_s_rmdir - %s", path)

@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-//go:build !wasm && !rbgo_core && !aix && !(freebsd && (386 || arm))
+//go:build !wasm && !plan9 && !rbgo_core && !aix && !(freebsd && (386 || arm))
 
 package vm
 

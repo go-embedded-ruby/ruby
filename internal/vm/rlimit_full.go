@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-//go:build !windows && !wasm && !openbsd && !aix && !solaris
+//go:build !windows && !wasm && !openbsd && !aix && !solaris && !plan9
 
 package vm
 

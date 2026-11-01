@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
@@ -393,12 +392,11 @@ func (w *realpathWalk) walk(names []string, fallback string, last bool) *realpat
 // (ENOTDIR on a path that walks through a regular file, EACCES on an unreadable
 // directory), falling back to the generic SystemCallError for anything else.
 func realpathSyscallErr(err error, testpath string) *realpathErr {
-	var eno syscall.Errno
-	if errors.As(err, &eno) {
-		if name, ok := errnoClasses[int64(eno)]; ok {
-			return &realpathErr{"Errno::" + name, errnoStrerror(int64(eno)), testpath}
+	if eno, ok := errnoOfError(err); ok {
+		if name, ok := errnoClasses[eno]; ok {
+			return &realpathErr{"Errno::" + name, errnoStrerror(eno), testpath}
 		}
-		return &realpathErr{"SystemCallError", errnoStrerror(int64(eno)), testpath}
+		return &realpathErr{"SystemCallError", errnoStrerror(eno), testpath}
 	}
 	return &realpathErr{"Errno::ENOENT", "No such file or directory", testpath}
 }

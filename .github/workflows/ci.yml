@@ -137,9 +137,9 @@ jobs:
   # embed rbgo on, and nothing else here would notice (the lanes above run six
   # of them). go vet type-checks every package with its tests for the target.
   # android and ios link only through cgo, so there the library packages are
-  # built (no link) instead. plan9 is excluded: its syscall package has no
-  # errno numbers and no POSIX process or file-lock calls, which rbgo's IO,
-  # Errno and Process layers are written against (see README "Platforms").
+  # built (no link) instead. plan9 is vetted like the rest (386, amd64, arm), but
+  # nothing RUNS there: no CI lane has a Plan 9 kernel, so its tests only
+  # compile (see README "Platforms" for what works there).
   every-target:
     name: compile on every target (${{ matrix.goos }})
     runs-on: ubuntu-latest
@@ -148,7 +148,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        goos: [aix, android, darwin, dragonfly, freebsd, illumos, ios, js, linux, netbsd, openbsd, solaris, wasip1, windows]
+        goos: [aix, android, darwin, dragonfly, freebsd, illumos, ios, js, linux, netbsd, openbsd, plan9, solaris, wasip1, windows]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
