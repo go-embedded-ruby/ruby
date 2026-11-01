@@ -13,17 +13,32 @@ import (
 // registerVersionConstants installs the RUBY_* version/platform constants. The
 // engine is reported as "ruby" (MRI) so app code that branches on RUBY_ENGINE —
 // Puppet, Rails and most gems guard MRI-only paths with `RUBY_ENGINE == "ruby"`
-// — takes the standard CRuby path. The version targets the project's Ruby 3.4
-// compatibility goal, a real version string so guards like
+// — takes the standard CRuby path. The version names the MRI release this
+// runtime targets, a real version string so guards like
 // `if RUBY_VERSION >= "3.0"` pass.
 // rubyVersion, releaseDate and revision are package level so that RUBY_DESCRIPTION
 // and the `rbgo -v` banner cannot disagree: one source, two readers. They were
 // function-local, which is how a CLI ends up printing a version the running VM
 // does not report.
+//
+// ⛔ AND IT NOW SELECTS THE CONFORMANCE POPULATION TOO. Since #845 the
+// ruby/spec shim derives `CUR_VERSION` from `RUBY_VERSION`, so moving this
+// constant moves which examples the gate runs: every spec behind a
+// `ruby_version_is "4.0"` guard becomes visible, and every guard that ends
+// before 4.0 stops applying. That is deliberate — one fact, one place — but it
+// means a change here is a change to the measurement, never only to a banner.
+// Bump it with `BASELINE` NOT regenerated, so the ratchet names every file that
+// moves in both directions (#799).
+//
+// Values read from ruby/ruby at tag v4.0.9 (note the tag naming changed at
+// 4.0.0: v3_4_1 became v4.0.9). `version.h` gives TEENY 9 and PATCHLEVEL 0 with
+// MAJOR/MINOR from include/ruby/version.h (4 and 0); the tag commit is
+// 3e93b23afcec3433f6aecc34b5d832799d754238, committed 2026-10-23T02:36:04Z,
+// which agrees with _data/releases.yml in ruby/www.ruby-lang.org.
 const (
-	rubyVersion = "3.4.1"
-	releaseDate = "2024-12-25"
-	revision    = "48d4efcb85000e1ebae42004e963b5d0cedddcf2"
+	rubyVersion = "4.0.9"
+	releaseDate = "2026-10-23"
+	revision    = "3e93b23afcec3433f6aecc34b5d832799d754238"
 )
 
 // Description is RUBY_DESCRIPTION, which is exactly what `ruby -v` and
