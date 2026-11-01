@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-//go:build !(js && wasm) && !openbsd && !netbsd && !dragonfly
+//go:build !(js && wasm) && !openbsd && !netbsd && !dragonfly && !plan9
 
 package vm
 

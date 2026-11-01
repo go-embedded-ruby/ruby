@@ -5,13 +5,11 @@
 package vm
 
 import (
-	"errors"
 	"math"
 	"math/big"
 	"os"
 	"sort"
 	"strings"
-	"syscall"
 	"time"
 	"unicode"
 
@@ -494,12 +492,11 @@ var errnoClasses = func() map[int64]string {
 // exotic failure is still a rescuable SystemCallError rather than a Go panic.
 func sysFail(err error, op string) {
 	cls, msg := "SystemCallError", errnoMessage(err)
-	var eno syscall.Errno
-	if errors.As(err, &eno) {
+	if eno, ok := errnoOfError(err); ok {
 		// The errno's own text, not the wrapper's: an os.PathError would otherwise
 		// repeat the operation and the path that op already names.
-		msg = errnoMessage(eno)
-		if name, ok := errnoClasses[int64(eno)]; ok {
+		msg = errnoText(eno)
+		if name, ok := errnoClasses[eno]; ok {
 			cls = "Errno::" + name
 		}
 	}
@@ -556,12 +553,12 @@ func getpriorityFailed(prio int, err error) bool {
 	if prio != -1 {
 		return true
 	}
-	var eno syscall.Errno
-	if !errors.As(err, &eno) {
+	eno, ok := errnoOfError(err)
+	if !ok {
 		return false
 	}
 	switch eno {
-	case syscall.ESRCH, syscall.EINVAL, syscall.EACCES, syscall.EPERM:
+	case errnoNumbers["ESRCH"], errnoNumbers["EINVAL"], errnoNumbers["EACCES"], errnoNumbers["EPERM"]:
 		return true
 	}
 	return false

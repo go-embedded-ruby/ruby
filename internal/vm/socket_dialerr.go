@@ -44,15 +44,14 @@ func raiseDialErr(err error, addr string) {
 	if errors.As(err, &dns) {
 		raise("Socket::ResolutionError", "getaddrinfo: %s", dns.Err)
 	}
-	var eno syscall.Errno
-	if errors.As(err, &eno) {
+	if eno, ok := errnoOfError(err); ok {
 		// Windows fails socket calls with WSAE* codes in the 10000 range, which
 		// errnoClasses does not name -- so a refused connection arrived as a bare
 		// SystemCallError there while darwin and linux were green, and `rescue
 		// Errno::ECONNREFUSED` matched nothing on the one platform nobody tested
 		// it on. MRI translates the same way (rb_w32_map_errno); posixErrno is
 		// the identity everywhere else.
-		eno = posixErrno(eno)
+		eno = int64(posixErrno(syscall.Errno(eno)))
 		// An empty addr means the caller has no single peer to name -- the
 		// Net::HTTP transport, where the phase may be a read rather than a
 		// connect and Go's own text already carries the address. Naming
@@ -61,10 +60,10 @@ func raiseDialErr(err error, addr string) {
 		if addr != "" {
 			suffix = " - connect(2) for " + addr
 		}
-		if name, ok := errnoClasses[int64(eno)]; ok {
-			raise("Errno::"+name, "%s%s", errnoStrerror(int64(eno)), suffix)
+		if name, ok := errnoClasses[eno]; ok {
+			raise("Errno::"+name, "%s%s", errnoStrerror(eno), suffix)
 		}
-		raise("SystemCallError", "%s%s", errnoStrerror(int64(eno)), suffix)
+		raise("SystemCallError", "%s%s", errnoStrerror(eno), suffix)
 	}
 	// Anything with no errno and no resolution failure behind it keeps the old
 	// class. Falling through to SocketError is deliberate: inventing an errno

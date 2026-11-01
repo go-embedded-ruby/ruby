@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-//go:build !windows && !wasm && !rbgo_core
+//go:build !windows && !wasm && !plan9 && !rbgo_core
 
 package vm
 

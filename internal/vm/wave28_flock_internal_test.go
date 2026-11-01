@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+//go:build !plan9
+
 package vm
 
 import (

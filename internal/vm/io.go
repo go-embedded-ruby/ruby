@@ -1128,7 +1128,7 @@ func flockWouldBlock(err error) bool {
 // without flock(2) gives.
 func raiseFlockErrno(err error, p string) {
 	switch {
-	case errors.Is(err, syscall.EBADF):
+	case errIsErrno(err, "EBADF"):
 		raise("Errno::EBADF", "Bad file descriptor @ rb_file_flock - %s", p)
 	case errors.Is(err, syscall.EINVAL):
 		raise("Errno::EINVAL", "Invalid argument @ rb_file_flock - %s", p)
