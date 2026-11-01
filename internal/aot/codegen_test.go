@@ -72,7 +72,7 @@ func TestCompileSupported(t *testing.T) {
 		{"setivar", "def m(a)\n  @x = a\nend\nm(1)", "m", "setIvar(self,"},
 		{"getconst", "def m = Foo\nm", "m", "vm.aotConst("},
 		{"setconst", "def m\n  X = 1\n  X\nend\nm", "m", "vm.consts["},
-		{"getgvar", "def m = $g\nm", "m", "vm.gvar("},
+		{"getgvar", "def m = $g\nm", "m", "vm.gvarGet("},
 		{"splat_concat", "def m(a, b) = [a, *[b, b]]\nm(1, 2)", "m", "aotConcat("},
 		{"splat", "def m(a, b) = [a, *[b, b]]\nm(1, 2)", "m", "aotSplat("},
 		{"regexp", "def m = /ab/\nm", "m", "compileLiteralRegexp("},
