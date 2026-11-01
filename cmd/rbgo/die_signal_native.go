@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-//go:build !wasm && !windows
+//go:build !wasm && !windows && !plan9
 
 package main
 

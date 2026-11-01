@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-//go:build wasm || windows
+//go:build wasm || windows || plan9
 
 package main
 
@@ -21,4 +21,8 @@ package main
 // program killed by a signal, with the platform-specific part left unclaimed.
 // The two end-to-end rows that assert death BY a signal skip on Windows and say
 // this is why (cmd/rbgo/exit_status_test.go is POSIX-only for the same reason).
+//
+// On Plan 9 a process is killed by a NOTE (syscall.Note), not a signal number, and
+// there is no 128+signo status to leave behind, so the caller's exit code is all
+// that is reported.
 func dieBySignal(int) {}

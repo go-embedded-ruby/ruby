@@ -31,18 +31,6 @@ func (vm *VM) classOfExtBinding(v object.Value) (*RClass, bool) {
 		return vm.consts["GRPC::ActiveCall"].(*RClass), true
 	case *GRPCStatus:
 		return vm.consts["GRPC::Status"].(*RClass), true
-	case *NATSX:
-		return x.cls, true
-	case *KafkaClient:
-		return x.cls, true
-	case *KafkaProducer:
-		return x.cls, true
-	case *KafkaConsumer:
-		return x.cls, true
-	case *KafkaMessage:
-		return x.cls, true
-	case *KafkaBatch:
-		return x.cls, true
 	case *MySQLClient:
 		return x.cls, true
 	case *MySQLResult:
@@ -61,10 +49,6 @@ func (vm *VM) classOfExtBinding(v object.Value) (*RClass, bool) {
 		return x.cls, true
 	case *MongoObjectId:
 		return x.cls, true
-	case *ParquetReader:
-		return vm.consts["Parquet::ArrowFileReader"].(*RClass), true
-	case *ParquetWriter:
-		return vm.consts["Parquet::ArrowFileWriter"].(*RClass), true
 	case *ArrowArray:
 		return vm.consts["Arrow::Array"].(*RClass), true
 	case *ArrowArrayBuilder:
@@ -101,6 +85,11 @@ func (vm *VM) classOfExtBinding(v object.Value) (*RClass, bool) {
 		return vm.consts["OpenStack::Image"].(*RClass), true
 	case *OpenStackIdentity:
 		return vm.consts["OpenStack::Identity"].(*RClass), true
+	}
+	// NATS, Kafka and Parquet are a separate seam: their drivers do not build for
+	// plan9 (see bindings_msg.go and backends_plan9.go).
+	if c, ok := vm.classOfMsgBinding(v); ok {
+		return c, true
 	}
 	// SQLite3, Sequel, Bolt, Bleve and Etcd are a separate seam: their drivers
 	// build on fewer targets than the rest (see bindings_store.go).

@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+//go:build !plan9
+
 package vm
 
 import (
@@ -10,16 +12,11 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"syscall"
 	"testing"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
-
-// rq renders an OS path as a Ruby double-quoted string literal (paths here are
-// plain ASCII temp dirs, so Go's quoting matches Ruby's).
-func rq(p string) string { return strconv.Quote(slash(p)) }
 
 // TestRaiseRmdirErrClassification covers every branch of raiseRmdirErr with
 // synthetic os errors (independent of the running user's privileges). It reuses
