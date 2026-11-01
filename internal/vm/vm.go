@@ -3942,8 +3942,21 @@ func (vm *VM) defineModuleIn(parent *RClass, name string, body *bytecode.ISeq, s
 // ruby/spec's "does not call #to_ary if #respond_to? returns false" pins down.
 // With the default #respond_to? the plain method lookup answers, and no Ruby
 // call is made.
+//
+// ⛔ NO #respond_to? AT ALL is not an overridden one, and conflating the two
+// sent #respond_to? to an object that does not have it. A BasicObject does not
+// include Kernel, so findMethod answers nil — and `nil != Kernel's entry` is
+// true, which took the branch that calls it:
+//
+//	a, b = BasicObject.new   # NoMethodError: undefined method 'respond_to?'
+//
+// That was live on `main` through the masgn path before this guard; MRI runs it
+// without complaint. Upstream says so explicitly: vm_respond_to opens with
+// `if (!cme) return -1`, and -1 means UNDECIDED rather than false, so
+// rb_check_funcall goes on to the plain method lookup — which is the fall-
+// through below.
 func (vm *VM) respondsToConversion(v object.Value, name string) bool {
-	if m := vm.findMethod(v, "respond_to?"); m != vm.cKernel.methods["respond_to?"] {
+	if m := vm.findMethod(v, "respond_to?"); m != nil && m != vm.cKernel.methods["respond_to?"] {
 		return vm.send(v, "respond_to?", []object.Value{object.SymVal(name)}, nil).Truthy()
 	}
 	return vm.findMethod(v, name) != nil
