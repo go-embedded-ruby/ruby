@@ -81,7 +81,7 @@ func TestCompileSupported(t *testing.T) {
 		// accepted by MRI — or a class/module body. methodISeq takes Children[0]
 		// whatever kind it is, so the block serves directly.
 		{"setconst", "[1].each { X = 1 }\nX", "block in <main>", "vm.consts["},
-		{"getgvar", "def m = $g\nm", "m", "vm.gvar("},
+		{"getgvar", "def m = $g\nm", "m", "vm.gvarGet("},
 		{"splat_concat", "def m(a, b) = [a, *[b, b]]\nm(1, 2)", "m", "aotConcat("},
 		{"splat", "def m(a, b) = [a, *[b, b]]\nm(1, 2)", "m", "aotSplat("},
 		{"regexp", "def m = /ab/\nm", "m", "compileLiteralRegexp("},

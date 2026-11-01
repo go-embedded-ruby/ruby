@@ -207,7 +207,10 @@ func (g *gen) emit(pc int) (string, bool) {
 	case bytecode.OpSetConst:
 		return line("vm.consts[%q] = s%d", g.iseq.Names[in.A], d-1), true
 	case bytecode.OpGetGVar:
-		return line("s%d = vm.gvar(%q)", d, g.iseq.Names[in.A]), true
+		// gvarGet, not gvar: it is the Ruby-level read, so it carries MRI's
+		// uninitialised-global warning. Emitting gvar here would make the warning
+		// depend on whether the method had been compiled yet.
+		return line("s%d = vm.gvarGet(%q)", d, g.iseq.Names[in.A]), true
 	case bytecode.OpSplatToArray:
 		return line("s%d = vm.aotSplat(s%d)", d-1, d-1), true
 	case bytecode.OpConcatArray:
