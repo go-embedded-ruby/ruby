@@ -104,10 +104,19 @@ no instance is constructed), and reports the ones that do not.
 go run ./scripts/conformance/rubyspec/cmd/phantom -root /tmp/rubyspec-corpus -rbgo /tmp/rbgo-rubyspec
 ```
 
-Measured on `main` at 3a3fb818: **59 attributable expectations over 2206 spec
-files, 1 candidate** (`Array#rfind`, implemented in #849), and `BASELINE` records
-that file as `0` — so **no counted pass in the total is bought by an absence**.
-The value of running it again is the comparison with that line.
+Measured on `main` after #849: **59 attributable expectations over 2206 spec
+files, 0 candidates** — so **no pass anywhere in the corpus is bought by a
+missing method**, and any future non-zero is the signal.
+
+It was 1 before #849 (`Array#rfind`), and that one is instructive: the example
+read *"raises a NoMethodError if the ifnone argument does not respond to
+#call"*, and on a build without `rfind` it passed because `rfind` itself was
+undefined. `BASELINE` recorded that file as `0`, so the counted total never held
+it — the pass only appeared with the shim at 4.0, which is where this tool will
+matter when the version moves.
+
+The 2206 is the same population `BASELINE` sums, which is the check that this
+tool and the gate are looking at the same corpus.
 
 It withdraws any describe block that **also asserts the absence**, because such
 an example is asserting exactly what it got: `core/complex/negative_spec.rb`
@@ -121,6 +130,40 @@ one, and its count is a lower bound. Like `cmd/ratchet` it refuses rather than
 guesses: exit 2 if the corpus cannot be read, if the interpreter cannot be run,
 or if its own control fails (a method that certainly exists must come back
 present, and one that cannot exist must come back absent).
+## Which examples the version string selects — `cmd/guards`
+
+`cmd/guards` and `cmd/phantom` answer different questions about the same
+number and neither replaces the other: guards says **which examples the
+version string lets into the population**, phantom says **whether a pass in
+that population is behaviour or an absence**. Both are analysis tools rather
+than gates, and both print their own control first.
+
+`spec_helper.rb` sets `CUR_VERSION`, and the corpus guards whole blocks and
+individual values on it. Moving that string moves the population **in both
+directions**, so `cmd/guards` censuses the corpus before anything is
+re-recorded — a static read, needing no sweep, and so runnable on a loaded
+machine where a sweep is not:
+
+```bash
+go run ./scripts/conformance/rubyspec/cmd/guards -root /tmp/rubyspec-corpus -list
+```
+
+It separates the two shapes, because they do opposite things:
+
+| shape | at a version below the threshold | raising `CUR_VERSION` |
+|---|---|---|
+| `ruby_version_is "4.0" do … end` | the examples inside are **skipped** | **adds** them to the population |
+| `ruby_version_is("4.0") ? a : b` | the example **runs**, asserting the pre-4.0 branch | **changes what it asserts** |
+
+⛔ **It reports its own control first.** The guard identification is checked
+against the figure in [#799](https://github.com/go-embedded-ruby/ruby/issues/799)
+(56 guards at `"4.0"` under a `do$` anchor); the example counts are a **lower
+bound**, since a static reader cannot expand `it_behaves_like`. Read the guard
+columns as the measurement and the example columns as a floor — and if the
+control ever stops reproducing, nothing below it is worth reading.
+
+It is an analysis tool, not a gate: nothing fails when it is not run. What it
+exists to prevent is a `UPDATE_BASELINE=1` that absorbs a loss silently.
 
 ## Caveats
 

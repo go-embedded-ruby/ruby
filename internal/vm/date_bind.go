@@ -776,7 +776,17 @@ func (vm *VM) registerDateFormat() {
 	d("ctime", strM((*date.Date).Ctime))
 	d("asctime", strM((*date.Date).Asctime))
 	d("jisx0301", strM((*date.Date).Jisx0301))
-	d("to_s", strM((*date.Date).String))
+	// to_s goes through the WRAPPER's ToS rather than straight to the library's
+	// String. Both end in the same call, so this is not a behaviour change: it
+	// removes a SECOND path to it. object.Value requires ToS (object.go:58), so
+	// (*Date).ToS has to exist -- and registering to_s as
+	// strM((*date.Date).String) meant nothing ever called the method, so the two
+	// renderings of a Date could drift with no test able to notice. It sat at
+	// 0.0% in both recorded below-100 lists, invisible for weeks behind a gate
+	// that compared a rounded total (#704).
+	d("to_s", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.NewString(v.(*Date).ToS())
+	})
 	d("inspect", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(dateInspect(self(v)))
 	})

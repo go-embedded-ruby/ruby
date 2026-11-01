@@ -111,3 +111,72 @@ func TestRecursiveStructureInspect(t *testing.T) {
 		}
 	}
 }
+
+// ⛔ THE FIVE TYPES THE TEST ABOVE DID NOT COVER, each of which killed the
+// process.
+//
+// The guard above is real and was tested — for Array, Hash and Set. Struct and
+// a plain object were outside that population, and `defaultObjectInspect` and
+// Struct#to_s both recursed until the Go runtime aborted with
+//
+//	fatal error: stack overflow
+//	runtime: goroutine stack exceeds 1000000000-byte limit
+//
+// which is NOT a panic: callNative's recover cannot convert it, so the embedding
+// host dies with the interpreter. Measured on 3a3fb818, every case below exited
+// 2 with that abort; all of them now exit 0.
+//
+// The reachability is what makes it serious. `a.peer = b; b.peer = a; p a` is
+// two ordinary objects pointing at each other — a doubly-linked list, a parent
+// with a back-pointer, an ORM association — and it needs no adversary. Wrapping
+// the object in an Array or a Hash did not save it, because those guard THEIR
+// OWN identity and the recursion came back through the object's inspect.
+//
+// The renderings are MRI's, from the two functions that do this upstream with
+// rb_exec_recursive: object.c's inspect_obj appends " ..." before the closing
+// ">", and struct.c's inspect_struct returns ":...>" (both at v4.0.9).
+func TestRecursiveObjectAndStructInspectDoNotKillTheProcess(t *testing.T) {
+	cases := []struct{ src, want string }{
+		// A plain object holding itself.
+		{`class K1; def initialize; @me = self; end; end; puts K1.new.inspect`,
+			"#<K1:0x0000000000000008 @me=#<K1:0x0000000000000008 ...>>\n"},
+
+		// ⛔ Two ordinary objects pointing at each other — the realistic shape.
+		// Note the two distinct addresses and that the re-entry lands on the
+		// first: the guard tracks identity, not depth.
+		{`class N1; attr_accessor :peer; end
+a = N1.new; b = N1.new; a.peer = b; b.peer = a
+p a`,
+			"#<N1:0x0000000000000008 @peer=#<N1:0x0000000000000010 @peer=#<N1:0x0000000000000008 ...>>>\n"},
+
+		// Inside a container: the container's own guard does not cover this.
+		{`class N2; attr_accessor :peer; end; a = N2.new; a.peer = a; p [a]`,
+			"[#<N2:0x0000000000000008 @peer=#<N2:0x0000000000000008 ...>>]\n"},
+		{`class N3; attr_accessor :peer; end; a = N3.new; a.peer = a; p({k: a})`,
+			"{k: #<N3:0x0000000000000008 @peer=#<N3:0x0000000000000008 ...>>}\n"},
+
+		// A Struct holding itself, and the same through #to_a — which died
+		// because the Array guarded itself and then re-entered the Struct.
+		{`S1 = Struct.new(:x); s = S1.new(nil); s.x = s; puts s.inspect`,
+			"#<struct S1 x=#<struct S1:...>>\n"},
+		{`S2 = Struct.new(:x); s = S2.new(nil); s.x = s; puts s.to_s`,
+			"#<struct S2 x=#<struct S2:...>>\n"},
+		{`S3 = Struct.new(:x); s = S3.new(nil); s.x = s; puts s.to_a.inspect`,
+			"[#<struct S3 x=#<struct S3:...>>]\n"},
+
+		// And the guard must CLEAR between siblings, or it would turn an ordinary
+		// repeated reference into "..." and silently corrupt normal output. This
+		// is the negative control for both new paths.
+		{`class K2; attr_accessor :v; end
+x = K2.new; x.v = 1
+p [x, x]`,
+			"[#<K2:0x0000000000000008 @v=1>, #<K2:0x0000000000000008 @v=1>]\n"},
+		{`S4 = Struct.new(:x); s = S4.new(1); p [s, s]`,
+			"[#<struct S4 x=1>, #<struct S4 x=1>]\n"},
+	}
+	for _, c := range cases {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q\n got=%q\nwant=%q", c.src, got, c.want)
+		}
+	}
+}

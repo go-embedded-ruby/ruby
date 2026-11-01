@@ -185,3 +185,83 @@ func TestMathPrivateInstanceMethods(t *testing.T) {
 		}
 	}
 }
+
+// TestMathLog1pAndExpm1 covers the two functions Ruby 4.0 added
+// (core/math/log1p_spec.rb, core/math/expm1_spec.rb — both behind
+// `ruby_version_is "4.0"`, so the conformance gate cannot see them while the
+// shim resolves guards at 3.4.1).
+//
+// ⛔ THE POINT OF THESE FUNCTIONS IS THE PRECISION, not the identity. Anyone
+// could write `log(1+x)` and `exp(x)-1` and satisfy the first example of each
+// spec; both specs then assert that the answer for 1e-16 is close to 1e-16 and
+// **is not 0.0**, which the naive forms fail — the leading 1 swallows every
+// significant digit. The cases marked "the whole reason" below are those, and
+// the two after them show the naive forms really do lose it, so those
+// assertions are not holding either way.
+func TestMathLog1pAndExpm1(t *testing.T) {
+	cases := []struct{ src, want string }{
+		// log1p(x) == log(1 + x) in the ordinary range.
+		{`p Math.log1p(3) == Math.log(4)`, "true\n"},
+		{`p Math.expm1(3) == Math.exp(3) - 1`, "true\n"},
+
+		// ⛔ the whole reason these exist.
+		{`p Math.log1p(1e-16) == 0.0`, "false\n"},
+		{`p Math.expm1(1e-16) == 0.0`, "false\n"},
+		// and the naive forms answer 0.0, which is the control for the two above.
+		{`p Math.log(1 + 1e-16)`, "0.0\n"},
+		{`p Math.exp(1e-16) - 1`, "0.0\n"},
+
+		// log1p is real for x >= -1: -1 is -Infinity, which is a value, and
+		// below -1 is Math::DomainError with MRI's exact wording.
+		{`p Math.log1p(-1)`, "-Infinity\n"},
+		{mathRescue(`Math.log1p(-1 - 1e-15)`),
+			"Math::DomainError: Numerical argument is out of domain - log1p\n"},
+		{`p Math.expm1(-1000) == -1.0`, "true\n"},
+
+		// NaN in, NaN out.
+		{`p Math.log1p(Float::NAN).nan?`, "true\n"},
+		{`p Math.expm1(Float::NAN).nan?`, "true\n"},
+
+		// Float() coercion, with MRI's messages.
+		{mathRescue(`Math.log1p("10")`), "TypeError: can't convert String into Float\n"},
+		{mathRescue(`Math.expm1("test")`), "TypeError: can't convert String into Float\n"},
+		{mathRescue(`Math.log1p(nil)`), "TypeError: can't convert nil into Float\n"},
+		{mathRescue(`Math.expm1(nil)`), "TypeError: can't convert nil into Float\n"},
+
+		// ⛔ Arity, which core/math/log1p_spec.rb:27 asserts outright. These two
+		// are strict where the older unary functions are not: `Math.cbrt(9, 3)`
+		// still answers 2.080083823051904 instead of raising, a pre-existing
+		// divergence across the module that cannot be fixed by a blanket check
+		// (`Math.log` takes one OR two arguments) and is tracked on its own. A
+		// new method must not inherit it.
+		{mathRescue(`Math.log1p(9, 3)`),
+			"ArgumentError: wrong number of arguments (given 2, expected 1)\n"},
+		{mathRescue(`Math.expm1(9, 3)`),
+			"ArgumentError: wrong number of arguments (given 2, expected 1)\n"},
+		// ⛔ And with NO argument, where the older helpers do something worse than
+		// being lenient: they index args[0] out of range, and the VM's
+		// panic-to-exception net surfaces the Go runtime error as the Ruby
+		// message. Measured on main:
+		//
+		//	Math.cbrt   -> ArgumentError: cbrt: runtime error: index out of range [0] with length 0
+		//	Math.log1p  -> ArgumentError: wrong number of arguments (given 0, expected 1)
+		//
+		// The class is right by accident; the message is a Go internal leaked to
+		// Ruby code, and it would read differently on another Go version. These
+		// two cases pin MRI's wording so that cannot regress into it.
+		{mathRescue(`Math.log1p`),
+			"ArgumentError: wrong number of arguments (given 0, expected 1)\n"},
+		{mathRescue(`Math.expm1`),
+			"ArgumentError: wrong number of arguments (given 0, expected 1)\n"},
+
+		// module_function: reachable as a private instance method on an includer,
+		// which is the last example of each spec file.
+		{"class IML\n  include Math\nend\np IML.new.send(:log1p, 4.21).round(11)", "1.65057985577\n"},
+		{"class IME\n  include Math\nend\np IME.new.send(:expm1, 23.1415).round(4)", "11226018483.0012\n"},
+	}
+	for _, c := range cases {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q got=%q want=%q", c.src, got, c.want)
+		}
+	}
+}

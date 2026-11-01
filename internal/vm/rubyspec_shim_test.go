@@ -246,3 +246,64 @@ describe "TIME_TOLERANCE (mspec constant)" do
 end`
 	assertShimResult(t, runShim(t, "", src), "pass=2 fail=0 error=0 skip=0")
 }
+
+// ⛔ CUR_VERSION selects the POPULATION the whole conformance figure is counted
+// over, and it used to be a second hardcoded copy of what
+// kernel_introspect.go's `rubyVersion` already says (#799). They agreed, so
+// nothing was wrong on any given day; the defect was that half a version change
+// could land — the runtime bumped, the shim forgotten — and the gate would go on
+// measuring the old population while every page claimed the new version. Both
+// halves look right on their own, which is why nothing would have said so.
+//
+// This is the test that makes that state impossible to commit. It asserts the
+// equality through the REAL shim rather than by matching the file's text,
+// because the thing that matters is not how the line is spelled but what the
+// constant holds at run time.
+func TestShimVersionIsTheRuntimesNotASecondCopy(t *testing.T) {
+	src := `
+describe "CUR_VERSION" do
+  it "is the version this interpreter reports, not a second copy of it" do
+    CUR_VERSION.should == RUBY_VERSION
+  end
+end`
+	assertShimResult(t, runShim(t, "", src), "pass=1 fail=0 error=0 skip=0")
+}
+
+// And the constant has to actually GOVERN the guard: an equality that nothing
+// reads would satisfy the test above while the guards resolved against
+// something else entirely. mspec's chain is
+// guards/version.rb -> SpecGuard.ruby_version(:full) -> RUBY_VERSION
+// (guard.rb:41-52, at mspec b79c65e); here it is CUR_VERSION, and this proves
+// _version_in_range is fed by it.
+//
+// A guard AT the running version must keep its examples; one above it must
+// remove them — note "remove", not "skip": a block guard below the threshold
+// deletes the examples rather than counting them as skipped, so the failing
+// example inside the second block contributes nothing to any counter. If it
+// ever did run, `1.should == 2` makes that visible as fail=1 instead of a
+// silently absent example.
+//
+// ⛔ WHAT THIS ONE CANNOT SEE, measured by planting it: with the shim set back
+// to a literal `CUR_VERSION = "9.9.9"`, this test still PASSES — a guard at
+// `>= RUBY_VERSION` is satisfied by any higher value and `"99.0"` still removes
+// its block. Only the test above catches that, and it did, naming the
+// disagreement (`expected "9.9.9" to == "3.4.1"`). So this test proves the
+// WIRING and the one above proves the VALUE; neither substitutes for the other,
+// and reading this one alone as the guard against a hardcode would be wrong.
+func TestShimVersionGuardsResolveAtThatVersion(t *testing.T) {
+	src := `
+describe "version guards" do
+  ruby_version_is RUBY_VERSION do
+    it "keeps an example guarded at exactly the running version" do
+      1.should == 1
+    end
+  end
+
+  ruby_version_is "99.0" do
+    it "removes an example guarded above it" do
+      1.should == 2
+    end
+  end
+end`
+	assertShimResult(t, runShim(t, "", src), "pass=1 fail=0 error=0 skip=0")
+}
