@@ -2469,7 +2469,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 						push(vm.curExc)
 					}
 				} else {
-					push(vm.gvar(name))
+					push(vm.gvarGet(name))
 				}
 			case bytecode.OpSetGVar:
 				// Assignment is an expression: set the global, keep its value.
