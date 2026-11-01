@@ -87,6 +87,60 @@ p [a.size, a.first.is_a?(SplatRefuser)]`,
 	}
 }
 
+// ⛔ A BasicObject HAS NO #respond_to?, and treating that as an overridden one
+// sent it the method anyway.
+//
+// `respondsToConversion` asked `findMethod(v, "respond_to?") != Kernel's entry`,
+// which is TRUE for nil — so an object outside Kernel took the branch that
+// CALLS #respond_to?:
+//
+//	a = *BasicObject.new   # NoMethodError: undefined method 'respond_to?'
+//
+// MRI says what to do instead, and says it first thing: vm_respond_to opens with
+// `if (!cme) return -1`, and -1 means UNDECIDED rather than false, so
+// rb_check_funcall falls through to the plain method lookup.
+//
+// Two of these four shapes were already broken on `main` — the masgn path uses
+// the same helper for #to_ary — and no spec covered them; routing the splat
+// through that helper is what surfaced it, via
+// `language/array_spec.rb`'s "when applied to a BasicObject coerces it to Array
+// if it respond_to?(:to_a)". All four agree with /usr/bin/ruby now, byte for
+// byte, which is how they were checked.
+func TestConversionOfAnObjectWithNoRespondTo(t *testing.T) {
+	cases := []struct{ name, src, want string }{
+		{
+			"splatting a bare BasicObject wraps it",
+			`a = *BasicObject.new
+p a.size`, "1\n",
+		}, {
+			"splatting a BasicObject with #to_a converts it",
+			`k = Class.new(BasicObject) do
+  def to_a; [1, 2]; end
+end
+p(*k.new)`, "1\n2\n",
+		}, {
+			// ⛔ Broken on main, through the same helper, with no spec to catch it.
+			"multiple assignment from a bare BasicObject",
+			`a, b = BasicObject.new
+p b`, "nil\n",
+		}, {
+			"multiple assignment from a BasicObject with #to_ary",
+			`k = Class.new(BasicObject) do
+  def to_ary; [1, 2]; end
+end
+a, b = k.new
+p [a, b]`, "[1, 2]\n",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := eval(t, c.src); got != c.want {
+				t.Errorf("src=%q\n got=%q\nwant=%q", c.src, got, c.want)
+			}
+		})
+	}
+}
+
 // The controls: every shape that must keep working, including the ones that
 // prove the conversion still HAPPENS. A splat that had simply stopped calling
 // #to_a would pass all four rows above.
