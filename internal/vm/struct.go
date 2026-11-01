@@ -448,6 +448,31 @@ func setupStruct(vm *VM) {
 			b.WriteString(" ")
 			b.WriteString(o.class.name)
 		}
+		// ⛔ A self-referential Struct killed the process here, the same way a
+		// self-referential plain object did in defaultObjectInspect:
+		//
+		//	S = Struct.new(:x); s = S.new(nil); s.x = s; s.inspect
+		//
+		// recursed until `fatal error: stack overflow`, which is not a panic and
+		// so cannot be converted by callNative's recover. `s.to_a.inspect` died
+		// too: the Array guards its own identity, then came back in here.
+		//
+		// MRI appends ":...>" on re-entry (struct.c at v4.0.9, inspect_struct:
+		// `if (recur) return rb_str_cat2(str, ":...>");`), so a named struct
+		// renders `#<struct S:...>`. Data shares that C function upstream and
+		// already had this guard here (data.go).
+		//
+		// ⚠ One deliberate divergence, in a corner of a corner: MRI appends the
+		// class path on re-entry even for an ANONYMOUS struct, where it omits it
+		// otherwise (`if (recur || first != '#')`), so MRI would print
+		// `#<struct #<Class:0x…>:...>`. This keeps rbgo's own naming rule in both
+		// cases and prints `#<struct:...>`. Recorded rather than guessed at,
+		// because the value of this change is not dying.
+		if !object.ReprEnter(o) {
+			b.WriteString(":...>")
+			return object.NewString(b.String())
+		}
+		defer object.ReprLeave(o)
 		for i, nm := range names {
 			if i == 0 {
 				b.WriteString(" ")

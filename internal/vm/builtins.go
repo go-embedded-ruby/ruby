@@ -6647,6 +6647,32 @@ func (vm *VM) defaultObjectInspect(o *RObject) string {
 		b.WriteByte('0')
 	}
 	b.WriteString(hex)
+	// ⛔ A SELF-REFERENTIAL OBJECT GRAPH KILLED THE PROCESS HERE. The ivar loop
+	// below inspects each value, so
+	//
+	//	class Node; attr_accessor :peer; end
+	//	a = Node.new; b = Node.new; a.peer = b; b.peer = a
+	//	p a
+	//
+	// recursed until the Go runtime aborted with `fatal error: stack overflow`
+	// — not a panic, so callNative's recover cannot convert it and the embedding
+	// host dies. Two ordinary objects pointing at each other: a doubly-linked
+	// list, a parent with a back-pointer, an ORM association. Wrapping it in an
+	// Array or a Hash did not help, because those guard THEIR OWN identity and
+	// the recursion then came back through here.
+	//
+	// internal/object's ReprEnter is the guard Array, Hash, Set, Data and
+	// Enumerator already use; it was simply never reached from this path, and
+	// TestRecursiveStructureInspect covered exactly the five types that had it.
+	//
+	// MRI renders " ..." in place of the ivars (object.c at v4.0.9,
+	// inspect_obj: `if (recur) rb_str_cat2(str, " ...");` then `">"`), so a
+	// re-entered object prints `#<Node:0x0000000000000008 ...>`.
+	if !object.ReprEnter(o) {
+		b.WriteString(" ...>")
+		return b.String()
+	}
+	defer object.ReprLeave(o)
 	for i, nv := range ivarNamesInOrder(o) {
 		if i == 0 {
 			b.WriteByte(' ')
