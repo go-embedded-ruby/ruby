@@ -6,7 +6,10 @@
 
 package vm
 
-import "errors"
+import (
+	"errors"
+	"syscall"
+)
 
 // This is the GOOS=plan9 half of the errno bucket rule stated in errno.go. Plan 9
 // has no errno numbers (see errno_plan9_map.go for the whole account), so every
@@ -24,10 +27,16 @@ var errnoPlatformNumbers = errnoLinuxPlatform()
 // errnoPlatformUndefined is empty: every per-target name has a number here.
 var errnoPlatformUndefined []string
 
-// platformErrnoStrerror is the strerror text for a number: the glibc wording of
-// the Linux number, since errnoStrerror's usual source, syscall.Errno.Error(),
-// prints only "errno N" on Plan 9.
-func platformErrnoStrerror(n int64) (string, bool) { return errnoLinuxText(n) }
+// errnoGoText is the text errnoStrerror starts from: the glibc wording of the
+// Linux number, since syscall.Errno.Error() prints only "errno N" on Plan 9. A
+// number the table does not name keeps that "errno N" form, which errnoStrerror
+// replaces with the C library's "Unknown error: N".
+func errnoGoText(n int64) string {
+	if s, ok := errnoLinuxText(n); ok {
+		return s
+	}
+	return syscall.Errno(n).Error()
+}
 
 // errnoText is the message sysFail embeds for an errno: the strerror text, since
 // syscall.Errno.Error() prints only "errno N" here.

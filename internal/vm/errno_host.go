@@ -36,10 +36,9 @@ func errIsErrno(err error, name string) bool {
 // syscall.Errno, i.e. Go's own text with its first letter restored.
 func errnoText(eno int64) string { return errnoMessage(syscall.Errno(eno)) }
 
-// platformErrnoStrerror lets a target supply the strerror text itself. Every
-// target but Plan 9 takes it from syscall.Errno.Error(), so there is nothing to
-// add here.
-func platformErrnoStrerror(int64) (string, bool) { return "", false }
+// errnoGoText is the text errnoStrerror starts from: Go's own, from
+// syscall.Errno.Error(). Plan 9 supplies glibc's instead (errno_plan9.go).
+func errnoGoText(n int64) string { return syscall.Errno(n).Error() }
 
 // errnoUniversalNumbers maps an Errno::Exxx name to its errno number for the
 // names EVERY GOOS rbgo builds for (except plan9, see errno_plan9.go) defines. The

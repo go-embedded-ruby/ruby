@@ -7,7 +7,6 @@ package vm
 import (
 	"strconv"
 	"strings"
-	"syscall"
 )
 
 // This file holds the Errno name table behind Ruby's Errno::Exxx classes and the
@@ -155,13 +154,11 @@ var errnoAliases = map[string]string{"EWOULDBLOCK": "EAGAIN"}
 // [[:graph:]]+), and settling it properly needs a Linux MRI witness — see the
 // per-platform errno issue.
 func errnoStrerror(n int64) string {
-	if s, ok := platformErrnoStrerror(n); ok {
+	text := errnoGoText(n)
+	if s, ok := errnoUnknownText(text, n); ok {
 		return s
 	}
-	if s, ok := errnoUnknownText(syscall.Errno(n).Error(), n); ok {
-		return s
-	}
-	return capitalizeASCII(syscall.Errno(n).Error())
+	return capitalizeASCII(text)
 }
 
 // errnoUnknownText recognises Go's "errno N" placeholder — what
