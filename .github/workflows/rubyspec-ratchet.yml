@@ -42,7 +42,7 @@ jobs:
     #
     # The other lanes keep `ubuntu-latest` deliberately: they build and test,
     # where an image roll is news worth having, not a baseline to protect.
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
