@@ -2,9 +2,46 @@ package vm
 
 import (
 	"os"
+	"strings"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
+
+// mriPredefinedGvars is the set of global names the INTERPRETER defines, each
+// of which therefore has a real getter and never reports itself uninitialised.
+// gvarGet consults it, and it says something about MRI, not about this VM: nine
+// of these names (`$;`, `$\`, `$,`, `$.`, `$_`, `$?`, `$FILENAME`, `$-F`, `$-i`)
+// are not modelled here and read as nil, and that gap is a separate, older
+// divergence. Conflating the two would turn a warning about a PROGRAM's variable
+// into a report about this VM's coverage.
+//
+// ⛔ The list is measured, not remembered. An earlier draft of the warning was
+// built from the names I could recall and it jabbered at every one of those
+// nine, because "rbgo falls through to the user-global path" and "MRI has no
+// getter" are different statements and only the second one licenses a warning.
+// The enumeration is `global_variables` taken from the reference interpreter at
+// startup (the installed /usr/bin/ruby, 2.6.10), minus `$SAFE`, `$KCODE` and
+// `$-K`, which Ruby 3.0 removed, and minus the two names the probe script
+// itself mentioned — `global_variables` lists every entry the parser CREATED,
+// so merely naming a variable puts it in the answer.
+//
+// Reading the set from an interpreter older than the 4.0.9 we target is sound in
+// this one direction, which is why it is allowed to stand: a name listed here
+// that 4.0 has since dropped only costs a warning we do not print, while a name
+// MISSING here costs a warning MRI never prints. The error that matters is the
+// second one, and an over-complete list cannot make it.
+var mriPredefinedGvars = map[string]bool{
+	"$!": true, "$\"": true, "$$": true, "$&": true, "$'": true,
+	"$*": true, "$+": true, "$,": true, "$-0": true, "$-F": true,
+	"$-I": true, "$-W": true, "$-a": true, "$-d": true, "$-i": true,
+	"$-l": true, "$-p": true, "$-v": true, "$-w": true, "$.": true,
+	"$/": true, "$0": true, "$:": true, "$;": true, "$<": true,
+	"$=": true, "$>": true, "$?": true, "$@": true, "$DEBUG": true,
+	"$FILENAME": true, "$LOADED_FEATURES": true, "$LOAD_PATH": true,
+	"$PROGRAM_NAME": true, "$VERBOSE": true, "$\\": true, "$_": true,
+	"$`": true, "$stderr": true, "$stdin": true, "$stdout": true,
+	"$~": true,
+}
 
 // englishAlias maps the English library's readable global names to the cryptic
 // special they alias (require "English"). The aliases are always recognised:
@@ -244,6 +281,58 @@ func (vm *VM) warnDeprecatedGvar(msg string) {
 		return
 	}
 	vm.send(w, "warn", []object.Value{object.NewString("warning: " + msg + "\n")}, nil)
+}
+
+// gvarGet is variable.c's rb_gvar_get (variable.c:1052 at v4.0.9): the
+// RUBY-LEVEL read of a global, which is gvar plus the warning MRI emits for a
+// global nothing ever assigned. The getgvar instruction and the two AOT tiers
+// that compile it are its only callers, and that split is upstream's own.
+//
+// rb_gvar_get resolves the name to an entry and calls that entry's getter. A
+// name nobody has assigned gets rb_gvar_undef_getter installed for it
+// (variable.c:649), and the whole body of that getter is
+//
+//	rb_warning("global variable '%"PRIsVALUE"' not initialized", QUOTE_ID(id));
+//	return Qnil;
+//
+// so what is being reported is "never assigned", NOT "reads as nil": assigning
+// replaces the getter, and `$x = nil; $x` is silent for good afterwards. It is
+// rb_warning rather than rb_warn, so only a TRUE $VERBOSE prints it — which is
+// why language/variables_spec.rb asks for it through `complain(verbose: true)`.
+//
+// ⛔ The internal reads must NOT come through here, and upstream's do not. This
+// VM reads $_, $/ and $; with vm.gvar from print/gets/split and copies a value
+// with it for `alias $new $old`; the C code those mirror touches
+// rb_lastline_get, rb_rs and rb_fs directly instead of calling rb_gv_get, so
+// none of them warns. Route one of them through gvarGet and every `puts` in a
+// `ruby -w` run grows a warning about $_.
+//
+// The gate is first because it is one map lookup and false in any ordinary run,
+// so the name resolution is walked once and the message is composed never.
+func (vm *VM) gvarGet(name string) object.Value {
+	// ⛔ bytecode.ErrinfoCell ("#$!") is not a Ruby global, it is the cell the
+	// begin/rescue compiler reads the pending exception through, and it is spelled
+	// with a '#' precisely so no program can name it. vm.go's getgvar arm
+	// intercepts it before reaching here; the two AOT tiers do NOT, so without
+	// this line every compiled `rescue` would report an uninitialised global under
+	// `ruby -w`. No Ruby global can start with '#', so the whole family is covered
+	// rather than the one spelling that exists today.
+	if !vm.warningEnabled() || strings.HasPrefix(name, "#") {
+		return vm.gvar(name)
+	}
+	if mriPredefinedGvars[name] || englishAlias[name] != "" {
+		// A name the interpreter defines has a getter, so it is never
+		// uninitialised however little of it this VM models. The English library's
+		// readable aliases resolve to one of those names, so they inherit that.
+		return vm.gvar(name)
+	}
+	v, uninitialized := vm.gvarResolve(name)
+	if uninitialized {
+		// QUOTE_ID quotes the id rb_gvar_get was CALLED with, so the message
+		// names the spelling the program read, not a canonical slot.
+		vm.rbWarningf("global variable '%s' not initialized", name)
+	}
+	return v
 }
 
 // setGVar stores a global, applying the checks MRI's setter for that name

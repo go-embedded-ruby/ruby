@@ -48,7 +48,7 @@ func TestCompileMainSupported(t *testing.T) {
 		{"setivar", "@x = 3; puts @x", `setIvar(self, "@x"`},
 		{"setconst", "K = 9; puts K", `vm.consts["K"]`},
 		{"getconst", "K = 9; puts K", `vm.aotConst("K")`},
-		{"gvar", "puts $0", `vm.gvar("$0")`},
+		{"gvar", "puts $0", `vm.gvarGet("$0")`},
 		{"send_noblock", "puts [3, 1, 2].sort.first", "vm.aotSend(&aotic"},
 		{"send_block", "t=0; 3.times { |i| t += i }; puts t", "&Proc{native: func(vm *VM, bargs"},
 		{"block_outerlocal", "t=0; 3.times { |i| t += i }; puts t", "l0_0"},

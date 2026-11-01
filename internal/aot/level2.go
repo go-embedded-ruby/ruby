@@ -213,7 +213,9 @@ func (s *mscope) emit(pc int) (string, bool) {
 	case bytecode.OpSetConst:
 		return line("vm.consts[%q] = %s", s.iseq.Names[in.A], s.sv(d-1)), true
 	case bytecode.OpGetGVar:
-		return line("%s = vm.gvar(%q)", s.sv(d), s.iseq.Names[in.A]), true
+		// gvarGet, not gvar — the Ruby-level read, with MRI's warning. See the
+		// same arm in codegen.go.
+		return line("%s = vm.gvarGet(%q)", s.sv(d), s.iseq.Names[in.A]), true
 	case bytecode.OpReturn:
 		if in.A != 0 {
 			return "", false // an explicit non-local `return` from a block: not lowered
