@@ -657,6 +657,87 @@ func TestTheTableNamesWhatProducedIt(t *testing.T) {
 	}
 }
 
+// ⛔ A NET GAIN HIDES AN EXAMPLE THAT WENT RED, and this is the measurement
+// that proved it rather than a hypothesis. On 2026-11-02 a control and a
+// treatment built from the same commit minus one change read:
+//
+//	core/thread/raise_spec.rb   51 → 68   +17
+//	53 file(s) … 1 file(s) moved, 0 regressed
+//
+// True, and incomplete. Nineteen examples turned green and TWO turned red —
+// the two were found by comparing the failure DESCRIPTIONS of the two runs, and
+// no count of passes, of failures, or of both can show a swap.
+//
+// The example that broke had been passing BECAUSE of a different defect, which
+// is why it reads as a clean win: nothing about it looks wrong from the
+// outside.
+func TestAnExampleThatWentRedInsideAnImprovedFileIsNamed(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake engines are POSIX shell scripts")
+	}
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "core", "r"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "core", "r", "g_spec.rb"), []byte("#\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Control: 5 passing, 3 failing — "alpha", "beta", "gamma".
+	control := fakeEngine(t, root, "ctl", "echo 'RBGO_RESULT pass=5 fail=3 error=0 skip=0'\n"+
+		"printf 'RBGO_DETAIL\\tfail\\tSpecFail\\talpha\\tmsg one\\n'\n"+
+		"printf 'RBGO_DETAIL\\tfail\\tSpecFail\\tbeta\\tmsg two\\n'\n"+
+		"printf 'RBGO_DETAIL\\tfail\\tSpecFail\\tgamma\\tmsg three\\n'\n")
+	// Treatment: 7 passing, 1 failing — a clear improvement by every count, and
+	// the one failure is a DIFFERENT example: "delta" was green and is not.
+	treatment := fakeEngine(t, root, "treat", "echo 'RBGO_RESULT pass=7 fail=1 error=0 skip=0'\n"+
+		"printf 'RBGO_DETAIL\\tfail\\tSpecFail\\tdelta\\tmsg four\\n'\n")
+
+	var out, errOut bytes.Buffer
+	code := main1([]string{"-root", root, "-move", "none", "-dir", "core/r", control, treatment}, &out, &errOut)
+	if !strings.Contains(out.String(), "WENT RED") || !strings.Contains(out.String(), "delta") {
+		t.Errorf("the example that broke is not named:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "1 example(s) WENT RED") {
+		t.Errorf("the summary does not count it:\n%s", out.String())
+	}
+	// ⛔ And it is a REGRESSION, whatever the totals did: +2 passing and two
+	// fewer failures would otherwise carry it out on exit 0.
+	if code != 1 {
+		t.Errorf("exit = %d, want 1 (an example went red)", code)
+	}
+
+	// THE CONTROL: the same shapes with no swap must stay silent, or every
+	// improved file would be flagged. Here the treatment simply fixes "gamma".
+	fixed := fakeEngine(t, root, "fixed", "echo 'RBGO_RESULT pass=7 fail=2 error=0 skip=0'\n"+
+		"printf 'RBGO_DETAIL\\tfail\\tSpecFail\\talpha\\tmsg one\\n'\n"+
+		"printf 'RBGO_DETAIL\\tfail\\tSpecFail\\tbeta\\tmsg two\\n'\n")
+	out.Reset()
+	errOut.Reset()
+	if code := main1([]string{"-root", root, "-move", "none", "-dir", "core/r", control, fixed}, &out, &errOut); code != 0 {
+		t.Errorf("a genuine improvement: exit = %d, want 0; out %q", code, out.String())
+	}
+	if strings.Contains(out.String(), "WENT RED") {
+		t.Errorf("a file that only improved was flagged:\n%s", out.String())
+	}
+
+	// ⛔ And a MESSAGE that differs is not an example that broke: the same
+	// description carrying an object address prints differently between two
+	// runs of the same binary, and keying on it would make every file look
+	// changed.
+	sameLabels := fakeEngine(t, root, "addr", "echo 'RBGO_RESULT pass=5 fail=3 error=0 skip=0'\n"+
+		"printf 'RBGO_DETAIL\\tfail\\tSpecFail\\talpha\\texpected #<Class:0xdeadbeef>\\n'\n"+
+		"printf 'RBGO_DETAIL\\tfail\\tSpecFail\\tbeta\\tmsg two\\n'\n"+
+		"printf 'RBGO_DETAIL\\tfail\\tSpecFail\\tgamma\\tmsg three\\n'\n")
+	out.Reset()
+	errOut.Reset()
+	if code := main1([]string{"-root", root, "-move", "none", "-dir", "core/r", control, sameLabels}, &out, &errOut); code != 0 {
+		t.Errorf("differing messages: exit = %d, want 0; out %q", code, out.String())
+	}
+	if strings.Contains(out.String(), "WENT RED") {
+		t.Errorf("a differing message was read as an example that broke:\n%s", out.String())
+	}
+}
+
 func fakeEngine(t *testing.T, dir, name, body string) string {
 	t.Helper()
 	p := filepath.Join(dir, name)

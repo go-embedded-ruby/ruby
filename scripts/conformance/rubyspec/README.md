@@ -330,6 +330,36 @@ control 9, 9, 8 and treatment 8, 9, 9. Above 1, each file runs N times per
 engine, the **lowest** count is kept, and an engine that disagrees with itself
 marks the file `UNSTABLE` and has its delta excluded from the verdict.
 
+**⛔ An example that went red inside a file that improved.** On 2026-11-02 a
+control and a treatment built from the same commit minus one change read:
+
+```text
+core/thread/raise_spec.rb   51 → 68   +17
+53 file(s): control 328 passing, treatment 345 passing, +17
+1 file(s) moved, 0 regressed
+```
+
+True, and incomplete. **Nineteen examples turned green and two turned red** —
+and no count of passes, of failures, or of both can show a swap. The two were
+found by hand, by comparing the two runs' failure *descriptions*; the example
+that broke had been passing **because of** a different defect, so nothing about
+it looked wrong.
+
+specdelta now compares those descriptions as a multiset (the same shared block
+included twice reports twice), names every one the treatment reports more often,
+and **exits 1** for it — a per-file verdict of "0 regressed" must not carry an
+example out:
+
+```console
+core/thread/raise_spec.rb                 51      68    +17
+      ⛔ WENT RED: fail  shared kernel_raise | raises a TypeError when passed a message and an extra argument (×2)
+
+1 file(s) moved, 0 regressed, 2 example(s) WENT RED
+```
+
+It keys on the **description** and not the message, because a message carries
+object addresses that differ between two runs of the *same* binary.
+
 **Two channels.** `RBGO_RESULT pass=…` comes out of the subject's own stdout, so
 a subject that miscounts can claim anything. specdelta also counts the
 `RBGO_DETAIL` lines and flags a file that printed **fewer** than its own

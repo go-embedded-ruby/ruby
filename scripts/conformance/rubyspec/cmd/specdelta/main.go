@@ -41,7 +41,8 @@
 // Exit status:
 //
 //	0  every file ran and no file passed fewer examples on the second engine
-//	1  at least one file regressed
+//	1  at least one file regressed, or an EXAMPLE went red inside a file that
+//	   improved on balance
 //	2  refused: no files, an engine that would not start, output that could not
 //	   be read, no -move declared, a declared move whose surface this run does
 //	   not cover, or a pair of binaries that cannot be tied to two distinct
@@ -73,6 +74,13 @@ type result struct {
 	details                int  // RBGO_DETAIL lines seen
 	ran                    bool // a RESULT line was found at all
 	killed                 bool
+
+	// labels counts the DESCRIPTION of each detail line — the example's own
+	// name, without the message, which carries object addresses that differ
+	// between runs. A multiset and not a set: a shared example block included
+	// twice reports the same description twice, and a file that loses one of
+	// the two has lost an example.
+	labels map[string]int
 }
 
 // tallyDisagrees reports whether the subject printed FEWER detail lines than
@@ -215,7 +223,7 @@ func main1(args []string, out, errOut io.Writer) int {
 	}
 	fmt.Fprintln(out, mv.header())
 
-	var totalA, totalB, moved, regressed, suspect, appeared int
+	var totalA, totalB, moved, regressed, suspect, appeared, wentRed int
 	var movePass, moveBad, moveFiles int
 	fmt.Fprintf(out, "%-56s %7s %7s %6s\n", "file", "control", "treat", "delta")
 	for _, r := range rows {
@@ -265,6 +273,27 @@ func main1(args []string, out, errOut io.Writer) int {
 		if worse > 0 {
 			note += fmt.Sprintf("  ⛔ fail+error %d → %d", badA, badB)
 		}
+		// ⛔ A NET GAIN HIDES AN EXAMPLE THAT WENT RED. On 2026-11-02
+		// core/thread/raise_spec.rb read `+17, 0 regressed` — true, and
+		// incomplete: nineteen examples turned green and TWO turned red, and no
+		// count of any kind can show a swap. The example that broke had been
+		// passing BECAUSE of a different defect.
+		//
+		// So the failure DESCRIPTIONS are compared, not their number, and every
+		// one that appears more often on the treatment is named.
+		if newlyRed := gainedLabels(r.a.labels, r.b.labels); len(newlyRed) > 0 && !r.unstable {
+			for _, l := range newlyRed {
+				// The COUNT, not just the name: a shared example block included
+				// twice in one file reports the same description twice, and
+				// losing both is two examples rather than one.
+				wentRed += l.gained
+				times := ""
+				if l.gained > 1 {
+					times = fmt.Sprintf(" (×%d)", l.gained)
+				}
+				note += "\n      ⛔ WENT RED: " + strings.ReplaceAll(l.label, "\t", "  ") + times
+			}
+		}
 		// A file the move itself changes is marked, because its delta is not a
 		// reading of the engines at all: the corpus handed the two runs
 		// different work. Reading `+3` on such a row as an improvement is
@@ -286,6 +315,11 @@ func main1(args []string, out, errOut io.Writer) int {
 	fmt.Fprintf(out, "\n%d file(s): control %d passing, treatment %d passing, %+d\n",
 		len(rows), totalA, totalB, totalB-totalA)
 	fmt.Fprintf(out, "%d file(s) moved, %d regressed", moved, regressed)
+	if wentRed > 0 {
+		// Counted apart from `regressed`, which is a per-FILE verdict: a file
+		// can improve on balance and still contain an example that broke.
+		fmt.Fprintf(out, ", %d example(s) WENT RED", wentRed)
+	}
 	if appeared > 0 {
 		// Named separately because it is not a regression in the passing total
 		// and would otherwise read as nothing at all.
@@ -305,10 +339,38 @@ func main1(args []string, out, errOut io.Writer) int {
 		fmt.Fprintf(errOut, "specdelta: %d file(s) reported a tally their detail lines contradict\n", suspect)
 		return 2
 	}
-	if regressed > 0 {
+	// ⛔ An example that went red IS a regression, whatever the file's total did.
+	// Letting a net gain carry it out would be the exact reading this check
+	// exists to stop.
+	if regressed > 0 || wentRed > 0 {
 		return 1
 	}
 	return 0
+}
+
+// gainedLabels lists the failure descriptions the TREATMENT reports more often
+// than the control — examples that were passing (or failing less often) and are
+// not any more. Sorted, so a report is stable between runs.
+//
+// It reads descriptions rather than messages because a message carries object
+// addresses (`#<Class:0x0000000000000008>`) that differ between two runs of the
+// SAME binary, which would make every file look changed.
+func gainedLabels(a, b map[string]int) []gainedLabel {
+	var out []gainedLabel
+	for label, n := range b {
+		if n > a[label] {
+			out = append(out, gainedLabel{label: label, gained: n - a[label]})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].label < out[j].label })
+	return out
+}
+
+// gainedLabel is one failure description and HOW MANY more times the treatment
+// reports it than the control.
+type gainedLabel struct {
+	label  string
+	gained int
 }
 
 // declared is what -move resolved to: either "the corpus is the same on both
@@ -678,6 +740,13 @@ func parse(s string) (result, error) {
 		switch {
 		case strings.HasPrefix(line, "RBGO_DETAIL"):
 			r.details++
+			// RBGO_DETAIL \t kind \t class \t description \t message
+			if f := strings.Split(line, "\t"); len(f) >= 4 {
+				if r.labels == nil {
+					r.labels = map[string]int{}
+				}
+				r.labels[f[1]+"\t"+f[3]]++
+			}
 		case strings.HasPrefix(line, "RBGO_RESULT"):
 			if r.ran {
 				return r, fmt.Errorf("two RBGO_RESULT lines in one run")
