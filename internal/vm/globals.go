@@ -307,9 +307,28 @@ func (vm *VM) warnDeprecatedGvar(msg string) {
 // none of them warns. Route one of them through gvarGet and every `puts` in a
 // `ruby -w` run grows a warning about $_.
 //
-// The gate is first because it is one map lookup and false in any ordinary run,
-// so the name resolution is walked once and the message is composed never.
+// ⛔ EVERY test here is behind `uninitialized`, and that ordering is the whole
+// cost of the feature. The resolution happens exactly once, as `gvar` did before
+// this existed, and a read that found a value returns through the same path it
+// always did — so an ordinary `$stdout` or `$LOAD_PATH` read pays nothing for the
+// warning, not even the one map lookup the $VERBOSE gate costs.
+//
+// The first draft asked the gate FIRST, which put `vm.globals["$VERBOSE"]` in
+// front of every Ruby-level global read in the interpreter and in both AOT
+// tiers. The comment it carried — "one map lookup and false in any ordinary
+// run" — was true and beside the point: `getgvar` is a hot instruction, the
+// lookup is unconditional, and nothing about it could be measured honestly on a
+// machine the fleet keeps at load 16. Making the cost structurally zero is worth
+// more than a benchmark of a cost that need not exist.
+//
+// Nothing is lost by deferring: `uninitialized` can only be true for a name that
+// resolved to no special, no match-data slot and no entry in vm.globals, which
+// is both rare and already an anomaly in the program being run.
 func (vm *VM) gvarGet(name string) object.Value {
+	v, uninitialized := vm.gvarResolve(name)
+	if !uninitialized {
+		return v
+	}
 	// ⛔ bytecode.ErrinfoCell ("#$!") is not a Ruby global, it is the cell the
 	// begin/rescue compiler reads the pending exception through, and it is spelled
 	// with a '#' precisely so no program can name it. vm.go's getgvar arm
@@ -317,17 +336,25 @@ func (vm *VM) gvarGet(name string) object.Value {
 	// this line every compiled `rescue` would report an uninitialised global under
 	// `ruby -w`. No Ruby global can start with '#', so the whole family is covered
 	// rather than the one spelling that exists today.
-	if !vm.warningEnabled() || strings.HasPrefix(name, "#") {
-		return vm.gvar(name)
+	if strings.HasPrefix(name, "#") {
+		return v
 	}
-	if mriPredefinedGvars[name] || englishAlias[name] != "" {
-		// A name the interpreter defines has a getter, so it is never
-		// uninitialised however little of it this VM models. The English library's
-		// readable aliases resolve to one of those names, so they inherit that.
-		return vm.gvar(name)
+	// A name the interpreter defines has a getter, so it is never uninitialised
+	// however little of it this VM models. Measured: nine of the forty-two names
+	// in the table reach this point — `$,` `$-F` `$-i` `$.` `$;` `$?` `$FILENAME`
+	// `$\` `$_` — and they are exactly the nine this VM leaves on the ordinary
+	// user-global path.
+	//
+	// The English library's aliases need no clause of their own, and that is an
+	// invariant rather than a coincidence: englishAlias lists only names whose
+	// target this VM models, so specialGvar or the match-data resolver answers
+	// every one of them and none can arrive here. Probed: 0 of its 9 keys resolve
+	// uninitialised. ⛔ Adding an alias whose target is NOT modelled would make it
+	// warn — put it in the table above, or model the target.
+	if mriPredefinedGvars[name] {
+		return v
 	}
-	v, uninitialized := vm.gvarResolve(name)
-	if uninitialized {
+	if vm.warningEnabled() {
 		// QUOTE_ID quotes the id rb_gvar_get was CALLED with, so the message
 		// names the spelling the program read, not a canonical slot.
 		vm.rbWarningf("global variable '%s' not initialized", name)
