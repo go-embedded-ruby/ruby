@@ -400,6 +400,18 @@ func (vm *VM) collectBindingLocals(b *Binding, i int) {
 	// more — locs carries the slot — but a binding with no enclosing scope then
 	// has the identity map it always had, and reads the same in a dump.
 	b.names = append(b.names, fc.iseq.Locals...)
+	// The implicit parameters of THIS scope only — depth 0 — which is MRI's
+	// get_local_variable_ptr(..., FALSE) and the reason a numbered parameter in a
+	// parent or a nested scope is invisible here.
+	for slot, n := range fc.iseq.ImplicitParams {
+		if n == "" {
+			continue
+		}
+		if b.implicit == nil {
+			b.implicit = map[string]int{}
+		}
+		b.implicit[n] = slot
+	}
 	b.locs = make([]bindLoc, len(b.names))
 	for k := range b.locs {
 		b.locs[k] = bindLoc{slot: k}

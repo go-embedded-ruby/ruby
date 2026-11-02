@@ -77,6 +77,20 @@ type builder struct {
 	curLine   int
 	lastLine  int
 	firstLine int
+
+	// implicitParams records, by slot, the name of a block's IMPLICIT parameter
+	// — `it` or `_1`..`_N` — and "" elsewhere. See bytecode.ISeq.ImplicitParams:
+	// it keeps the names the public local table must not carry, instead of
+	// discarding them as blanking alone did.
+	implicitParams []string
+}
+
+// markImplicitParam records slot i as holding the implicit parameter `name`.
+func (b *builder) markImplicitParam(i int, name string) {
+	for len(b.implicitParams) <= i {
+		b.implicitParams = append(b.implicitParams, "")
+	}
+	b.implicitParams[i] = name
 }
 
 func newBuilder(name string, params []string) *builder {
@@ -232,23 +246,24 @@ func (b *builder) localLookup(name string) (int, bool) {
 
 func (b *builder) build() *bytecode.ISeq {
 	return &bytecode.ISeq{
-		Name:        b.name,
-		Insns:       b.insns,
-		Consts:      b.consts,
-		Names:       b.names,
-		Params:      b.params,
-		NumRequired: b.numRequired,
-		SplatIndex:  b.splatIndex,
-		PostCount:   b.postCount,
-		KwNames:     b.kwNames,
-		KwRequired:  b.kwRequired,
-		KwRestSlot:  b.kwRestSlot,
-		BlockSlot:   b.blockSlot,
-		NumLocals:   len(b.locals),
-		Locals:      b.locals,
-		Children:    b.children,
-		Lines:       b.lines,
-		FirstLine:   b.firstLine,
+		Name:           b.name,
+		Insns:          b.insns,
+		Consts:         b.consts,
+		Names:          b.names,
+		Params:         b.params,
+		NumRequired:    b.numRequired,
+		SplatIndex:     b.splatIndex,
+		PostCount:      b.postCount,
+		KwNames:        b.kwNames,
+		KwRequired:     b.kwRequired,
+		KwRestSlot:     b.kwRestSlot,
+		BlockSlot:      b.blockSlot,
+		NumLocals:      len(b.locals),
+		Locals:         b.locals,
+		ImplicitParams: b.implicitParams,
+		Children:       b.children,
+		Lines:          b.lines,
+		FirstLine:      b.firstLine,
 	}
 }
 
@@ -2193,11 +2208,25 @@ func blockParamsAreImplicit(blk *ast.Block) bool {
 // under `ruby_version_is ""..."4.0"` and pins the hiding only from 4.0. Hiding
 // them here would be answering a question rbgo has not yet said it is answering;
 // it belongs with the RUBY_VERSION bump.
+//
+// ⛔ BOTH KINDS ARE RECORDED, hidden or not. Ruby 4.0 adds
+// Binding#implicit_parameters, #implicit_parameter_get and
+// #implicit_parameter_defined? (proc.c v4.0.9:680-783), which answer for `it`
+// AND for `_1`..`_N`. That is the other half of taking `_1` out of
+// #local_variables: the implicit parameters do not disappear, they move to an
+// API of their own. Blanking alone threw the name away and left nothing for the
+// new methods to read, so the name goes into ImplicitParams first — a channel
+// the public local table does not expose and the version bump does not have to
+// invent.
 func hideImplicitBlockParams(b *builder, blk *ast.Block, positionals []string) {
 	if !blockParamsAreImplicit(blk) {
 		return
 	}
 	for i, name := range positionals {
+		if name == "" {
+			continue
+		}
+		b.markImplicitParam(i, name)
 		if name != "it" {
 			continue
 		}
