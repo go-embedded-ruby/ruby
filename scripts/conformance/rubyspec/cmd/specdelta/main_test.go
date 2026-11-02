@@ -333,6 +333,55 @@ fi
 	}
 }
 
+// ⛔ A file can get WORSE without its pass count moving, and the first version
+// of this tool could not see it.
+//
+// Three `core/binding/implicit_parameter*_spec.rb` files report
+// `pass=0 fail=0 error=0` at 3.4.1 — every example behind a `ruby_version_is
+// "4.0"` guard — and **37 failures** at 4.0.9, where the guard opens and the
+// three new Binding methods do not exist. Delta 0, absent from the report, and
+// the measurement that missed them was used to size a plan: "ten examples of
+// work" was short by those 37.
+func TestAFileThatGainsFailuresWithoutLosingPassesIsNamed(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake engines are POSIX shell scripts")
+	}
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "core", "v"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "core", "v", "d_spec.rb"), []byte("#\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Guarded out on the control: no examples at all, nothing to pass or fail.
+	guarded := fakeEngine(t, root, "guarded", "echo 'RBGO_RESULT pass=0 fail=0 error=0 skip=0'\n")
+	// The guard opens on the treatment and every example fails.
+	opened := fakeEngine(t, root, "opened", "echo 'RBGO_RESULT pass=0 fail=3 error=2 skip=0'\n"+
+		"printf 'RBGO_DETAIL\\tfail\\tX\\ta\\tb\\n%.0s' 1 2 3\n"+
+		"printf 'RBGO_DETAIL\\terror\\tY\\tc\\td\\n%.0s' 1 2\n")
+
+	var out, errOut bytes.Buffer
+	main1([]string{"-root", root, "-dir", "core/v", "-quiet", guarded, opened}, &out, &errOut)
+	if !strings.Contains(out.String(), "fail+error 0 → 5") {
+		t.Errorf("the new failures are not named:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "1 gained failures without losing passes") {
+		t.Errorf("the summary does not count it:\n%s", out.String())
+	}
+	// ⛔ And -quiet must NOT hide it: a delta of 0 was exactly how it hid before.
+	if !strings.Contains(out.String(), "d_spec.rb") {
+		t.Errorf("-quiet suppressed a file that got worse:\n%s", out.String())
+	}
+
+	// The control: a file that is quiet on both engines stays out of a -quiet
+	// report, or every unchanged file would be printed.
+	out.Reset()
+	main1([]string{"-root", root, "-dir", "core/v", "-quiet", guarded, guarded}, &out, &errOut)
+	if strings.Contains(out.String(), "d_spec.rb") {
+		t.Errorf("an unchanged file was printed under -quiet:\n%s", out.String())
+	}
+}
+
 func fakeEngine(t *testing.T, dir, name, body string) string {
 	t.Helper()
 	p := filepath.Join(dir, name)

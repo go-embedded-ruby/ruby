@@ -168,12 +168,26 @@ func main1(args []string, out, errOut io.Writer) int {
 		return rows[i].file < rows[j].file
 	})
 
-	var totalA, totalB, moved, regressed, suspect int
+	var totalA, totalB, moved, regressed, suspect, appeared int
 	fmt.Fprintf(out, "%-56s %7s %7s %6s\n", "file", "control", "treat", "delta")
 	for _, r := range rows {
 		d := r.b.pass - r.a.pass
+		// ⛔ A file can get WORSE without its pass count moving. Three
+		// `core/binding/implicit_parameter*_spec.rb` files report
+		// `pass=0 fail=0 error=0` under one engine — every example behind a
+		// version guard — and 37 failures under the other, where the guard opens
+		// and the methods do not exist. Delta 0, invisible, and the measurement
+		// that missed them was used to size a plan.
+		//
+		// So the row is printed whenever EITHER the passes moved or the
+		// failures did.
+		badA, badB := r.a.fail+r.a.errs, r.b.fail+r.b.errs
+		worse := badB - badA
 		if d != 0 {
 			moved++
+		}
+		if d == 0 && worse > 0 {
+			appeared++
 		}
 		// ⛔ An unstable file is kept OUT of the verdict: its delta is noise, and
 		// counting it would make the exit status depend on a coin flip.
@@ -200,6 +214,9 @@ func main1(args []string, out, errOut io.Writer) int {
 			note += "  ⛔ fewer detail lines than its own fail+error tally"
 			suspect++
 		}
+		if worse > 0 {
+			note += fmt.Sprintf("  ⛔ fail+error %d → %d", badA, badB)
+		}
 		if *quiet && d == 0 && note == "" {
 			continue
 		}
@@ -207,7 +224,13 @@ func main1(args []string, out, errOut io.Writer) int {
 	}
 	fmt.Fprintf(out, "\n%d file(s): control %d passing, treatment %d passing, %+d\n",
 		len(rows), totalA, totalB, totalB-totalA)
-	fmt.Fprintf(out, "%d file(s) moved, %d regressed\n", moved, regressed)
+	fmt.Fprintf(out, "%d file(s) moved, %d regressed", moved, regressed)
+	if appeared > 0 {
+		// Named separately because it is not a regression in the passing total
+		// and would otherwise read as nothing at all.
+		fmt.Fprintf(out, ", %d gained failures without losing passes", appeared)
+	}
+	fmt.Fprintln(out)
 	if suspect > 0 {
 		// A total built on a tally the subject contradicts is not a measurement.
 		fmt.Fprintf(errOut, "specdelta: %d file(s) reported a tally their detail lines contradict\n", suspect)
