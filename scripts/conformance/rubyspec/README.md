@@ -212,6 +212,47 @@ Three engines is the shape the measurement rules want: reference, control
 (`main`), treatment (the branch). A difference between the last two that the
 reference does not share is the defect, or the fix.
 
+## Holding the corpus still — `cmd/specdelta`
+
+`cmd/ratchet` judges one sweep against `BASELINE`. That is the right gate for
+*"may this land"* and the wrong instrument for *"what does this change do"*: a
+baseline comparison folds in every difference between the recording machine and
+this one. `cmd/specdelta` asks the other question — hold the corpus and the
+machine fixed, vary only the interpreter, and name every file that moved.
+
+```console
+$ specdelta -root ~/ruby-spec-corpus -dir core/set -quiet -repeat 3 ./rbgo-main ./rbgo-409
+file                                        control   treat  delta
+core/set/flatten_merge_spec.rb                    3       0     -3
+core/set/to_s_spec.rb                             2       4     +2
+core/set/divide_spec.rb                           9       8     -1
+...
+57 file(s): control 175 passing, treatment 167 passing, -8
+9 file(s) moved, 8 regressed
+```
+
+That table took the `Set` half of the 4.0 version move from "eight files to work
+through" to **two defects** — the other six are examples 4.0 stopped asking for,
+which the deltas cannot tell you and the `ruby_version_is` guards can.
+
+**`-repeat N`.** One run per engine cannot tell a FLAKE from a difference. The
+tool's first real use reported `core/random/bytes_spec.rb` as `-1` between two
+binaries that differ by one file and three constants; three runs of each gave
+control 9, 9, 8 and treatment 8, 9, 9. Above 1, each file runs N times per
+engine, the **lowest** count is kept, and an engine that disagrees with itself
+marks the file `UNSTABLE` and has its delta excluded from the verdict.
+
+**Two channels.** `RBGO_RESULT pass=…` comes out of the subject's own stdout, so
+a subject that miscounts can claim anything. specdelta also counts the
+`RBGO_DETAIL` lines and flags a file that printed **fewer** than its own
+`fail + error` tally. It is an inequality and not an equality, because the shim
+emits a detail with no counter for a `before(:all)` failure and a counter with
+no detail for a guard-driven skip.
+
+Exit **2**, never 1, for a refusal: an engine that would not start, an
+unreadable result line, two result lines in one run, or an **empty population**
+— a mistyped `-dir` would otherwise print `0 files, no regressions` and exit 0.
+
 ## Caveats
 
 The shim is not full MSpec: a few matchers (`complain`, `output`,
