@@ -259,10 +259,21 @@ func (vm *VM) registerGC() {
 	// tunables. rbgo runs on Go's GC and exposes no tunable settings, so the
 	// configuration is just the read-only :implementation name: with no argument
 	// (or nil) it returns {implementation: "rbgo"}; with a Hash it applies the
-	// (empty) set of writable settings — ignoring unknown keys — and returns the
-	// settings without the global :implementation key, but raises ArgumentError if
-	// asked to write the read-only :implementation. Any other argument type raises
-	// ArgumentError, matching MRI.
+	// (empty) set of writable settings — ignoring unknown keys — and raises
+	// ArgumentError if asked to write the read-only :implementation. Any other
+	// argument type raises ArgumentError, matching MRI.
+	//
+	// ⛔ What the Hash form RETURNS changed in Ruby 4.0, and ruby/spec asserts it
+	// both ways:
+	//
+	//	ruby_version_is ""..."4.0"    "returns the same as GC.config but WITHOUT the :implementation key"
+	//	ruby_version_is "4.0"         "returns the same as GC.config, INCLUDING the :implementation key"
+	//	                              (core/gc/config_spec.rb:43 and :50)
+	//
+	// So from 4.0 the setter answers with the full configuration, exactly what
+	// the no-argument form returns — `GC.config({}).should == previous`. Here
+	// that is the one global key, which is why the pre-4.0 answer was an empty
+	// Hash and the 4.0 answer is `{implementation: "rbgo"}`.
 	def("config", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		fullConfig := func() *object.Hash {
 			h := object.NewHash()
@@ -282,9 +293,11 @@ func (vm *VM) registerGC() {
 			if _, ok := a.Get(object.NewString("implementation")); ok {
 				return raise("ArgumentError", `Attempting to set read-only key "Implementation"`)
 			}
-			// No writable settings exist on Go's GC; unknown keys are ignored. The
-			// return value mirrors the settings without the global :implementation key.
-			return object.NewHash()
+			// No writable settings exist on Go's GC; unknown keys are ignored. From
+			// 4.0 the return value is the FULL configuration — the same thing the
+			// no-argument form answers — rather than the settings with the global
+			// key stripped out.
+			return fullConfig()
 		default:
 			return raise("ArgumentError", "expected keyword arguments, got %s", vm.classOf(args[0]).name)
 		}
