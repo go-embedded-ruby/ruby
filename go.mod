@@ -132,7 +132,7 @@ require (
 	github.com/go-ruby-pagy/pagy v0.0.0-20261025191701-053fcd4aa5cc
 	github.com/go-ruby-paper-trail/paper-trail v0.0.0-20261025191706-ca25fcaea25a
 	github.com/go-ruby-parquet/parquet v0.0.0-20261025191711-6e7a95f7a303
-	github.com/go-ruby-parser/parser v0.13.1
+	github.com/go-ruby-parser/parser v0.14.0
 	github.com/go-ruby-pathname/pathname v0.0.0-20261025180827-dbeb0072806a
 	github.com/go-ruby-pg/pg v0.0.0-20261025191721-f5e310f52c5f
 	github.com/go-ruby-prawn/prawn v0.0.0-20261028113423-d440480b5471
