@@ -43,13 +43,15 @@
 //	0  every file ran and no file passed fewer examples on the second engine
 //	1  at least one file regressed
 //	2  refused: no files, an engine that would not start, output that could not
-//	   be read, no -move declared, or a declared move whose surface this run
-//	   does not cover — never reported as a regression, because "could not
-//	   measure" and "measured worse" need opposite responses
+//	   be read, no -move declared, a declared move whose surface this run does
+//	   not cover, or a pair of binaries that cannot be tied to two distinct
+//	   commits — never reported as a regression, because "could not measure"
+//	   and "measured worse" need opposite responses
 package main
 
 import (
 	"bytes"
+	"debug/buildinfo"
 	"errors"
 	"flag"
 	"fmt"
@@ -121,6 +123,7 @@ func main1(args []string, out, errOut io.Writer) int {
 	// results cannot reveal, and the wrong guess is silent.
 	move := fs.String("move", "", `required: "none" if both engines read the corpus at the same RUBY_VERSION, else FROM:TO (e.g. 3.4.1:4.0.9)`)
 	partial := fs.Bool("partial", false, "run a declared move anyway when its surface reaches outside -dir; the report is stamped PARTIAL")
+	unprovenanced := fs.Bool("unprovenanced", false, "compare engines that cannot be tied to two distinct commits; the report is stamped UNPROVENANCED")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -153,6 +156,10 @@ func main1(args []string, out, errOut io.Writer) int {
 	// THE MOVE GATE, before a single engine is started: a run whose surface is
 	// already known to be incomplete must not cost an hour first.
 	mv, err := declaredMove(*move, *root, *dir, files, errOut, *partial)
+	if err != nil {
+		return 2
+	}
+	pv, err := checkProvenance(engines, []buildFacts{readBuildFacts(engines[0]), readBuildFacts(engines[1])}, *unprovenanced, errOut)
 	if err != nil {
 		return 2
 	}
@@ -201,6 +208,11 @@ func main1(args []string, out, errOut io.Writer) int {
 	// The declaration prints ABOVE the table, so a pasted table carries the
 	// claim it was made under. "ten examples" was quoted from a table that said
 	// nothing about which comparison it was.
+	fmt.Fprint(out, "PROVENANCE")
+	fmt.Fprintln(out, pv.stamp)
+	for _, l := range pv.lines {
+		fmt.Fprintln(out, l)
+	}
 	fmt.Fprintln(out, mv.header())
 
 	var totalA, totalB, moved, regressed, suspect, appeared int
@@ -415,9 +427,148 @@ side, 37 failures on the other, and a pass delta of zero either way.
 	return d, nil
 }
 
-// errRefused carries nothing: declaredMove has already said why, in the words
-// the reader needs rather than a wrapped error string.
+// errRefused carries nothing: the refusing function has already said why, in
+// the words the reader needs rather than a wrapped error string.
 var errRefused = errors.New("refused")
+
+// buildFacts is what can be learned about an engine binary WITHOUT running it.
+type buildFacts struct {
+	known   bool   // Go build information was readable at all
+	rev     string // vcs.revision, as `go build` stamps it
+	dirty   bool   // vcs.modified: the tree had uncommitted changes
+	treeRev string // HEAD of the git work tree the binary sits in, "" if none
+}
+
+// prov is the provenance verdict: what to print, and whether it is attributable.
+type prov struct {
+	lines []string
+	stamp string
+}
+
+// ⛔ THE SECOND RULE THIS TOOL NOW ENFORCES, and it is a repeat offence.
+//
+// On 2026-11-01 a figure was published for PR #858 — `pass=118 fail=1` — from a
+// binary built BEFORE that branch existed. It carried the previous branch's
+// code. The true figure was 117/2, and the correction had to go on the record.
+// The same shape is in the notes from an earlier arc: a control built from the
+// WORKING TREE rather than from the commit, which attributed +3 to the wrong
+// fix. Writing it down twice did not stop it a third time.
+//
+// `go build` already stamps `vcs.revision` and `vcs.modified` into every binary
+// it produces from a repository, so the binary can be asked what it is. The
+// three refusals below are the three ways a comparison is void before it starts:
+//
+//	same revision      nothing to compare: one of them was not rebuilt
+//	dirty tree         the revision names code the binary does not contain
+//	stale against HEAD the tree moved on after the binary was built — #858
+//
+// An engine with no Go build information at all (MRI, a shell fake) is NOT
+// refused: it is legitimately not a Go binary. It is STAMPED, because a table
+// nobody can attribute must say so rather than look like the others.
+func checkProvenance(engines []string, facts []buildFacts, allow bool, errOut io.Writer) (prov, error) {
+	var p prov
+	unattributable := false
+	for i, f := range facts {
+		switch {
+		case !f.known:
+			p.lines = append(p.lines, fmt.Sprintf("  %-9s %s — no Go build information", role(i), engines[i]))
+			unattributable = true
+		case f.dirty:
+			p.lines = append(p.lines, fmt.Sprintf("  %-9s %s — built from %s with UNCOMMITTED changes", role(i), engines[i], short(f.rev)))
+			unattributable = true
+		default:
+			p.lines = append(p.lines, fmt.Sprintf("  %-9s %s — built from %s", role(i), engines[i], short(f.rev)))
+		}
+	}
+
+	var why []string
+	if facts[0].known && facts[1].known && !facts[0].dirty && !facts[1].dirty && facts[0].rev == facts[1].rev {
+		why = append(why, fmt.Sprintf("both engines were built from %s — one of them was not rebuilt, and there is nothing to compare", short(facts[0].rev)))
+	}
+	for i, f := range facts {
+		if f.dirty {
+			why = append(why, fmt.Sprintf("the %s was built from a tree with uncommitted changes, so %s does not name the code it contains", role(i), short(f.rev)))
+		}
+		// ⛔ #858 exactly: the binary is older than the branch it is being
+		// quoted for. Nothing in the results can show this.
+		if f.known && !f.dirty && f.treeRev != "" && f.treeRev != f.rev {
+			why = append(why, fmt.Sprintf("the %s binary was built from %s but its work tree is now at %s — it is not the code you are measuring",
+				role(i), short(f.rev), short(f.treeRev)))
+		}
+	}
+	if len(why) == 0 {
+		if unattributable {
+			p.stamp = "  ⛔ UNPROVENANCED"
+		}
+		return p, nil
+	}
+	if allow {
+		p.stamp = "  ⛔ UNPROVENANCED"
+		return p, nil
+	}
+	fmt.Fprintln(errOut, "specdelta: this comparison cannot be attributed to any pair of commits:")
+	for _, w := range why {
+		fmt.Fprintf(errOut, "    %s\n", w)
+	}
+	fmt.Fprintln(errOut, "  Rebuild, or pass -unprovenanced to say so on purpose — the report is then stamped.")
+	return prov{}, errRefused
+}
+
+func role(i int) string {
+	if i == 0 {
+		return "control"
+	}
+	return "treatment"
+}
+
+func short(rev string) string {
+	if len(rev) > 12 {
+		return rev[:12]
+	}
+	if rev == "" {
+		return "(no revision)"
+	}
+	return rev
+}
+
+// readBuildFacts asks a binary what it is. Replaceable so the policy above can
+// be driven by a table rather than by building Go binaries in a test.
+var readBuildFacts = func(path string) buildFacts {
+	var f buildFacts
+	bi, err := buildinfo.ReadFile(path)
+	if err != nil {
+		return f
+	}
+	f.known = true
+	for _, s := range bi.Settings {
+		switch s.Key {
+		case "vcs.revision":
+			f.rev = s.Value
+		case "vcs.modified":
+			f.dirty = s.Value == "true"
+		}
+	}
+	if f.rev == "" {
+		// Stamped with no revision is the same as not stamped: there is
+		// nothing to attribute it to.
+		f.known = false
+		return f
+	}
+	f.treeRev = headOf(filepath.Dir(path))
+	return f
+}
+
+// headOf asks git for a work tree's HEAD, and answers "" for anything it
+// cannot establish — a binary outside a repository is not a defect.
+func headOf(dir string) string {
+	cmd := exec.Command("git", "-C", dir, "rev-parse", "HEAD")
+	cmd.Stdin = nil
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
 
 func abs(n int) int {
 	if n < 0 {

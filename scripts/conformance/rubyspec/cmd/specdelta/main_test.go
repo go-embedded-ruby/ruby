@@ -533,6 +533,130 @@ func TestAFileTheMoveOpensSurvivesQuiet(t *testing.T) {
 	}
 }
 
+// ⛔ THE REPEAT OFFENCE. On 2026-11-01 `pass=118 fail=1` was published for
+// PR #858 from a binary built BEFORE that branch existed; it carried the
+// previous branch's code, and the true figure was 117/2. The same shape is in
+// the notes from an earlier arc — a control built from the working tree rather
+// than from the commit, attributing +3 to the wrong fix. Written down twice,
+// and it happened a third time.
+//
+// `go build` stamps vcs.revision and vcs.modified into every binary, so the
+// binary can be asked. The policy is tested as a table because the alternative
+// is building Go binaries inside a test to observe a decision that does not
+// depend on building them.
+func TestProvenanceRefusesWhatCannotBeAttributed(t *testing.T) {
+	clean := func(rev, head string) buildFacts {
+		return buildFacts{known: true, rev: rev, treeRev: head}
+	}
+	for _, tc := range []struct {
+		name    string
+		facts   []buildFacts
+		refuse  bool
+		stamped bool
+		says    string
+	}{{
+		name:  "two distinct commits, both clean — the only fully attributable case",
+		facts: []buildFacts{clean("aaaaaaaaaaaa1", "aaaaaaaaaaaa1"), clean("bbbbbbbbbbbb2", "bbbbbbbbbbbb2")},
+	}, {
+		name:   "the same revision twice: one of them was not rebuilt",
+		facts:  []buildFacts{clean("aaaaaaaaaaaa1", ""), clean("aaaaaaaaaaaa1", "")},
+		refuse: true,
+		says:   "nothing to compare",
+	}, {
+		name:   "a dirty tree: the revision does not name the code in the binary",
+		facts:  []buildFacts{clean("aaaaaaaaaaaa1", ""), {known: true, rev: "bbbbbbbbbbbb2", dirty: true}},
+		refuse: true,
+		says:   "uncommitted changes",
+	}, {
+		// #858, exactly.
+		name:   "the tree moved on after the binary was built",
+		facts:  []buildFacts{clean("aaaaaaaaaaaa1", "aaaaaaaaaaaa1"), clean("bbbbbbbbbbbb2", "cccccccccccc3")},
+		refuse: true,
+		says:   "not the code you are measuring",
+	}, {
+		// MRI, or a shell fake: legitimately not a Go binary. Not a refusal,
+		// but the table must not look like an attributable one.
+		name:    "an engine with no build information is stamped, not refused",
+		facts:   []buildFacts{{}, clean("bbbbbbbbbbbb2", "bbbbbbbbbbbb2")},
+		stamped: true,
+	}} {
+		t.Run(tc.name, func(t *testing.T) {
+			var errOut bytes.Buffer
+			p, err := checkProvenance([]string{"./a", "./b"}, tc.facts, false, &errOut)
+			if tc.refuse {
+				if err == nil {
+					t.Fatalf("not refused; printed %q", errOut.String())
+				}
+				if !strings.Contains(errOut.String(), tc.says) {
+					t.Errorf("the refusal does not say why: %q", errOut.String())
+				}
+				// ⛔ And the derogation STAMPS rather than silences: an opt-in
+				// that only removed a message would leave the same number
+				// published with nothing attached to it.
+				errOut.Reset()
+				p, err = checkProvenance([]string{"./a", "./b"}, tc.facts, true, &errOut)
+				if err != nil {
+					t.Fatalf("-unprovenanced still refused: %v", err)
+				}
+				if !strings.Contains(p.stamp, "UNPROVENANCED") {
+					t.Errorf("the derogation did not stamp the report: %q", p.stamp)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("refused: %q", errOut.String())
+			}
+			if strings.Contains(p.stamp, "UNPROVENANCED") != tc.stamped {
+				t.Errorf("stamp = %q, want stamped=%v", p.stamp, tc.stamped)
+			}
+			// Both engines are always named, so a pasted table says what
+			// produced it.
+			if len(p.lines) != 2 {
+				t.Errorf("provenance lines = %v, want one per engine", p.lines)
+			}
+		})
+	}
+}
+
+// The header has to carry both revisions into the table a reader will paste,
+// because the published figure that was wrong carried nothing at all.
+func TestTheTableNamesWhatProducedIt(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake engines are POSIX shell scripts")
+	}
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "core", "p"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "core", "p", "f_spec.rb"), []byte("#\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a := fakeEngine(t, root, "a", "echo 'RBGO_RESULT pass=1 fail=0 error=0 skip=0'\n")
+	b := fakeEngine(t, root, "b", "echo 'RBGO_RESULT pass=1 fail=0 error=0 skip=0'\n")
+
+	saved := readBuildFacts
+	t.Cleanup(func() { readBuildFacts = saved })
+	readBuildFacts = func(path string) buildFacts {
+		if strings.HasSuffix(path, "/a") {
+			return buildFacts{known: true, rev: "1111111111112222", treeRev: "1111111111112222"}
+		}
+		return buildFacts{known: true, rev: "3333333333334444", treeRev: "3333333333334444"}
+	}
+
+	var out, errOut bytes.Buffer
+	if code := main1([]string{"-root", root, "-move", "none", "-dir", "core/p", a, b}, &out, &errOut); code != 0 {
+		t.Fatalf("exit = %d, want 0; err %q", code, errOut.String())
+	}
+	for _, want := range []string{"PROVENANCE", "111111111111", "333333333333"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("the table does not carry %q:\n%s", want, out.String())
+		}
+	}
+	if strings.Contains(out.String(), "UNPROVENANCED") {
+		t.Errorf("two clean distinct commits were stamped:\n%s", out.String())
+	}
+}
+
 func fakeEngine(t *testing.T, dir, name, body string) string {
 	t.Helper()
 	p := filepath.Join(dir, name)

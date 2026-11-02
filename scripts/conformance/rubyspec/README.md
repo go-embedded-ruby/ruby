@@ -298,6 +298,31 @@ here` and is **never dropped by `-quiet`** — a delta of zero on such a file is
 the signature of the defect, not of calm — and the summary reports the move's
 share apart from the engines'.
 
+**⛔ Provenance, and it is a repeat offence.** On 2026-11-01 `pass=118 fail=1`
+was published for [#858](https://github.com/go-embedded-ruby/ruby/pull/858) from
+a binary built **before that branch existed**; it carried the previous branch's
+code, and the true figure was 117/2. The notes already held the same shape from
+an earlier arc — a control built from the *working tree* rather than from the
+commit, attributing `+3` to the wrong fix. Written down twice, and it happened
+again.
+
+`go build` stamps `vcs.revision` and `vcs.modified` into every binary it
+produces from a repository, so a binary can be **asked what it is**. specdelta
+reads both engines before running either, prints what it found above the table,
+and refuses the three ways a comparison is void before it starts:
+
+| what it finds | why the comparison is void |
+|---|---|
+| the same revision twice | one of them was not rebuilt |
+| `vcs.modified=true` | the revision does not name the code in the binary |
+| the work tree has moved past the binary's revision | the binary is not the code being measured — **#858** |
+
+An engine with no Go build information (MRI, a shell fake) is **not** refused —
+it is legitimately not a Go binary — but the report is stamped
+`⛔ UNPROVENANCED`, because a table nobody can attribute must not look like one
+that can. `-unprovenanced` is the named derogation and it stamps rather than
+silences.
+
 **`-repeat N`.** One run per engine cannot tell a FLAKE from a difference. The
 tool's first real use reported `core/random/bytes_spec.rb` as `-1` between two
 binaries that differ by one file and three constants; three runs of each gave
