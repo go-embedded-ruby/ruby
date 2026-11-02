@@ -88,12 +88,23 @@ func TestGCModule(t *testing.T) {
 		{`p GC::OPTS.is_a?(Array)`, "true\n"},
 
 		// config: no-arg and nil return {implementation: "rbgo"}; an options Hash
-		// returns the (empty) writable settings and ignores unknown keys; writing the
-		// read-only :implementation (Symbol or String) raises; a non-hash raises.
+		// ignores unknown keys; writing the read-only :implementation (Symbol or
+		// String) raises; a non-hash raises.
+		//
+		// ⛔ What the Hash form RETURNS changed in Ruby 4.0, and the two rows below
+		// moved with the version rather than because rbgo was wrong — ruby/spec
+		// asserts it both ways, which is how a reader can tell the two apart:
+		//
+		//	ruby_version_is ""..."4.0"  "returns the same as GC.config but WITHOUT the :implementation key"
+		//	ruby_version_is "4.0"       "returns the same as GC.config, INCLUDING the :implementation key"
+		//	                            (core/gc/config_spec.rb:43 and :50)
+		//
+		// So from 4.0 the setter answers with the full configuration — here the one
+		// global key — where before it answered an empty Hash.
 		{`c = GC.config; p [c.is_a?(Hash), c[:implementation]]`, `[true, "rbgo"]` + "\n"},
 		{`p GC.config(nil) == GC.config`, "true\n"},
-		{`p GC.config({})`, "{}\n"},
-		{`p (GC.config(foo: "bar") == {})`, "true\n"},
+		{`p GC.config({})`, `{implementation: "rbgo"}` + "\n"},
+		{`p (GC.config(foo: "bar") == GC.config)`, "true\n"},
 		{`begin; GC.config(implementation: "x"); rescue => e; p [e.class, e.message]; end`, `[ArgumentError, "Attempting to set read-only key \"Implementation\""]` + "\n"},
 		{`begin; GC.config("implementation" => "x"); rescue => e; p e.class; end`, "ArgumentError\n"},
 		{`begin; GC.config([]); rescue => e; p e.class; end`, "ArgumentError\n"},
