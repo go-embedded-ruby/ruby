@@ -456,6 +456,13 @@ func (vm *VM) fiberStorageKey(v object.Value) object.Value {
 // Running in the CALLER's context is what makes the automatic chaining right:
 // `cause` is the caller's $! at the moment of the call, not the target's, which
 // is exactly what ruby/spec's `:kernel_raise_across_contexts` pins from 4.0.
+//
+// ⛔ KNOWN LIMIT, #873: popCauseKwarg cannot tell a POSITIONAL Hash from
+// keyword arguments, because a native receives both as a trailing *object.Hash
+// and nothing marks which it was. So `raise("m", {cause: e})` — two positional
+// arguments, a TypeError in MRI — is read here as `raise("m", cause: e)`. The
+// defect is older than this function (Kernel#raise and Fiber#raise have always
+// had it) and wider than raise; it is filed rather than patched locally.
 func (vm *VM) asyncRaiseException(args []object.Value) object.Value {
 	args, causeGiven, causeVal := popCauseKwarg(args)
 	if len(args) == 0 {
