@@ -52,6 +52,27 @@ func (vm *VM) aotSplat(v object.Value) object.Value {
 // made `*obj` call #to_a on an object that had just said it does not respond to
 // it, and take the result.
 func (vm *VM) splatToArray(v object.Value) object.Value {
+	// ⛔ nil splats to an empty Array WITHOUT a method call, from Ruby 4.0.
+	// vm_splat_array at v4.0.9 (vm_insnhelper.c:5744) opens with
+	//
+	//	if (NIL_P(ary)) {
+	//	    return RTEST(flag) ? rb_ary_new() : rb_cArray_empty_frozen;
+	//	}
+	//
+	// before rb_check_to_array is reached, so `nil.to_a` is never sent.
+	// ruby/spec asserts it both ways and the pair is five lines apart:
+	// "calls #to_a to convert nil to an empty Array" below 4.0, and "converts
+	// nil to empty array without calling a method" from 4.0
+	// (language/variables_spec.rb:366 and :375), with the 4.0 one arranged as
+	// `nil.should_not_receive(:to_a)`.
+	//
+	// The `flag` distinction upstream is an allocation optimisation: the
+	// non-dup path hands back one shared frozen empty Array. rbgo has no flag
+	// and returns a fresh one, which is the dup-path answer and always safe —
+	// the splat's result is assigned and may be mutated.
+	if object.IsNil(v) {
+		return object.NewArrayFromSlice(nil)
+	}
 	if a, ok := v.(*object.Array); ok {
 		return a
 	}
