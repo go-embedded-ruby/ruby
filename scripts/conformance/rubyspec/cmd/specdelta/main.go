@@ -22,13 +22,30 @@
 // concern: reading the detail lines rather than the tally is what caught a
 // figure misattributed between two branches on 2026-11-01.
 //
+// ⛔ -move IS REQUIRED, and that is the point of it. On 2026-11-01 this tool
+// measured #799's version move and the figure was published as "ten examples of
+// work". The real figure was about seventy-five. Three
+// `core/binding/implicit_parameter*_spec.rb` files are `pass=0 fail=0 error=0`
+// below 4.0 — every example behind a `ruby_version_is "4.0"` guard — and 37
+// failures above it, and `-dir` had never been pointed at `core/binding` at
+// all. The corpus itself changes between the two engines, and a tool that
+// compares RESULTS cannot see that from the results.
+//
+// A note saying "ask what the target version ADDS before measuring what moves"
+// had been written down beforehand and was not consulted. So the question is no
+// longer something to remember: the tool will not produce a table until the
+// caller has declared which comparison this is, and when a move is declared it
+// censuses the corpus (internal/guardcensus) and REFUSES, before running
+// anything, if the move touches files outside the measured set.
+//
 // Exit status:
 //
 //	0  every file ran and no file passed fewer examples on the second engine
 //	1  at least one file regressed
-//	2  refused: no files, an engine that would not start, or output that could
-//	   not be read — never reported as a regression, because "could not measure"
-//	   and "measured worse" need opposite responses
+//	2  refused: no files, an engine that would not start, output that could not
+//	   be read, no -move declared, or a declared move whose surface this run
+//	   does not cover — never reported as a regression, because "could not
+//	   measure" and "measured worse" need opposite responses
 package main
 
 import (
@@ -44,6 +61,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	gc "github.com/go-embedded-ruby/ruby/scripts/conformance/rubyspec/internal/guardcensus"
 )
 
 // result is one spec file's outcome under one engine.
@@ -98,6 +117,10 @@ func main1(args []string, out, errOut io.Writer) int {
 	// With -repeat above 1 a file whose own engine disagrees with itself is named
 	// UNSTABLE and kept out of the regression verdict.
 	repeat := fs.Int("repeat", 1, "run each file this many times per engine; above 1, detect flaky files")
+	// ⛔ No default. A default here would be a guess about the one thing the
+	// results cannot reveal, and the wrong guess is silent.
+	move := fs.String("move", "", `required: "none" if both engines read the corpus at the same RUBY_VERSION, else FROM:TO (e.g. 3.4.1:4.0.9)`)
+	partial := fs.Bool("partial", false, "run a declared move anyway when its surface reaches outside -dir; the report is stamped PARTIAL")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -124,6 +147,13 @@ func main1(args []string, out, errOut io.Writer) int {
 
 	if *repeat < 1 {
 		fmt.Fprintln(errOut, "specdelta: -repeat must be at least 1")
+		return 2
+	}
+
+	// THE MOVE GATE, before a single engine is started: a run whose surface is
+	// already known to be incomplete must not cost an hour first.
+	mv, err := declaredMove(*move, *root, *dir, files, errOut, *partial)
+	if err != nil {
 		return 2
 	}
 	type row struct {
@@ -168,7 +198,13 @@ func main1(args []string, out, errOut io.Writer) int {
 		return rows[i].file < rows[j].file
 	})
 
+	// The declaration prints ABOVE the table, so a pasted table carries the
+	// claim it was made under. "ten examples" was quoted from a table that said
+	// nothing about which comparison it was.
+	fmt.Fprintln(out, mv.header())
+
 	var totalA, totalB, moved, regressed, suspect, appeared int
+	var movePass, moveBad, moveFiles int
 	fmt.Fprintf(out, "%-56s %7s %7s %6s\n", "file", "control", "treat", "delta")
 	for _, r := range rows {
 		d := r.b.pass - r.a.pass
@@ -217,6 +253,19 @@ func main1(args []string, out, errOut io.Writer) int {
 		if worse > 0 {
 			note += fmt.Sprintf("  ⛔ fail+error %d → %d", badA, badB)
 		}
+		// A file the move itself changes is marked, because its delta is not a
+		// reading of the engines at all: the corpus handed the two runs
+		// different work. Reading `+3` on such a row as an improvement is
+		// exactly the mistake this flag exists to stop.
+		if n, ok := mv.opens[r.file]; ok {
+			note += fmt.Sprintf("  ⛔ THE MOVE OPENS ≥%d examples here", n)
+			movePass += d
+			moveBad += worse
+			moveFiles++
+			// The note is non-empty from here, so -quiet cannot drop the row: a
+			// delta of zero on a file the move opens is precisely how 37
+			// failures stayed invisible.
+		}
 		if *quiet && d == 0 && note == "" {
 			continue
 		}
@@ -231,6 +280,14 @@ func main1(args []string, out, errOut io.Writer) int {
 		fmt.Fprintf(out, ", %d gained failures without losing passes", appeared)
 	}
 	fmt.Fprintln(out)
+	// ⛔ The sentence a reader will quote. It must not be a passing total alone:
+	// the published one was, and it read as a plan.
+	if mv.on {
+		fmt.Fprintf(out, "of which the declared move %s → %s accounts for %d file(s): %+d passing, %+d failing\n",
+			mv.from, mv.to, moveFiles, movePass, moveBad)
+		fmt.Fprintf(out, "the move also opens ≥%d examples in %d file(s) of the corpus in total%s\n",
+			mv.move.ExamplesOpened(), len(gcFiles(mv.move.Opened)), mv.partialNote())
+	}
 	if suspect > 0 {
 		// A total built on a tally the subject contradicts is not a measurement.
 		fmt.Fprintf(errOut, "specdelta: %d file(s) reported a tally their detail lines contradict\n", suspect)
@@ -241,6 +298,126 @@ func main1(args []string, out, errOut io.Writer) int {
 	}
 	return 0
 }
+
+// declared is what -move resolved to: either "the corpus is the same on both
+// sides" or a census of what the version move does to it.
+type declared struct {
+	on       bool
+	from, to string
+	move     gc.Move
+	opens    map[string]int // measured file -> lower-bound examples the move opens there
+	partial  bool
+}
+
+func gcFiles(sites []gc.Site) []string { return gc.Files(sites) }
+
+func (d declared) header() string {
+	if !d.on {
+		return "MOVE none declared: both engines read the same corpus, so every delta below is the ENGINE\n"
+	}
+	return fmt.Sprintf(
+		"MOVE %s → %s declared: the CORPUS differs between the two runs — %d guards open, %d close, %d inline sites flip%s\n",
+		d.from, d.to, len(d.move.Opened), len(d.move.Closed), len(d.move.Flipped), d.partialNote())
+}
+
+func (d declared) partialNote() string {
+	if d.partial {
+		return "  ⛔ PARTIAL: part of the move's surface was not measured"
+	}
+	return ""
+}
+
+// declaredMove resolves -move and, for a real move, REFUSES a run whose
+// measured set does not cover the surface the move touches.
+//
+// ⛔ The refusal is the whole feature. `specdelta -dir core/set` across a
+// 3.4→4.0 move is a perfectly well-formed command that produces a perfectly
+// readable table saying nothing about the move, because the three files the
+// move hits hardest are under core/binding. There is no way to see that in the
+// results; it is only visible in the corpus, before anything runs.
+func declaredMove(spec, root, dir string, files []string, errOut io.Writer, allowPartial bool) (declared, error) {
+	if spec == "" {
+		fmt.Fprint(errOut, `specdelta: -move is required.
+
+  -move none         both engines read the corpus at the same RUBY_VERSION, so
+                     every difference below belongs to the engine
+  -move 3.4.1:4.0.9  the engines read the corpus at DIFFERENT versions: the
+                     guards move too, and the census says which files that hits
+
+There is no default, because the results cannot answer it. A version move was
+measured here on 2026-11-01 and published as "ten examples of work"; the real
+figure was about seventy-five, and the missing part was three spec files whose
+every example is guarded away below 4.0 — zero passes and zero failures on one
+side, 37 failures on the other, and a pass delta of zero either way.
+`)
+		return declared{}, errRefused
+	}
+	if spec == "none" {
+		return declared{on: false}, nil
+	}
+	from, to, ok := strings.Cut(spec, ":")
+	if !ok || from == "" || to == "" {
+		fmt.Fprintf(errOut, "specdelta: -move wants \"none\" or FROM:TO, e.g. 3.4.1:4.0.9; got %q\n", spec)
+		return declared{}, errRefused
+	}
+	if gc.CompareVersions(from, to) == 0 {
+		fmt.Fprintf(errOut, "specdelta: -move %s:%s names the same version twice — that is -move none\n", from, to)
+		return declared{}, errRefused
+	}
+
+	sites, read, err := gc.Walk(root, []string{"language", "core"})
+	if err != nil {
+		fmt.Fprintf(errOut, "specdelta: censusing %s: %v\n", root, err)
+		return declared{}, errRefused
+	}
+	if read == 0 {
+		// ⛔ An unreadable corpus must not pass as a move that touches nothing:
+		// "found no guards" and "could not look" are the same number.
+		fmt.Fprintf(errOut, "specdelta: no *_spec.rb under %s/{language,core} — the move cannot be censused\n", root)
+		return declared{}, errRefused
+	}
+
+	d := declared{on: true, from: from, to: to, move: gc.ClassifyMove(sites, from, to), opens: map[string]int{}}
+
+	measured := make(map[string]bool, len(files))
+	for _, f := range files {
+		measured[filepath.ToSlash(f)] = true
+	}
+	for _, s := range d.move.Opened {
+		if measured[s.File] {
+			d.opens[s.File] += s.Examples
+		}
+	}
+	var outside []string
+	for _, f := range d.move.Touched() {
+		if !measured[f] {
+			outside = append(outside, f)
+		}
+	}
+	if len(outside) == 0 {
+		return d, nil
+	}
+	sort.Strings(outside)
+	fmt.Fprintf(errOut, "specdelta: the move %s → %s touches %d file(s) that -dir %s does not measure:\n", from, to, len(outside), dir)
+	for i, f := range outside {
+		if i == 12 {
+			fmt.Fprintf(errOut, "    … and %d more\n", len(outside)-i)
+			break
+		}
+		fmt.Fprintf(errOut, "    %s\n", f)
+	}
+	if !allowPartial {
+		fmt.Fprintln(errOut, "  A number from this run would not be a number about the move. Widen -dir, or")
+		fmt.Fprintln(errOut, "  pass -partial to say so on purpose — the report is then stamped PARTIAL.")
+		return declared{}, errRefused
+	}
+	d.partial = true
+	return d, nil
+}
+
+// errRefused carries nothing: declaredMove has already said why, in the words
+// the reader needs rather than a wrapped error string.
+var errRefused = errors.New("refused")
 
 func abs(n int) int {
 	if n < 0 {
