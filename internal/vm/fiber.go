@@ -271,7 +271,7 @@ func (vm *VM) registerFiber() {
 	// caller's — while the backtrace is stamped in the target, where it is
 	// actually raised.
 	cFiber.define("raise", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return vm.fiberRaise(self.(*Fiber), vm.fiberRaiseException(args))
+		return vm.fiberRaise(self.(*Fiber), vm.asyncRaiseException(args))
 	})
 	// Fiber#kill terminates the fiber with an uncatchable unwind: ensure blocks
 	// run, rescue clauses do not (rb_fiber_m_kill, cont.c). An unborn fiber goes
@@ -438,13 +438,25 @@ func (vm *VM) fiberStorageKey(v object.Value) object.Value {
 	return raise("TypeError", "%s is not a symbol nor a string", v.Inspect())
 }
 
-// fiberRaiseException builds the exception object for Fiber#raise from its
-// arguments, exactly as Kernel#raise does (rb_make_exception plus, since Ruby
-// 4.0, the cause: keyword): a bare call is a RuntimeError with an empty message,
-// a third positional argument is the backtrace, and cause: overrides the
-// automatic chaining from the caller's $!. It does not panic — the exception
-// travels to the target fiber, which raises it.
-func (vm *VM) fiberRaiseException(args []object.Value) object.Value {
+// asyncRaiseException builds the exception object for a raise aimed at ANOTHER
+// context — Fiber#raise and Thread#raise — from its arguments, exactly as
+// Kernel#raise does (rb_make_exception plus, since Ruby 4.0, the cause:
+// keyword): a bare call is a RuntimeError with an empty message, a third
+// positional argument is the backtrace, and cause: overrides the automatic
+// chaining from the caller's $!. It does not panic — the exception travels to
+// the target, which raises it.
+//
+// ⛔ It is shared because the two are the SAME rule and were not the same code.
+// Ruby 4.0 gives both of them the cause: keyword (ruby/spec's
+// `:kernel_raise_with_cause`, included by core/thread/raise_spec.rb and
+// core/fiber/raise_spec.rb alike). Fiber#raise had it; Thread#raise built its
+// exception by hand and silently dropped both cause: and the backtrace
+// argument. A second copy would have had to be kept in step with this one.
+//
+// Running in the CALLER's context is what makes the automatic chaining right:
+// `cause` is the caller's $! at the moment of the call, not the target's, which
+// is exactly what ruby/spec's `:kernel_raise_across_contexts` pins from 4.0.
+func (vm *VM) asyncRaiseException(args []object.Value) object.Value {
 	args, causeGiven, causeVal := popCauseKwarg(args)
 	if len(args) == 0 {
 		if causeGiven {
