@@ -239,7 +239,9 @@ Ruby **4.0**'s implicit-parameter API is implemented:
 `#implicit_parameter_defined?` read a block's `it` or `_1`..`_N` — the current
 scope's only, never a parent's or a nested one's, which is the single flag MRI
 distinguishes them by (`proc.c` v4.0.9:688). An implicit parameter is not a
-local variable, so these are the way to reach one.
+local variable, so these are the way to reach one. `Thread#raise` takes 4.0's
+`cause:` keyword too, chaining from the **caller's** `$!` rather than the
+target thread's.
 
 **Performance:** a 6-runtime comparative suite ([BENCHMARKS.md](BENCHMARKS.md))
 pits rbgo and rbgo+AOT against MRI, MRI+YJIT, JRuby and TruffleRuby. The rbgo
