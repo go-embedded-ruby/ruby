@@ -165,6 +165,53 @@ control ever stops reproducing, nothing below it is worth reading.
 It is an analysis tool, not a gate: nothing fails when it is not run. What it
 exists to prevent is a `UPDATE_BASELINE=1` that absorbs a loss silently.
 
+## Asking the reference interpreter — `cmd/oracle`
+
+Every parity fix starts with *"what does MRI actually do here?"*, and the obvious
+way to ask it loses the answer. `ruby probe.rb > out 2>&1` discards the **exit
+status**; a pipe into `grep` or `tail` discards whichever part of the answer did
+not match the pattern the asker already had in mind; and running the reference
+and rbgo as two separate commands invites comparing a fresh measurement against
+a remembered one.
+
+```sh
+# the reference, the control, and the treatment — in one invocation
+go run ./scripts/conformance/rubyspec/cmd/oracle \
+  -script probe.rb /usr/bin/ruby ./rbgo-main ./rbgo-branch
+```
+
+It **parses nothing**. Both streams are copied through verbatim with their byte
+counts, the status is printed as a number (or `KILLED`, for a probe that never
+returns — one of the defects found this way was an endless range that hung), and
+the only judgement made is byte equality between engines:
+
+```text
+=== the engines DISAGREED ===
+  /usr/bin/ruby vs ./rbgo-main:   stderr 1008 vs 407 bytes
+  /usr/bin/ruby vs ./rbgo-branch: stderr 1008 vs 1008 bytes
+```
+
+That second row is the point. **Same length, different content** — the branch
+had gained the warning but still differed from MRI in the line number and the
+quote style. A comparison by length would have called it parity, which is why
+`-selftest` plants exactly that case (`'$x'` vs `'$y'`, equal length, one byte
+apart) and refuses to pass unless the comparator sees it:
+
+```console
+$ go run ./scripts/conformance/rubyspec/cmd/oracle -selftest
+selftest: the comparison is right on all 5 cases
+```
+
+Exit status is `0` when the engines agreed, `1` when they did not, and `2` for a
+refusal — no script, an unreadable script, no engine named, or an engine that
+would not start. The last distinction is deliberate and tested: *"could not
+ask"* and *"answered differently"* call for opposite responses, so a missing
+interpreter must never arrive as a disagreement.
+
+Three engines is the shape the measurement rules want: reference, control
+(`main`), treatment (the branch). A difference between the last two that the
+reference does not share is the defect, or the fix.
+
 ## Caveats
 
 The shim is not full MSpec: a few matchers (`complain`, `output`,
