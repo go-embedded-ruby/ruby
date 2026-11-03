@@ -6,14 +6,14 @@
 [![License](https://img.shields.io/badge/license-BSD--3--Clause-blue)](LICENSE)
 [![Go](https://img.shields.io/github/go-mod/go-version/go-embedded-ruby/ruby?label=go&color=00ADD8)](https://go.dev/dl/)
 [![Release](https://img.shields.io/github/v/release/go-embedded-ruby/ruby?label=release&color=blue)](https://github.com/go-embedded-ruby/ruby/releases/latest)
-[![ruby/spec](https://img.shields.io/badge/ruby%2Fspec-23%2C511%20examples%20passing-1a7f37)](#runtime-conformance--rubyspec)
+[![ruby/spec](https://img.shields.io/badge/ruby%2Fspec-23%2C673%20examples%20passing-1a7f37)](#runtime-conformance--rubyspec)
 
 **A Ruby interpreter written in pure Go, with cgo disabled** — so you can embed it
 in a Go program with `import "github.com/go-embedded-ruby/ruby"`, or ship it as a
 single static binary that cross-compiles wherever Go does, with no C toolchain and
 no libruby.
 
-**How complete is it?** It runs **23,511** of ruby/spec's `language/` + `core/`
+**How complete is it?** It runs **23,673** of ruby/spec's `language/` + `core/`
 examples ([what that counts](#runtime-conformance--rubyspec)) — a large and growing
 subset of the language, and **not** a drop-in replacement for CRuby. Read
 [What does not work yet](#what-does-not-work-yet) before you depend on it; the
@@ -152,6 +152,14 @@ writing. Only the baseline is machine-checked against this file
 (`TestReadmeConformanceCountMatchesTheBaseline`); the table's other rows come
 from the sweep named below and are not derivable from the baseline, which
 records passing counts and nothing else.
+
+⛔ **The table is a sweep taken at `RUBY_VERSION` 3.4.1**, before the move to
+4.0.9. Its rows are left as they were measured rather than rewritten, because
+they come from one dated run and are not derivable from the baseline; the badge
+and the summary above count the current `BASELINE` and so already reflect 4.0.9.
+The move was measured separately — both engines built from one commit minus the
+version string — at **+144 passing and 27 examples that went red**
+([#799](https://github.com/go-embedded-ruby/ruby/issues/799)).
 
 Measured 2026-09-28 on `862a9f3`, darwin/arm64, against the corpus pinned at
 `SPEC_SHA=87b1631992bd00cf0c4934474766d54dad088191`, on an isolated snapshot of
@@ -763,7 +771,7 @@ Otherwise:
 
 | | how it differs from MRI 4.0.5 |
 | --- | --- |
-| `RUBY_VERSION` | rbgo reports `"3.4.1"`; the differential oracle it is developed against is MRI 4.0.5, and the latest MRI release is 4.0.9 (2026-10-23). The Ruby 4.0 **`Ruby` namespace** *is* implemented — all nine of `Ruby::{VERSION,RELEASE_DATE,PLATFORM,PATCHLEVEL,REVISION,COPYRIGHT,ENGINE,ENGINE_VERSION,DESCRIPTION}` are the **same objects** as their `RUBY_`-prefixed globals, as `version.c` defines them, so `Ruby::VERSION.equal?(RUBY_VERSION)` is `true`. The conformance shim resolves `ruby_version_is` at the reported `3.4.1`, so the ten examples asserting that in `core/builtin_constants` are **not counted by the gate**: measured here, that file yields 17 at 3.4.1 and 27 at 4.0.9 ([#799](https://github.com/go-embedded-ruby/ruby/issues/799)) |
+| `RUBY_VERSION` | rbgo reports `"4.0.9"`, the latest MRI release (2026-10-23). The Ruby 4.0 **`Ruby` namespace** *is* implemented — all nine of `Ruby::{VERSION,RELEASE_DATE,PLATFORM,PATCHLEVEL,REVISION,COPYRIGHT,ENGINE,ENGINE_VERSION,DESCRIPTION}` are the **same objects** as their `RUBY_`-prefixed globals, as `version.c` defines them, so `Ruby::VERSION.equal?(RUBY_VERSION)` is `true`. The move from `3.4.1` was measured before it was made, with both engines built from one commit minus the version string: **+144 passing** over `core` and `language`, and **27 examples that went red**, which no pass total shows — see [#799](https://github.com/go-embedded-ruby/ruby/issues/799) for the list of what each of the 27 needs |
 | `Numeric#to_int` | not defined — `Complex(2.9, 0).to_int` raises `NoMethodError`; MRI returns `2` |
 | `File::Stat#==` | `a == b` is `false` for two stats of the same file (MRI: `true`); `a.==(b)` answers `true` |
 | `File#stat` on a file unlinked while open | raises `Errno::ENOENT`; MRI answers from the open descriptor. rbgo's streams are buffered by path and hold no descriptor |
@@ -1248,7 +1256,7 @@ specification of the language — through `rbgo` under a minimal MSpec-compatibl
 shim, and gates CI on a **per-file** baseline
 ([`scripts/conformance/rubyspec/`](scripts/conformance/rubyspec/), in
 `BASELINE`). No file may pass fewer examples than its record or stop loading, so
-measured language conformance moves in one direction; the total, **23,511**, is
+measured language conformance moves in one direction; the total, **23,673**, is
 a derived summary rather than the thing gated. Run it with
 `scripts/conformance/rubyspec/run.sh`, and see *Runtime conformance* under
 *Status* for the full breakdown.

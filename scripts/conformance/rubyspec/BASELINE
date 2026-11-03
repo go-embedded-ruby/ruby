@@ -1,87 +1,18 @@
 # ruby/spec per-file baseline. Regenerate with UPDATE_BASELINE=1 scripts/conformance/rubyspec/run.sh.
 # One record per spec file: OK<TAB>path<TAB>passing, or FILEFAIL<TAB>path.
 # Judged per file, so no margin is needed and every move is attributable.
-#
-# Recorded 2026-09-28 on main @862a9f3, corpus SPEC_SHA
-# 87b1631992bd00cf0c4934474766d54dad088191, 2206 language/+core/ *_spec.rb.
-#
-# Updated 2026-10-08 for the frozen-def fix (#800), 23483 -> 23512 over the 20
-# files the ratchet reported improved. The twenty deltas were taken from the
-# CI run on 496c39d (ubuntu-latest, TIMEOUT=60) and applied to this file,
-# rather than re-measured here: this machine was carrying a desktop load of 12
-# and a pass/fail count is corrupted under load through the per-file timeout --
-# which is what "record it on an unloaded machine" above is about, and the
-# reason the CI job raises TIMEOUT. Three checks before writing: the pre-edit
-# sum matched the 23483 the README claimed, every one of CI's "baseline"
-# columns matched the value recorded here, and the post-edit sum equals the
-# 23512 CI reported. CI's verdict listed improved (20) and nothing else -- no
-# regression, no new file, no change of loading -- so the deltas are the whole
-# move.
-#
-# ⛔ 2026-10-09: ONE of those twenty was wrong to apply, and this file said so.
-# core/random/bytes_spec.rb went 8 -> 9, and it is the KNOWN FLAKE held at its
-# observed minimum (see "One file is recorded at its OBSERVED MINIMUM" below,
-# and the two earlier waves that applied deltas and deliberately left it alone).
-# The next run read 8 and the lane went red, which is the coin toss that note
-# predicts in those words. Put back to 8.
-#
-# All three checks that commit lists were ARITHMETIC -- sums and columns -- and
-# every one of them passed. None of them asked whether a number SHOULD move,
-# which is the question this file answers in its own header, three times over,
-# about this exact path. Measured here afterwards, same binary, six runs:
-# 9 9 9 9 8 9.
-#
-# So: when applying a ratchet delta, read the header for the FILE being moved
-# before moving it. The sum being right is not evidence that the move was.
-#
-# THE FRAME MATTERS, twice over, and both are why an earlier attempt at this
-# file was wrong:
-#
-#  1. PATH. Seven path-identity specs answer differently depending on whether
-#     the corpus is reached through a symlink -- /tmp is a symlink to
-#     private/tmp on macOS, and run.sh's default CACHE lives there. Same inode,
-#     different spelling, 20 examples. This was swept from a REAL path. The
-#     underlying divergence from MRI is issue #741.
-#  2. PLATFORM. This lane runs on ubuntu. FIVE files were measured on darwin and
-#     are recorded at CI's own LOWER ubuntu value instead: file/stat/inspect,
-#     kernel/backtick, marshal/load, process/setrlimit, kernel/require. Each was
-#     found by CI NAMING it, which is what judging per file buys -- a scalar
-#     floor would have reported one number and left the reader to guess which of
-#     2206 files moved. Under-recording is the safe direction: a file that
-#     passes more is reported as improved, never failed. The baseline belongs to
-#     the lane that enforces it.
-#
-# Swept twice; the two sweeps were byte-identical across all 2206 records.
-#
-# 2026-09-29, #741 (ISeq path vs realpath): THREE files raised by applying the
-# darwin-measured DELTA to the recorded value, not by overwriting with a darwin
-# sweep -- core/kernel/require_spec.rb is one of the five held at CI's lower
-# ubuntu number, and an overwrite would have lost that. The deltas, from two
-# sweeps of the same real-path corpus before and after the change:
-#   core/thread/backtrace/location/absolute_path_spec.rb  +3  (2 -> 5)
-#   core/kernel/require_relative_spec.rb                  +1  (54 -> 55)
-#   core/kernel/require_spec.rb                           +1  (68 -> 69, from 69 -> 70)
-# core/random/bytes_spec.rb read 9 in both post-change sweeps and is deliberately
-# left at 8: it is the known flake named below, not a mover.
-#
-# One file is recorded at its OBSERVED MINIMUM rather than its usual value:
-# core/random/bytes_spec.rb answers 8 or 9 on the same binary, on both engines,
-# and every wave measuring conformance today named it. Recorded at 8, so a run
-# that reads 9 reports an improvement and one that reads 8 passes. Recording a
-# flake at its high value would fail the lane on a coin toss -- two sweeps here
-# read 9 and a third, under heavier load, read 8.
-#
-# 2026-09-30, frozen_string_literal magic comment (+ parser v0.10.0's unary
-# plus): FIVE records raised by APPLYING the measured delta, not by overwriting
-# from a darwin sweep -- an overwrite would discard the five values held at CI's
-# lower ubuntu number and the flake note below. The deltas are the difference
-# between two sweeps of the same real-path corpus run back to back, one with
-# origin/main's binary and one with the branch's:
-#   language/magic_comment_spec.rb  +5    core/kernel/eval_spec.rb   +2
-#   core/proc/call_spec.rb          +1    core/string/uplus_spec.rb  +1
-#   language/encoding_spec.rb       +1
-# core/random/bytes_spec.rb read 9 on BOTH binaries and stays at 8: the known
-# flake named below, not a mover.
+# ⛔ ABSORBED 11 file(s) that went backwards, recorded with -absorb on 2026-11-03:
+#     core/gc/config_spec.rb: 7 passing, baseline 8 (-1)
+#     core/objectspace/_id2ref_spec.rb: 0 passing, baseline 10 (-10)
+#     core/range/max_spec.rb: 30 passing, baseline 32 (-2)
+#     core/set/divide_spec.rb: 8 passing, baseline 9 (-1)
+#     core/set/equal_value_spec.rb: 3 passing, baseline 4 (-1)
+#     core/set/exclusion_spec.rb: 2 passing, baseline 3 (-1)
+#     core/set/flatten_merge_spec.rb: 0 passing, baseline 3 (-3)
+#     core/set/flatten_spec.rb: 9 passing, baseline 10 (-1)
+#     core/set/join_spec.rb: 4 passing, baseline 5 (-1)
+#     core/set/proper_superset_spec.rb: 2 passing, baseline 3 (-1)
+#     core/set/superset_spec.rb: 2 passing, baseline 3 (-1)
 OK	core/argf/argf_spec.rb	2
 OK	core/argf/argv_spec.rb	1
 OK	core/argf/binmode_spec.rb	2
@@ -140,7 +71,7 @@ OK	core/array/deconstruct_spec.rb	1
 OK	core/array/delete_at_spec.rb	6
 OK	core/array/delete_if_spec.rb	13
 OK	core/array/delete_spec.rb	7
-OK	core/array/detect_spec.rb	0
+OK	core/array/detect_spec.rb	1
 OK	core/array/difference_spec.rb	14
 OK	core/array/dig_spec.rb	8
 OK	core/array/drop_spec.rb	11
@@ -158,7 +89,7 @@ OK	core/array/fetch_values_spec.rb	8
 OK	core/array/fill_spec.rb	47
 OK	core/array/filter_spec.rb	2
 OK	core/array/find_index_spec.rb	8
-OK	core/array/find_spec.rb	0
+OK	core/array/find_spec.rb	16
 OK	core/array/first_spec.rb	15
 OK	core/array/flatten_spec.rb	32
 OK	core/array/frozen_spec.rb	2
@@ -224,7 +155,7 @@ OK	core/array/repeated_permutation_spec.rb	11
 OK	core/array/replace_spec.rb	7
 OK	core/array/reverse_each_spec.rb	8
 OK	core/array/reverse_spec.rb	6
-OK	core/array/rfind_spec.rb	0
+OK	core/array/rfind_spec.rb	16
 OK	core/array/rindex_spec.rb	13
 OK	core/array/rotate_spec.rb	14
 OK	core/array/sample_spec.rb	24
@@ -266,16 +197,16 @@ OK	core/basicobject/singleton_method_undefined_spec.rb	2
 OK	core/binding/clone_spec.rb	2
 OK	core/binding/dup_spec.rb	3
 OK	core/binding/eval_spec.rb	15
-OK	core/binding/implicit_parameter_defined_spec.rb	0
-OK	core/binding/implicit_parameter_get_spec.rb	0
-OK	core/binding/implicit_parameters_spec.rb	0
+OK	core/binding/implicit_parameter_defined_spec.rb	13
+OK	core/binding/implicit_parameter_get_spec.rb	14
+OK	core/binding/implicit_parameters_spec.rb	10
 OK	core/binding/local_variable_defined_spec.rb	8
 OK	core/binding/local_variable_get_spec.rb	8
 OK	core/binding/local_variable_set_spec.rb	7
 OK	core/binding/local_variables_spec.rb	5
 OK	core/binding/receiver_spec.rb	1
 OK	core/binding/source_location_spec.rb	2
-OK	core/builtin_constants/builtin_constants_spec.rb	17
+OK	core/builtin_constants/builtin_constants_spec.rb	27
 OK	core/class/allocate_spec.rb	3
 OK	core/class/attached_object_spec.rb	0
 OK	core/class/dup_spec.rb	6
@@ -339,13 +270,13 @@ OK	core/conditionvariable/marshal_dump_spec.rb	1
 OK	core/conditionvariable/signal_spec.rb	2
 OK	core/conditionvariable/wait_spec.rb	6
 OK	core/data/constants_spec.rb	2
-OK	core/data/deconstruct_keys_spec.rb	8
+OK	core/data/deconstruct_keys_spec.rb	12
 OK	core/data/deconstruct_spec.rb	1
 OK	core/data/define_spec.rb	5
 OK	core/data/eql_spec.rb	8
 OK	core/data/equal_value_spec.rb	8
 OK	core/data/hash_spec.rb	3
-OK	core/data/initialize_spec.rb	20
+OK	core/data/initialize_spec.rb	24
 OK	core/data/inspect_spec.rb	1
 OK	core/data/members_spec.rb	3
 OK	core/data/to_h_spec.rb	7
@@ -552,7 +483,7 @@ OK	core/enumerator/next_values_spec.rb	8
 OK	core/enumerator/peek_spec.rb	5
 OK	core/enumerator/peek_values_spec.rb	8
 OK	core/enumerator/plus_spec.rb	2
-OK	core/enumerator/produce_spec.rb	5
+OK	core/enumerator/produce_spec.rb	9
 OK	core/enumerator/product/each_spec.rb	8
 OK	core/enumerator/product/initialize_copy_spec.rb	6
 OK	core/enumerator/product/initialize_spec.rb	5
@@ -619,7 +550,7 @@ OK	core/exception/equal_value_spec.rb	10
 OK	core/exception/errno_spec.rb	8
 OK	core/exception/exception_spec.rb	10
 OK	core/exception/exit_value_spec.rb	1
-OK	core/exception/frozen_error_spec.rb	1
+OK	core/exception/frozen_error_spec.rb	2
 OK	core/exception/full_message_spec.rb	8
 OK	core/exception/hierarchy_spec.rb	0
 OK	core/exception/inspect_spec.rb	5
@@ -663,7 +594,7 @@ OK	core/fiber/current_spec.rb	1
 OK	core/fiber/inspect_spec.rb	6
 OK	core/fiber/kill_spec.rb	6
 OK	core/fiber/new_spec.rb	4
-OK	core/fiber/raise_spec.rb	35
+OK	core/fiber/raise_spec.rb	54
 OK	core/fiber/resume_spec.rb	15
 OK	core/fiber/scheduler_spec.rb	0
 OK	core/fiber/set_scheduler_spec.rb	5
@@ -858,7 +789,7 @@ OK	core/float/uminus_spec.rb	5
 OK	core/float/uplus_spec.rb	1
 OK	core/float/zero_spec.rb	1
 OK	core/gc/auto_compact_spec.rb	1
-OK	core/gc/config_spec.rb	8
+OK	core/gc/config_spec.rb	7
 OK	core/gc/count_spec.rb	2
 OK	core/gc/disable_spec.rb	1
 OK	core/gc/enable_spec.rb	1
@@ -1016,7 +947,7 @@ OK	core/integer/zero_spec.rb	2
 OK	core/io/advise_spec.rb	13
 OK	core/io/autoclose_spec.rb	8
 OK	core/io/binmode_spec.rb	7
-OK	core/io/binread_spec.rb	7
+OK	core/io/binread_spec.rb	8
 OK	core/io/binwrite_spec.rb	11
 OK	core/io/buffer/and_spec.rb	8
 OK	core/io/buffer/bit_count_spec.rb	0
@@ -1027,7 +958,7 @@ OK	core/io/buffer/free_spec.rb	10
 OK	core/io/buffer/initialize_spec.rb	13
 OK	core/io/buffer/internal_spec.rb	3
 OK	core/io/buffer/locked_spec.rb	7
-OK	core/io/buffer/map_spec.rb	15
+OK	core/io/buffer/map_spec.rb	20
 OK	core/io/buffer/mapped_spec.rb	3
 OK	core/io/buffer/not_spec.rb	4
 OK	core/io/buffer/null_spec.rb	13
@@ -1060,7 +991,7 @@ OK	core/io/fdatasync_spec.rb	0
 OK	core/io/fileno_spec.rb	2
 OK	core/io/flush_spec.rb	1
 OK	core/io/for_fd_spec.rb	56
-OK	core/io/foreach_spec.rb	34
+OK	core/io/foreach_spec.rb	35
 OK	core/io/fsync_spec.rb	2
 OK	core/io/getbyte_spec.rb	5
 OK	core/io/getc_spec.rb	4
@@ -1088,16 +1019,16 @@ OK	core/io/putc_spec.rb	9
 OK	core/io/puts_spec.rb	16
 OK	core/io/pwrite_spec.rb	9
 OK	core/io/read_nonblock_spec.rb	17
-OK	core/io/read_spec.rb	104
+OK	core/io/read_spec.rb	105
 OK	core/io/readbyte_spec.rb	2
 OK	core/io/readchar_spec.rb	14
 OK	core/io/readline_spec.rb	11
-OK	core/io/readlines_spec.rb	54
+OK	core/io/readlines_spec.rb	55
 OK	core/io/readpartial_spec.rb	14
 OK	core/io/reopen_spec.rb	27
 OK	core/io/rewind_spec.rb	6
 OK	core/io/seek_spec.rb	15
-OK	core/io/select_spec.rb	14
+OK	core/io/select_spec.rb	15
 OK	core/io/set_encoding_by_bom_spec.rb	16
 OK	core/io/set_encoding_spec.rb	37
 OK	core/io/stat_spec.rb	1
@@ -1115,10 +1046,10 @@ OK	core/io/tty_spec.rb	2
 OK	core/io/ungetbyte_spec.rb	6
 OK	core/io/ungetc_spec.rb	11
 OK	core/io/write_nonblock_spec.rb	18
-OK	core/io/write_spec.rb	43
+OK	core/io/write_spec.rb	44
 OK	core/kernel/Array_spec.rb	14
 OK	core/kernel/Complex_spec.rb	68
-OK	core/kernel/Float_spec.rb	97
+OK	core/kernel/Float_spec.rb	98
 OK	core/kernel/Hash_spec.rb	10
 OK	core/kernel/Integer_spec.rb	243
 OK	core/kernel/Rational_spec.rb	32
@@ -1163,7 +1094,7 @@ OK	core/kernel/gsub_spec.rb	0
 OK	core/kernel/initialize_clone_spec.rb	4
 OK	core/kernel/initialize_copy_spec.rb	4
 OK	core/kernel/initialize_dup_spec.rb	3
-OK	core/kernel/inspect_spec.rb	4
+OK	core/kernel/inspect_spec.rb	6
 OK	core/kernel/instance_of_spec.rb	7
 OK	core/kernel/instance_variable_defined_spec.rb	6
 OK	core/kernel/instance_variable_get_spec.rb	17
@@ -1182,7 +1113,7 @@ OK	core/kernel/methods_spec.rb	18
 OK	core/kernel/nil_spec.rb	1
 OK	core/kernel/not_match_spec.rb	3
 OK	core/kernel/object_id_spec.rb	13
-OK	core/kernel/open_spec.rb	14
+OK	core/kernel/open_spec.rb	15
 OK	core/kernel/p_spec.rb	8
 OK	core/kernel/pp_spec.rb	0
 OK	core/kernel/print_spec.rb	4
@@ -1291,14 +1222,14 @@ OK	core/math/cosh_spec.rb	7
 OK	core/math/erf_spec.rb	7
 OK	core/math/erfc_spec.rb	7
 OK	core/math/exp_spec.rb	7
-OK	core/math/expm1_spec.rb	0
+OK	core/math/expm1_spec.rb	7
 OK	core/math/frexp_spec.rb	6
 OK	core/math/gamma_spec.rb	13
 OK	core/math/hypot_spec.rb	7
 OK	core/math/ldexp_spec.rb	12
 OK	core/math/lgamma_spec.rb	10
 OK	core/math/log10_spec.rb	9
-OK	core/math/log1p_spec.rb	0
+OK	core/math/log1p_spec.rb	10
 OK	core/math/log2_spec.rb	8
 OK	core/math/log_spec.rb	11
 OK	core/math/sin_spec.rb	7
@@ -1354,7 +1285,7 @@ OK	core/module/const_get_spec.rb	45
 OK	core/module/const_missing_spec.rb	5
 OK	core/module/const_set_spec.rb	15
 OK	core/module/const_source_location_spec.rb	40
-OK	core/module/constants_spec.rb	7
+OK	core/module/constants_spec.rb	11
 OK	core/module/define_method_spec.rb	85
 OK	core/module/define_singleton_method_spec.rb	1
 OK	core/module/deprecate_constant_spec.rb	6
@@ -1408,7 +1339,7 @@ OK	core/module/refinements_spec.rb	3
 OK	core/module/remove_class_variable_spec.rb	8
 OK	core/module/remove_const_spec.rb	11
 OK	core/module/remove_method_spec.rb	14
-OK	core/module/ruby2_keywords_spec.rb	14
+OK	core/module/ruby2_keywords_spec.rb	15
 OK	core/module/set_temporary_name_spec.rb	13
 OK	core/module/singleton_class_spec.rb	5
 OK	core/module/to_s_spec.rb	8
@@ -1487,7 +1418,7 @@ OK	core/numeric/truncate_spec.rb	1
 OK	core/numeric/uminus_spec.rb	3
 OK	core/numeric/uplus_spec.rb	1
 OK	core/numeric/zero_spec.rb	2
-OK	core/objectspace/_id2ref_spec.rb	10
+OK	core/objectspace/_id2ref_spec.rb	0
 OK	core/objectspace/count_objects_spec.rb	0
 OK	core/objectspace/define_finalizer_spec.rb	7
 OK	core/objectspace/each_object_spec.rb	22
@@ -1533,8 +1464,8 @@ OK	core/proc/hash_spec.rb	3
 OK	core/proc/inspect_spec.rb	1
 OK	core/proc/lambda_spec.rb	10
 OK	core/proc/new_spec.rb	10
-OK	core/proc/parameters_spec.rb	25
-OK	core/proc/ruby2_keywords_spec.rb	6
+OK	core/proc/parameters_spec.rb	27
+OK	core/proc/ruby2_keywords_spec.rb	7
 OK	core/proc/source_location_spec.rb	5
 OK	core/proc/to_proc_spec.rb	1
 OK	core/proc/to_s_spec.rb	6
@@ -1646,7 +1577,7 @@ OK	core/queue/pop_spec.rb	20
 OK	core/queue/push_spec.rb	1
 OK	core/queue/shift_spec.rb	1
 OK	core/queue/size_spec.rb	1
-OK	core/random/bytes_spec.rb	8
+OK	core/random/bytes_spec.rb	9
 OK	core/random/default_spec.rb	1
 OK	core/random/equal_value_spec.rb	2
 OK	core/random/new_seed_spec.rb	3
@@ -1676,7 +1607,7 @@ OK	core/range/include_spec.rb	78
 OK	core/range/initialize_spec.rb	7
 OK	core/range/inspect_spec.rb	4
 OK	core/range/last_spec.rb	13
-OK	core/range/max_spec.rb	32
+OK	core/range/max_spec.rb	30
 OK	core/range/member_spec.rb	1
 OK	core/range/min_spec.rb	30
 OK	core/range/minmax_spec.rb	13
@@ -1689,7 +1620,7 @@ OK	core/range/size_spec.rb	7
 OK	core/range/step_spec.rb	73
 OK	core/range/to_a_spec.rb	7
 OK	core/range/to_s_spec.rb	3
-OK	core/range/to_set_spec.rb	3
+OK	core/range/to_set_spec.rb	4
 OK	core/rational/abs_spec.rb	1
 OK	core/rational/ceil_spec.rb	9
 OK	core/rational/comparison_spec.rb	13
@@ -1767,16 +1698,16 @@ OK	core/set/delete_if_spec.rb	4
 OK	core/set/delete_spec.rb	5
 OK	core/set/difference_spec.rb	1
 OK	core/set/disjoint_spec.rb	4
-OK	core/set/divide_spec.rb	9
+OK	core/set/divide_spec.rb	8
 OK	core/set/each_spec.rb	3
 OK	core/set/empty_spec.rb	1
 OK	core/set/enumerable/to_set_spec.rb	2
 OK	core/set/eql_spec.rb	1
-OK	core/set/equal_value_spec.rb	4
-OK	core/set/exclusion_spec.rb	3
+OK	core/set/equal_value_spec.rb	3
+OK	core/set/exclusion_spec.rb	2
 OK	core/set/filter_spec.rb	1
-OK	core/set/flatten_merge_spec.rb	3
-OK	core/set/flatten_spec.rb	10
+OK	core/set/flatten_merge_spec.rb	0
+OK	core/set/flatten_spec.rb	9
 OK	core/set/gt_spec.rb	1
 OK	core/set/gte_spec.rb	1
 OK	core/set/hash_spec.rb	1
@@ -1786,7 +1717,7 @@ OK	core/set/initialize_spec.rb	10
 OK	core/set/inspect_spec.rb	1
 OK	core/set/intersect_spec.rb	4
 OK	core/set/intersection_spec.rb	4
-OK	core/set/join_spec.rb	5
+OK	core/set/join_spec.rb	4
 OK	core/set/keep_if_spec.rb	4
 OK	core/set/length_spec.rb	1
 OK	core/set/lt_spec.rb	1
@@ -1798,7 +1729,7 @@ OK	core/set/minus_spec.rb	3
 OK	core/set/plus_spec.rb	1
 OK	core/set/pretty_print_cycle_spec.rb	0
 OK	core/set/proper_subset_spec.rb	2
-OK	core/set/proper_superset_spec.rb	3
+OK	core/set/proper_superset_spec.rb	2
 OK	core/set/reject_spec.rb	5
 OK	core/set/replace_spec.rb	5
 OK	core/set/select_spec.rb	5
@@ -1807,9 +1738,9 @@ OK	core/set/size_spec.rb	1
 OK	core/set/sortedset/sortedset_spec.rb	0
 OK	core/set/subset_spec.rb	2
 OK	core/set/subtract_spec.rb	2
-OK	core/set/superset_spec.rb	3
+OK	core/set/superset_spec.rb	2
 OK	core/set/to_a_spec.rb	1
-OK	core/set/to_s_spec.rb	2
+OK	core/set/to_s_spec.rb	4
 OK	core/set/union_spec.rb	4
 OK	core/signal/list_spec.rb	4
 OK	core/signal/signame_spec.rb	6
@@ -2070,7 +2001,7 @@ OK	core/thread/new_spec.rb	6
 OK	core/thread/pass_spec.rb	1
 OK	core/thread/pending_interrupt_spec.rb	3
 OK	core/thread/priority_spec.rb	7
-OK	core/thread/raise_spec.rb	48
+OK	core/thread/raise_spec.rb	68
 OK	core/thread/report_on_exception_spec.rb	5
 OK	core/thread/run_spec.rb	3
 OK	core/thread/set_trace_func_spec.rb	0
@@ -2214,13 +2145,13 @@ OK	language/alias_spec.rb	22
 OK	language/and_spec.rb	10
 OK	language/array_spec.rb	23
 OK	language/assignments_spec.rb	34
-OK	language/block_spec.rb	163
+OK	language/block_spec.rb	164
 OK	language/break_spec.rb	29
 OK	language/case_spec.rb	48
 OK	language/class_spec.rb	40
 OK	language/class_variable_spec.rb	13
 OK	language/comment_spec.rb	1
-OK	language/constants_spec.rb	88
+OK	language/constants_spec.rb	90
 OK	language/def_spec.rb	63
 OK	language/defined_spec.rb	256
 OK	language/delegation_spec.rb	12
@@ -2232,7 +2163,7 @@ OK	language/for_spec.rb	32
 OK	language/hash_spec.rb	29
 OK	language/heredoc_spec.rb	10
 OK	language/if_spec.rb	50
-OK	language/it_parameter_spec.rb	15
+OK	language/it_parameter_spec.rb	16
 OK	language/keyword_arguments_spec.rb	20
 OK	language/lambda_spec.rb	56
 OK	language/line_spec.rb	6
@@ -2244,7 +2175,7 @@ OK	language/method_spec.rb	160
 OK	language/module_spec.rb	14
 OK	language/next_spec.rb	31
 OK	language/not_spec.rb	9
-OK	language/numbered_parameters_spec.rb	16
+OK	language/numbered_parameters_spec.rb	17
 OK	language/numbers_spec.rb	21
 OK	language/optional_assignments_spec.rb	74
 OK	language/or_spec.rb	12
@@ -2275,7 +2206,7 @@ OK	language/retry_spec.rb	3
 OK	language/return_spec.rb	37
 OK	language/safe_navigator_spec.rb	9
 OK	language/safe_spec.rb	1
-OK	language/send_spec.rb	72
+OK	language/send_spec.rb	73
 OK	language/singleton_class_spec.rb	47
 OK	language/source_encoding_spec.rb	0
 OK	language/string_spec.rb	25
@@ -2285,6 +2216,6 @@ OK	language/throw_spec.rb	9
 OK	language/undef_spec.rb	6
 OK	language/unless_spec.rb	6
 OK	language/until_spec.rb	25
-OK	language/variables_spec.rb	115
+OK	language/variables_spec.rb	118
 OK	language/while_spec.rb	34
 OK	language/yield_spec.rb	36
