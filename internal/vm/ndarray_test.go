@@ -548,7 +548,13 @@ func TestNDArrayArgumentChecks(t *testing.T) {
 		{`NDArray.zeros(2, 0).max(1)`, "ArgumentError", "zero-length axis"},
 		{a + `a.argmax(1, 2)`, "ArgumentError", "(given 2, expected 0..1)"},
 		{a + `a.argmax("x")`, "TypeError", "String into Integer"},
-		{a + `a.argmin(axis: 1)`, "ArgumentError", "unknown keyword: :axis"},
+		{a + `a.argmin(axes: 1)`, "ArgumentError", "unknown keyword: :axes"},
+		{a + `a.sum(0, axis: 1)`, "ArgumentError", "both positionally and as a keyword"},
+		{a + `a.argmax(0, axis: 1)`, "ArgumentError", "both positionally and as a keyword"},
+		{a + `a.cumsum(0, axis: 1)`, "ArgumentError", "both positionally and as a keyword"},
+		{a + `a.sum(axis: "x")`, "TypeError", "String into Integer"},
+		{a + `a.sum(axis: 2)`, "IndexError", "axis out of range"},
+		{a + `a.cumsum(axes: 1)`, "ArgumentError", "unknown keyword: :axes"},
 		{a + `a.argmax(4)`, "IndexError", "axis out of range"},
 		{`NDArray.zeros(0).argmin(keepdims: true)`, "ArgumentError", "empty"},
 		{a + `a.cumsum(1, 2)`, "ArgumentError", "(given 2, expected 0..1)"},
@@ -582,6 +588,48 @@ func TestNDArrayArgumentChecks(t *testing.T) {
 		}
 		if strings.Contains(err.Error(), "runtime error") {
 			t.Errorf("src=%q leaked a Go runtime fault: %v", c.src, err)
+		}
+	}
+}
+
+// TestNDArrayAxisKeyword: NumPy spells the axis as a keyword (a.sum(axis=0)), so
+// a Ruby user writes a.sum(axis: 0). Before, only keepdims: was accepted and
+// axis: raised "unknown keyword: :axis". Values are NumPy's, by hand, for
+// a = arange(6).reshape(2, 3) = [[0,1,2],[3,4,5]]. The positional form stays.
+func TestNDArrayAxisKeyword(t *testing.T) {
+	const a = `a = NDArray.arange(6).reshape(2, 3); `
+	for _, c := range []struct{ src, want string }{
+		// a.sum(axis=0) == [3, 5, 7]; a.sum(axis=1) == [3, 12].
+		{a + `p a.sum(axis: 0).to_a`, "[3.0, 5.0, 7.0]\n"},
+		{a + `p a.sum(axis: 1).to_a`, "[3.0, 12.0]\n"},
+		{a + `p a.sum(axis: -1).to_a`, "[3.0, 12.0]\n"},
+		// Control: the positional form gives the same answers.
+		{a + `p a.sum(0).to_a`, "[3.0, 5.0, 7.0]\n"},
+		{a + `p a.sum(1).to_a`, "[3.0, 12.0]\n"},
+		// a.sum(axis=1, keepdims=True).shape == (2, 1), in either order of keywords.
+		{a + `p a.sum(axis: 1, keepdims: true).shape`, "[2, 1]\n"},
+		{a + `p a.sum(keepdims: true, axis: 1).shape`, "[2, 1]\n"},
+		{a + `p a.sum(1, keepdims: true).shape`, "[2, 1]\n"},
+		// axis=None (nil) is the whole array.
+		{a + `p a.sum(axis: nil)`, "15.0\n"},
+		{a + `p a.sum(axis: nil, keepdims: true).shape`, "[1, 1]\n"},
+		{a + `p a.sum`, "15.0\n"},
+		// The other reductions.
+		{a + `p a.mean(axis: 0).to_a`, "[1.5, 2.5, 3.5]\n"},
+		{a + `p a.prod(axis: 1).to_a`, "[0.0, 60.0]\n"},
+		{a + `p a.max(axis: 1).to_a`, "[2.0, 5.0]\n"},
+		{a + `p a.min(axis: 0).to_a`, "[0.0, 1.0, 2.0]\n"},
+		{a + `p a.argmax(axis: 1).to_a`, "[2.0, 2.0]\n"},
+		{a + `p a.argmin(axis: 0).to_a`, "[0.0, 0.0, 0.0]\n"},
+		{a + `p a.argmax(1).to_a`, "[2.0, 2.0]\n"},
+		{a + `p a.argmax(axis: nil)`, "5\n"},
+		// cumsum(axis=0) == [[0,1,2],[3,5,7]]; no axis flattens.
+		{a + `p a.cumsum(axis: 0).to_a`, "[0.0, 1.0, 2.0, 3.0, 5.0, 7.0]\n"},
+		{a + `p a.cumsum(0).to_a`, "[0.0, 1.0, 2.0, 3.0, 5.0, 7.0]\n"},
+		{a + `p a.cumsum.to_a`, "[0.0, 1.0, 3.0, 6.0, 10.0, 15.0]\n"},
+	} {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q got=%q want=%q", c.src, got, c.want)
 		}
 	}
 }
