@@ -80,6 +80,53 @@ and be recorded as not loading, which bakes the load into the gate. The CI job
 (`.github/workflows/rubyspec-ratchet.yml`) enforces the baseline on every push
 and pull request, and raises `TIMEOUT` to 60s for exactly this reason.
 
+### ⛔ A re-record reads the old baseline first, and refuses to bank a loss
+
+`-update` used to write straight over `BASELINE` **without reading it**, so the
+one thing it could never report was whether the sweep replacing the record was
+better or worse than it. The comparison simply never happened.
+
+The hazard was written down twice in this repository and gated in neither —
+`cmd/guards`' own header (*"`UPDATE_BASELINE=1` records whatever it sees and
+would absorb a loss"*) and the ratchet lane's comment about an Ubuntu image
+roll: *"the same run also showed `kernel/require` +1, equally environmental, and
+`UPDATE_BASELINE=1` would bank it as progress."* Two notes, no refusal.
+
+You re-record to lock in a **win**. A file that went backwards is either a real
+regression or an environment that moved, and both need a person — not an
+overwrite that erases the evidence of itself:
+
+```console
+$ UPDATE_BASELINE=1 scripts/conformance/rubyspec/run.sh
+re-record: 2206 files measured, 2206 in the baseline being replaced
+
+-- REGRESSED (1) --
+   core/a_spec.rb: 9 passing, baseline 10 (-1)
+
+::error::REFUSING to re-record: 1 file(s) went backwards -- named above
+A re-record locks in a win. Fix the regression, or pass -absorb to record
+it on purpose -- the baseline then carries a line naming every file absorbed.
+```
+
+It exits **1**, distinct in the source from the plain regression verdict
+although they share the status: *"this branch broke something"* and *"I declined
+to erase the evidence that something is broken"* send a reader to different
+places.
+
+`-absorb` is the named derogation and it **stamps the artefact**, not just the
+log — a console warning scrolls away, and the baseline outlives the run that
+wrote it by months:
+
+```text
+# ⛔ ABSORBED 1 file(s) that went backwards, recorded with -absorb on 2026-11-03:
+#     core/a_spec.rb: 9 passing, baseline 10 (-1)
+```
+
+A refused re-record leaves `BASELINE` **byte for byte as it was**, which is
+asserted: a refusal that truncated the file would destroy the record it declined
+to replace. A first recording, with no baseline to be worse than, is not a
+refusal at all.
+
 ## `cmd/phantom` — is a pass the behaviour, or the method's absence?
 
 A spec that asserts an exception class cannot tell why it got one.
