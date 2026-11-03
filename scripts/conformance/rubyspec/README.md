@@ -162,8 +162,37 @@ bound**, since a static reader cannot expand `it_behaves_like`. Read the guard
 columns as the measurement and the example columns as a floor — and if the
 control ever stops reproducing, nothing below it is worth reading.
 
-It is an analysis tool, not a gate: nothing fails when it is not run. What it
-exists to prevent is a `UPDATE_BASELINE=1` that absorbs a loss silently.
+### ⛔ It used to be an analysis tool, and that was the defect
+
+This section read *"it is an analysis tool, not a gate: nothing fails when it
+is not run"*. On 2026-11-01 it was not run, and the 4.0 version move was
+measured by comparing **passing** counts between two engines and published as
+**ten examples of work**. The real figure was about **seventy-five**.
+
+Three `core/binding/implicit_parameter*_spec.rb` files are
+`pass=0 fail=0 error=0` below 4.0 — every example behind a `ruby_version_is
+"4.0"` guard — and **37 failures** above it, because Ruby 4.0 adds three
+`Binding` methods rbgo does not have. A pass delta over those files is zero in
+both directions, and `-dir` had never been pointed at `core/binding` at all.
+
+The lesson *"ask what the target version **adds** before measuring what moves"*
+was already written down and was not consulted. So the reading moved into
+`internal/guardcensus`, and `cmd/specdelta` now **cannot produce a table** until
+the caller declares which comparison it is making. The note was not the missing
+part; a refusal was.
+
+```bash
+# what the move does to the CORPUS, before any engine runs
+go run ./scripts/conformance/rubyspec/cmd/guards \
+    -root ~/ruby-spec-corpus -move 3.4.1:4.0.9
+```
+
+Against the pinned corpus that move **opens 67 block guards in 50 files**
+(≥145 examples), **closes 45** in 37 files, and **flips 5 inline sites** in 3.
+Those 50 files are the surface any claim about the move has to cover.
+
+It remains the right instrument for the other half too: a `UPDATE_BASELINE=1`
+that absorbs a loss silently.
 
 ## Asking the reference interpreter — `cmd/oracle`
 
@@ -221,7 +250,8 @@ this one. `cmd/specdelta` asks the other question — hold the corpus and the
 machine fixed, vary only the interpreter, and name every file that moved.
 
 ```console
-$ specdelta -root ~/ruby-spec-corpus -dir core/set -quiet -repeat 3 ./rbgo-main ./rbgo-409
+$ specdelta -root ~/ruby-spec-corpus -move none -dir core/set -quiet -repeat 3 ./rbgo-main ./rbgo-409
+MOVE none declared: both engines read the same corpus, so every delta below is the ENGINE
 file                                        control   treat  delta
 core/set/flatten_merge_spec.rb                    3       0     -3
 core/set/to_s_spec.rb                             2       4     +2
@@ -235,12 +265,100 @@ That table took the `Set` half of the 4.0 version move from "eight files to work
 through" to **two defects** — the other six are examples 4.0 stopped asking for,
 which the deltas cannot tell you and the `ruby_version_is` guards can.
 
+**⛔ `-move` is required, and has no default.** The two runs above read the same
+corpus; a run across a version move reads two *different* corpora, and the
+tables look identical. Only one of them is a reading of the engines.
+
+| declaration | what it asserts |
+|---|---|
+| `-move none` | both engines read the corpus at the same `RUBY_VERSION` |
+| `-move 3.4.1:4.0.9` | they do not: the guards move too |
+
+With a move declared, specdelta censuses the corpus through
+`internal/guardcensus` — the same reading `cmd/guards` prints — and **refuses
+before starting either engine** if the move touches a file `-dir` does not
+measure:
+
+```console
+$ specdelta -root ~/ruby-spec-corpus -move 3.4.1:4.0.9 -dir core/set ./a ./b
+specdelta: the move 3.4.1 → 4.0.9 touches 49 file(s) that -dir core/set does not measure:
+    core/array/detect_spec.rb
+    core/binding/implicit_parameter_defined_spec.rb
+    core/binding/implicit_parameter_get_spec.rb
+    core/binding/implicit_parameters_spec.rb
+    …
+  A number from this run would not be a number about the move. Widen -dir, or
+  pass -partial to say so on purpose — the report is then stamped PARTIAL.
+```
+
+The refusal comes **first** because a `core/` sweep is an hour, and an hour
+spent on a figure already known to be incomplete is the cost the gate exists to
+avoid. A measured file the move opens is marked `⛔ THE MOVE OPENS ≥N examples
+here` and is **never dropped by `-quiet`** — a delta of zero on such a file is
+the signature of the defect, not of calm — and the summary reports the move's
+share apart from the engines'.
+
+**⛔ Provenance, and it is a repeat offence.** On 2026-11-01 `pass=118 fail=1`
+was published for [#858](https://github.com/go-embedded-ruby/ruby/pull/858) from
+a binary built **before that branch existed**; it carried the previous branch's
+code, and the true figure was 117/2. The notes already held the same shape from
+an earlier arc — a control built from the *working tree* rather than from the
+commit, attributing `+3` to the wrong fix. Written down twice, and it happened
+again.
+
+`go build` stamps `vcs.revision` and `vcs.modified` into every binary it
+produces from a repository, so a binary can be **asked what it is**. specdelta
+reads both engines before running either, prints what it found above the table,
+and refuses the three ways a comparison is void before it starts:
+
+| what it finds | why the comparison is void |
+|---|---|
+| the same revision twice | one of them was not rebuilt |
+| `vcs.modified=true` | the revision does not name the code in the binary |
+| the work tree has moved past the binary's revision | the binary is not the code being measured — **#858** |
+
+An engine with no Go build information (MRI, a shell fake) is **not** refused —
+it is legitimately not a Go binary — but the report is stamped
+`⛔ UNPROVENANCED`, because a table nobody can attribute must not look like one
+that can. `-unprovenanced` is the named derogation and it stamps rather than
+silences.
+
 **`-repeat N`.** One run per engine cannot tell a FLAKE from a difference. The
 tool's first real use reported `core/random/bytes_spec.rb` as `-1` between two
 binaries that differ by one file and three constants; three runs of each gave
 control 9, 9, 8 and treatment 8, 9, 9. Above 1, each file runs N times per
 engine, the **lowest** count is kept, and an engine that disagrees with itself
 marks the file `UNSTABLE` and has its delta excluded from the verdict.
+
+**⛔ An example that went red inside a file that improved.** On 2026-11-02 a
+control and a treatment built from the same commit minus one change read:
+
+```text
+core/thread/raise_spec.rb   51 → 68   +17
+53 file(s): control 328 passing, treatment 345 passing, +17
+1 file(s) moved, 0 regressed
+```
+
+True, and incomplete. **Nineteen examples turned green and two turned red** —
+and no count of passes, of failures, or of both can show a swap. The two were
+found by hand, by comparing the two runs' failure *descriptions*; the example
+that broke had been passing **because of** a different defect, so nothing about
+it looked wrong.
+
+specdelta now compares those descriptions as a multiset (the same shared block
+included twice reports twice), names every one the treatment reports more often,
+and **exits 1** for it — a per-file verdict of "0 regressed" must not carry an
+example out:
+
+```console
+core/thread/raise_spec.rb                 51      68    +17
+      ⛔ WENT RED: fail  shared kernel_raise | raises a TypeError when passed a message and an extra argument (×2)
+
+1 file(s) moved, 0 regressed, 2 example(s) WENT RED
+```
+
+It keys on the **description** and not the message, because a message carries
+object addresses that differ between two runs of the *same* binary.
 
 **Two channels.** `RBGO_RESULT pass=…` comes out of the subject's own stdout, so
 a subject that miscounts can claim anything. specdelta also counts the
@@ -250,8 +368,10 @@ emits a detail with no counter for a `before(:all)` failure and a counter with
 no detail for a guard-driven skip.
 
 Exit **2**, never 1, for a refusal: an engine that would not start, an
-unreadable result line, two result lines in one run, or an **empty population**
-— a mistyped `-dir` would otherwise print `0 files, no regressions` and exit 0.
+unreadable result line, two result lines in one run, a missing or malformed
+`-move`, a declared move whose surface this run does not cover, or an **empty
+population** — a mistyped `-dir` would otherwise print `0 files, no regressions`
+and exit 0.
 
 ## Caveats
 

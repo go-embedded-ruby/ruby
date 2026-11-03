@@ -22,17 +22,37 @@
 // concern: reading the detail lines rather than the tally is what caught a
 // figure misattributed between two branches on 2026-11-01.
 //
+// ⛔ -move IS REQUIRED, and that is the point of it. On 2026-11-01 this tool
+// measured #799's version move and the figure was published as "ten examples of
+// work". The real figure was about seventy-five. Three
+// `core/binding/implicit_parameter*_spec.rb` files are `pass=0 fail=0 error=0`
+// below 4.0 — every example behind a `ruby_version_is "4.0"` guard — and 37
+// failures above it, and `-dir` had never been pointed at `core/binding` at
+// all. The corpus itself changes between the two engines, and a tool that
+// compares RESULTS cannot see that from the results.
+//
+// A note saying "ask what the target version ADDS before measuring what moves"
+// had been written down beforehand and was not consulted. So the question is no
+// longer something to remember: the tool will not produce a table until the
+// caller has declared which comparison this is, and when a move is declared it
+// censuses the corpus (internal/guardcensus) and REFUSES, before running
+// anything, if the move touches files outside the measured set.
+//
 // Exit status:
 //
 //	0  every file ran and no file passed fewer examples on the second engine
-//	1  at least one file regressed
-//	2  refused: no files, an engine that would not start, or output that could
-//	   not be read — never reported as a regression, because "could not measure"
+//	1  at least one file regressed, or an EXAMPLE went red inside a file that
+//	   improved on balance
+//	2  refused: no files, an engine that would not start, output that could not
+//	   be read, no -move declared, a declared move whose surface this run does
+//	   not cover, or a pair of binaries that cannot be tied to two distinct
+//	   commits — never reported as a regression, because "could not measure"
 //	   and "measured worse" need opposite responses
 package main
 
 import (
 	"bytes"
+	"debug/buildinfo"
 	"errors"
 	"flag"
 	"fmt"
@@ -44,6 +64,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	gc "github.com/go-embedded-ruby/ruby/scripts/conformance/rubyspec/internal/guardcensus"
 )
 
 // result is one spec file's outcome under one engine.
@@ -52,6 +74,13 @@ type result struct {
 	details                int  // RBGO_DETAIL lines seen
 	ran                    bool // a RESULT line was found at all
 	killed                 bool
+
+	// labels counts the DESCRIPTION of each detail line — the example's own
+	// name, without the message, which carries object addresses that differ
+	// between runs. A multiset and not a set: a shared example block included
+	// twice reports the same description twice, and a file that loses one of
+	// the two has lost an example.
+	labels map[string]int
 }
 
 // tallyDisagrees reports whether the subject printed FEWER detail lines than
@@ -98,6 +127,11 @@ func main1(args []string, out, errOut io.Writer) int {
 	// With -repeat above 1 a file whose own engine disagrees with itself is named
 	// UNSTABLE and kept out of the regression verdict.
 	repeat := fs.Int("repeat", 1, "run each file this many times per engine; above 1, detect flaky files")
+	// ⛔ No default. A default here would be a guess about the one thing the
+	// results cannot reveal, and the wrong guess is silent.
+	move := fs.String("move", "", `required: "none" if both engines read the corpus at the same RUBY_VERSION, else FROM:TO (e.g. 3.4.1:4.0.9)`)
+	partial := fs.Bool("partial", false, "run a declared move anyway when its surface reaches outside -dir; the report is stamped PARTIAL")
+	unprovenanced := fs.Bool("unprovenanced", false, "compare engines that cannot be tied to two distinct commits; the report is stamped UNPROVENANCED")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -124,6 +158,17 @@ func main1(args []string, out, errOut io.Writer) int {
 
 	if *repeat < 1 {
 		fmt.Fprintln(errOut, "specdelta: -repeat must be at least 1")
+		return 2
+	}
+
+	// THE MOVE GATE, before a single engine is started: a run whose surface is
+	// already known to be incomplete must not cost an hour first.
+	mv, err := declaredMove(*move, *root, *dir, files, errOut, *partial)
+	if err != nil {
+		return 2
+	}
+	pv, err := checkProvenance(engines, []buildFacts{readBuildFacts(engines[0]), readBuildFacts(engines[1])}, *unprovenanced, errOut)
+	if err != nil {
 		return 2
 	}
 	type row struct {
@@ -168,7 +213,18 @@ func main1(args []string, out, errOut io.Writer) int {
 		return rows[i].file < rows[j].file
 	})
 
-	var totalA, totalB, moved, regressed, suspect, appeared int
+	// The declaration prints ABOVE the table, so a pasted table carries the
+	// claim it was made under. "ten examples" was quoted from a table that said
+	// nothing about which comparison it was.
+	fmt.Fprint(out, "PROVENANCE")
+	fmt.Fprintln(out, pv.stamp)
+	for _, l := range pv.lines {
+		fmt.Fprintln(out, l)
+	}
+	fmt.Fprintln(out, mv.header())
+
+	var totalA, totalB, moved, regressed, suspect, appeared, wentRed int
+	var movePass, moveBad, moveFiles int
 	fmt.Fprintf(out, "%-56s %7s %7s %6s\n", "file", "control", "treat", "delta")
 	for _, r := range rows {
 		d := r.b.pass - r.a.pass
@@ -217,6 +273,40 @@ func main1(args []string, out, errOut io.Writer) int {
 		if worse > 0 {
 			note += fmt.Sprintf("  ⛔ fail+error %d → %d", badA, badB)
 		}
+		// ⛔ A NET GAIN HIDES AN EXAMPLE THAT WENT RED. On 2026-11-02
+		// core/thread/raise_spec.rb read `+17, 0 regressed` — true, and
+		// incomplete: nineteen examples turned green and TWO turned red, and no
+		// count of any kind can show a swap. The example that broke had been
+		// passing BECAUSE of a different defect.
+		//
+		// So the failure DESCRIPTIONS are compared, not their number, and every
+		// one that appears more often on the treatment is named.
+		if newlyRed := gainedLabels(r.a.labels, r.b.labels); len(newlyRed) > 0 && !r.unstable {
+			for _, l := range newlyRed {
+				// The COUNT, not just the name: a shared example block included
+				// twice in one file reports the same description twice, and
+				// losing both is two examples rather than one.
+				wentRed += l.gained
+				times := ""
+				if l.gained > 1 {
+					times = fmt.Sprintf(" (×%d)", l.gained)
+				}
+				note += "\n      ⛔ WENT RED: " + strings.ReplaceAll(l.label, "\t", "  ") + times
+			}
+		}
+		// A file the move itself changes is marked, because its delta is not a
+		// reading of the engines at all: the corpus handed the two runs
+		// different work. Reading `+3` on such a row as an improvement is
+		// exactly the mistake this flag exists to stop.
+		if n, ok := mv.opens[r.file]; ok {
+			note += fmt.Sprintf("  ⛔ THE MOVE OPENS ≥%d examples here", n)
+			movePass += d
+			moveBad += worse
+			moveFiles++
+			// The note is non-empty from here, so -quiet cannot drop the row: a
+			// delta of zero on a file the move opens is precisely how 37
+			// failures stayed invisible.
+		}
 		if *quiet && d == 0 && note == "" {
 			continue
 		}
@@ -225,21 +315,321 @@ func main1(args []string, out, errOut io.Writer) int {
 	fmt.Fprintf(out, "\n%d file(s): control %d passing, treatment %d passing, %+d\n",
 		len(rows), totalA, totalB, totalB-totalA)
 	fmt.Fprintf(out, "%d file(s) moved, %d regressed", moved, regressed)
+	if wentRed > 0 {
+		// Counted apart from `regressed`, which is a per-FILE verdict: a file
+		// can improve on balance and still contain an example that broke.
+		fmt.Fprintf(out, ", %d example(s) WENT RED", wentRed)
+	}
 	if appeared > 0 {
 		// Named separately because it is not a regression in the passing total
 		// and would otherwise read as nothing at all.
 		fmt.Fprintf(out, ", %d gained failures without losing passes", appeared)
 	}
 	fmt.Fprintln(out)
+	// ⛔ The sentence a reader will quote. It must not be a passing total alone:
+	// the published one was, and it read as a plan.
+	if mv.on {
+		fmt.Fprintf(out, "of which the declared move %s → %s accounts for %d file(s): %+d passing, %+d failing\n",
+			mv.from, mv.to, moveFiles, movePass, moveBad)
+		fmt.Fprintf(out, "the move also opens ≥%d examples in %d file(s) of the corpus in total%s\n",
+			mv.move.ExamplesOpened(), len(gcFiles(mv.move.Opened)), mv.partialNote())
+	}
 	if suspect > 0 {
 		// A total built on a tally the subject contradicts is not a measurement.
 		fmt.Fprintf(errOut, "specdelta: %d file(s) reported a tally their detail lines contradict\n", suspect)
 		return 2
 	}
-	if regressed > 0 {
+	// ⛔ An example that went red IS a regression, whatever the file's total did.
+	// Letting a net gain carry it out would be the exact reading this check
+	// exists to stop.
+	if regressed > 0 || wentRed > 0 {
 		return 1
 	}
 	return 0
+}
+
+// gainedLabels lists the failure descriptions the TREATMENT reports more often
+// than the control — examples that were passing (or failing less often) and are
+// not any more. Sorted, so a report is stable between runs.
+//
+// It reads descriptions rather than messages because a message carries object
+// addresses (`#<Class:0x0000000000000008>`) that differ between two runs of the
+// SAME binary, which would make every file look changed.
+func gainedLabels(a, b map[string]int) []gainedLabel {
+	var out []gainedLabel
+	for label, n := range b {
+		if n > a[label] {
+			out = append(out, gainedLabel{label: label, gained: n - a[label]})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].label < out[j].label })
+	return out
+}
+
+// gainedLabel is one failure description and HOW MANY more times the treatment
+// reports it than the control.
+type gainedLabel struct {
+	label  string
+	gained int
+}
+
+// declared is what -move resolved to: either "the corpus is the same on both
+// sides" or a census of what the version move does to it.
+type declared struct {
+	on       bool
+	from, to string
+	move     gc.Move
+	opens    map[string]int // measured file -> lower-bound examples the move opens there
+	partial  bool
+}
+
+func gcFiles(sites []gc.Site) []string { return gc.Files(sites) }
+
+func (d declared) header() string {
+	if !d.on {
+		return "MOVE none declared: both engines read the same corpus, so every delta below is the ENGINE\n"
+	}
+	return fmt.Sprintf(
+		"MOVE %s → %s declared: the CORPUS differs between the two runs — %d guards open, %d close, %d inline sites flip%s\n",
+		d.from, d.to, len(d.move.Opened), len(d.move.Closed), len(d.move.Flipped), d.partialNote())
+}
+
+func (d declared) partialNote() string {
+	if d.partial {
+		return "  ⛔ PARTIAL: part of the move's surface was not measured"
+	}
+	return ""
+}
+
+// declaredMove resolves -move and, for a real move, REFUSES a run whose
+// measured set does not cover the surface the move touches.
+//
+// ⛔ The refusal is the whole feature. `specdelta -dir core/set` across a
+// 3.4→4.0 move is a perfectly well-formed command that produces a perfectly
+// readable table saying nothing about the move, because the three files the
+// move hits hardest are under core/binding. There is no way to see that in the
+// results; it is only visible in the corpus, before anything runs.
+func declaredMove(spec, root, dir string, files []string, errOut io.Writer, allowPartial bool) (declared, error) {
+	if spec == "" {
+		fmt.Fprint(errOut, `specdelta: -move is required.
+
+  -move none         both engines read the corpus at the same RUBY_VERSION, so
+                     every difference below belongs to the engine
+  -move 3.4.1:4.0.9  the engines read the corpus at DIFFERENT versions: the
+                     guards move too, and the census says which files that hits
+
+There is no default, because the results cannot answer it. A version move was
+measured here on 2026-11-01 and published as "ten examples of work"; the real
+figure was about seventy-five, and the missing part was three spec files whose
+every example is guarded away below 4.0 — zero passes and zero failures on one
+side, 37 failures on the other, and a pass delta of zero either way.
+`)
+		return declared{}, errRefused
+	}
+	if spec == "none" {
+		return declared{on: false}, nil
+	}
+	from, to, ok := strings.Cut(spec, ":")
+	if !ok || from == "" || to == "" {
+		fmt.Fprintf(errOut, "specdelta: -move wants \"none\" or FROM:TO, e.g. 3.4.1:4.0.9; got %q\n", spec)
+		return declared{}, errRefused
+	}
+	if gc.CompareVersions(from, to) == 0 {
+		fmt.Fprintf(errOut, "specdelta: -move %s:%s names the same version twice — that is -move none\n", from, to)
+		return declared{}, errRefused
+	}
+
+	sites, read, err := gc.Walk(root, []string{"language", "core"})
+	if err != nil {
+		fmt.Fprintf(errOut, "specdelta: censusing %s: %v\n", root, err)
+		return declared{}, errRefused
+	}
+	if read == 0 {
+		// ⛔ An unreadable corpus must not pass as a move that touches nothing:
+		// "found no guards" and "could not look" are the same number.
+		fmt.Fprintf(errOut, "specdelta: no *_spec.rb under %s/{language,core} — the move cannot be censused\n", root)
+		return declared{}, errRefused
+	}
+
+	d := declared{on: true, from: from, to: to, move: gc.ClassifyMove(sites, from, to), opens: map[string]int{}}
+
+	measured := make(map[string]bool, len(files))
+	for _, f := range files {
+		measured[filepath.ToSlash(f)] = true
+	}
+	for _, s := range d.move.Opened {
+		if measured[s.File] {
+			d.opens[s.File] += s.Examples
+		}
+	}
+	var outside []string
+	for _, f := range d.move.Touched() {
+		if !measured[f] {
+			outside = append(outside, f)
+		}
+	}
+	if len(outside) == 0 {
+		return d, nil
+	}
+	sort.Strings(outside)
+	fmt.Fprintf(errOut, "specdelta: the move %s → %s touches %d file(s) that -dir %s does not measure:\n", from, to, len(outside), dir)
+	for i, f := range outside {
+		if i == 12 {
+			fmt.Fprintf(errOut, "    … and %d more\n", len(outside)-i)
+			break
+		}
+		fmt.Fprintf(errOut, "    %s\n", f)
+	}
+	if !allowPartial {
+		fmt.Fprintln(errOut, "  A number from this run would not be a number about the move. Widen -dir, or")
+		fmt.Fprintln(errOut, "  pass -partial to say so on purpose — the report is then stamped PARTIAL.")
+		return declared{}, errRefused
+	}
+	d.partial = true
+	return d, nil
+}
+
+// errRefused carries nothing: the refusing function has already said why, in
+// the words the reader needs rather than a wrapped error string.
+var errRefused = errors.New("refused")
+
+// buildFacts is what can be learned about an engine binary WITHOUT running it.
+type buildFacts struct {
+	known   bool   // Go build information was readable at all
+	rev     string // vcs.revision, as `go build` stamps it
+	dirty   bool   // vcs.modified: the tree had uncommitted changes
+	treeRev string // HEAD of the git work tree the binary sits in, "" if none
+}
+
+// prov is the provenance verdict: what to print, and whether it is attributable.
+type prov struct {
+	lines []string
+	stamp string
+}
+
+// ⛔ THE SECOND RULE THIS TOOL NOW ENFORCES, and it is a repeat offence.
+//
+// On 2026-11-01 a figure was published for PR #858 — `pass=118 fail=1` — from a
+// binary built BEFORE that branch existed. It carried the previous branch's
+// code. The true figure was 117/2, and the correction had to go on the record.
+// The same shape is in the notes from an earlier arc: a control built from the
+// WORKING TREE rather than from the commit, which attributed +3 to the wrong
+// fix. Writing it down twice did not stop it a third time.
+//
+// `go build` already stamps `vcs.revision` and `vcs.modified` into every binary
+// it produces from a repository, so the binary can be asked what it is. The
+// three refusals below are the three ways a comparison is void before it starts:
+//
+//	same revision      nothing to compare: one of them was not rebuilt
+//	dirty tree         the revision names code the binary does not contain
+//	stale against HEAD the tree moved on after the binary was built — #858
+//
+// An engine with no Go build information at all (MRI, a shell fake) is NOT
+// refused: it is legitimately not a Go binary. It is STAMPED, because a table
+// nobody can attribute must say so rather than look like the others.
+func checkProvenance(engines []string, facts []buildFacts, allow bool, errOut io.Writer) (prov, error) {
+	var p prov
+	unattributable := false
+	for i, f := range facts {
+		switch {
+		case !f.known:
+			p.lines = append(p.lines, fmt.Sprintf("  %-9s %s — no Go build information", role(i), engines[i]))
+			unattributable = true
+		case f.dirty:
+			p.lines = append(p.lines, fmt.Sprintf("  %-9s %s — built from %s with UNCOMMITTED changes", role(i), engines[i], short(f.rev)))
+			unattributable = true
+		default:
+			p.lines = append(p.lines, fmt.Sprintf("  %-9s %s — built from %s", role(i), engines[i], short(f.rev)))
+		}
+	}
+
+	var why []string
+	if facts[0].known && facts[1].known && !facts[0].dirty && !facts[1].dirty && facts[0].rev == facts[1].rev {
+		why = append(why, fmt.Sprintf("both engines were built from %s — one of them was not rebuilt, and there is nothing to compare", short(facts[0].rev)))
+	}
+	for i, f := range facts {
+		if f.dirty {
+			why = append(why, fmt.Sprintf("the %s was built from a tree with uncommitted changes, so %s does not name the code it contains", role(i), short(f.rev)))
+		}
+		// ⛔ #858 exactly: the binary is older than the branch it is being
+		// quoted for. Nothing in the results can show this.
+		if f.known && !f.dirty && f.treeRev != "" && f.treeRev != f.rev {
+			why = append(why, fmt.Sprintf("the %s binary was built from %s but its work tree is now at %s — it is not the code you are measuring",
+				role(i), short(f.rev), short(f.treeRev)))
+		}
+	}
+	if len(why) == 0 {
+		if unattributable {
+			p.stamp = "  ⛔ UNPROVENANCED"
+		}
+		return p, nil
+	}
+	if allow {
+		p.stamp = "  ⛔ UNPROVENANCED"
+		return p, nil
+	}
+	fmt.Fprintln(errOut, "specdelta: this comparison cannot be attributed to any pair of commits:")
+	for _, w := range why {
+		fmt.Fprintf(errOut, "    %s\n", w)
+	}
+	fmt.Fprintln(errOut, "  Rebuild, or pass -unprovenanced to say so on purpose — the report is then stamped.")
+	return prov{}, errRefused
+}
+
+func role(i int) string {
+	if i == 0 {
+		return "control"
+	}
+	return "treatment"
+}
+
+func short(rev string) string {
+	if len(rev) > 12 {
+		return rev[:12]
+	}
+	if rev == "" {
+		return "(no revision)"
+	}
+	return rev
+}
+
+// readBuildFacts asks a binary what it is. Replaceable so the policy above can
+// be driven by a table rather than by building Go binaries in a test.
+var readBuildFacts = func(path string) buildFacts {
+	var f buildFacts
+	bi, err := buildinfo.ReadFile(path)
+	if err != nil {
+		return f
+	}
+	f.known = true
+	for _, s := range bi.Settings {
+		switch s.Key {
+		case "vcs.revision":
+			f.rev = s.Value
+		case "vcs.modified":
+			f.dirty = s.Value == "true"
+		}
+	}
+	if f.rev == "" {
+		// Stamped with no revision is the same as not stamped: there is
+		// nothing to attribute it to.
+		f.known = false
+		return f
+	}
+	f.treeRev = headOf(filepath.Dir(path))
+	return f
+}
+
+// headOf asks git for a work tree's HEAD, and answers "" for anything it
+// cannot establish — a binary outside a repository is not a defect.
+func headOf(dir string) string {
+	cmd := exec.Command("git", "-C", dir, "rev-parse", "HEAD")
+	cmd.Stdin = nil
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 func abs(n int) int {
@@ -350,6 +740,13 @@ func parse(s string) (result, error) {
 		switch {
 		case strings.HasPrefix(line, "RBGO_DETAIL"):
 			r.details++
+			// RBGO_DETAIL \t kind \t class \t description \t message
+			if f := strings.Split(line, "\t"); len(f) >= 4 {
+				if r.labels == nil {
+					r.labels = map[string]int{}
+				}
+				r.labels[f[1]+"\t"+f[3]]++
+			}
 		case strings.HasPrefix(line, "RBGO_RESULT"):
 			if r.ran {
 				return r, fmt.Errorf("two RBGO_RESULT lines in one run")

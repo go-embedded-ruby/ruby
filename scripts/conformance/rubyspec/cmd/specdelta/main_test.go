@@ -125,7 +125,7 @@ func TestEmptyPopulationIsRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out, errOut bytes.Buffer
-	if code := main1([]string{"-root", root, "-dir", "core/empty", "/bin/echo", "/bin/echo"}, &out, &errOut); code != 2 {
+	if code := main1([]string{"-root", root, "-move", "none", "-dir", "core/empty", "/bin/echo", "/bin/echo"}, &out, &errOut); code != 2 {
 		t.Errorf("exit = %d, want 2; err %q", code, errOut.String())
 	}
 	if !strings.Contains(errOut.String(), "no _spec.rb files") {
@@ -140,10 +140,10 @@ func TestUsageRefusals(t *testing.T) {
 		name string
 		args []string
 	}{
-		{"one engine", []string{"-root", root, "-dir", "x", "/bin/echo"}},
-		{"three engines", []string{"-root", root, "-dir", "x", "/bin/echo", "/bin/echo", "/bin/echo"}},
+		{"one engine", []string{"-root", root, "-move", "none", "-dir", "x", "/bin/echo"}},
+		{"three engines", []string{"-root", root, "-move", "none", "-dir", "x", "/bin/echo", "/bin/echo", "/bin/echo"}},
 		{"no dir", []string{"-root", root, "/bin/echo", "/bin/echo"}},
-		{"absent dir", []string{"-root", root, "-dir", "nope", "/bin/echo", "/bin/echo"}},
+		{"absent dir", []string{"-root", root, "-move", "none", "-dir", "nope", "/bin/echo", "/bin/echo"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var out, errOut bytes.Buffer
@@ -172,7 +172,7 @@ func TestReportsMovementAndRegression(t *testing.T) {
 	three := fakeEngine(t, root, "three", "echo 'RBGO_RESULT pass=3 fail=0 error=0 skip=0'\n")
 
 	var out, errOut bytes.Buffer
-	if code := main1([]string{"-root", root, "-dir", "core/x", two, three}, &out, &errOut); code != 0 {
+	if code := main1([]string{"-root", root, "-move", "none", "-dir", "core/x", two, three}, &out, &errOut); code != 0 {
 		t.Errorf("improvement: exit = %d, want 0; err %q", code, errOut.String())
 	}
 	if !strings.Contains(out.String(), "+1") {
@@ -181,7 +181,7 @@ func TestReportsMovementAndRegression(t *testing.T) {
 
 	out.Reset()
 	errOut.Reset()
-	if code := main1([]string{"-root", root, "-dir", "core/x", three, two}, &out, &errOut); code != 1 {
+	if code := main1([]string{"-root", root, "-move", "none", "-dir", "core/x", three, two}, &out, &errOut); code != 1 {
 		t.Errorf("regression: exit = %d, want 1; err %q", code, errOut.String())
 	}
 	if !strings.Contains(out.String(), "-1") || !strings.Contains(out.String(), "1 regressed") {
@@ -223,7 +223,7 @@ esac
 esac
 `)
 	var out, errOut bytes.Buffer
-	if code := main1([]string{"-root", root, "-dir", "core/w", low, high}, &out, &errOut); code != 0 {
+	if code := main1([]string{"-root", root, "-move", "none", "-dir", "core/w", low, high}, &out, &errOut); code != 0 {
 		t.Fatalf("exit = %d, want 0; err %q", code, errOut.String())
 	}
 	iAA := strings.Index(out.String(), "aa_spec.rb")
@@ -254,7 +254,7 @@ func TestAFileThatDidNotRunIsNamed(t *testing.T) {
 	mute := fakeEngine(t, root, "mute", "exit 1\n")
 
 	var out, errOut bytes.Buffer
-	main1([]string{"-root", root, "-dir", "core/y", ok, mute}, &out, &errOut)
+	main1([]string{"-root", root, "-move", "none", "-dir", "core/y", ok, mute}, &out, &errOut)
 	if !strings.Contains(out.String(), "DID NOT RUN on the treatment") {
 		t.Errorf("a silent engine is not named:\n%s", out.String())
 	}
@@ -295,7 +295,7 @@ fi
 	// flag exists for, asserted so the difference between the two modes is
 	// visible rather than claimed.
 	var out, errOut bytes.Buffer
-	if code := main1([]string{"-root", root, "-dir", "core/z", stable, flaky}, &out, &errOut); code != 1 {
+	if code := main1([]string{"-root", root, "-move", "none", "-dir", "core/z", stable, flaky}, &out, &errOut); code != 1 {
 		t.Errorf("-repeat 1: exit = %d, want 1 (the flake reads as a regression); err %q", code, errOut.String())
 	}
 
@@ -305,7 +305,7 @@ fi
 	}
 	out.Reset()
 	errOut.Reset()
-	if code := main1([]string{"-root", root, "-dir", "core/z", "-repeat", "3", stable, flaky}, &out, &errOut); code != 0 {
+	if code := main1([]string{"-root", root, "-move", "none", "-dir", "core/z", "-repeat", "3", stable, flaky}, &out, &errOut); code != 0 {
 		t.Errorf("-repeat 3: exit = %d, want 0 (unstable, excluded); out %q", code, out.String())
 	}
 	if !strings.Contains(out.String(), "UNSTABLE") {
@@ -318,7 +318,7 @@ fi
 	// A stable engine must NOT be called unstable, or every file would be.
 	out.Reset()
 	errOut.Reset()
-	if code := main1([]string{"-root", root, "-dir", "core/z", "-repeat", "3", stable, stable}, &out, &errOut); code != 0 {
+	if code := main1([]string{"-root", root, "-move", "none", "-dir", "core/z", "-repeat", "3", stable, stable}, &out, &errOut); code != 0 {
 		t.Errorf("stable pair: exit = %d, want 0; out %q", code, out.String())
 	}
 	if strings.Contains(out.String(), "UNSTABLE") {
@@ -328,7 +328,7 @@ fi
 	// And -repeat below 1 is a usage refusal, not a silent no-op.
 	out.Reset()
 	errOut.Reset()
-	if code := main1([]string{"-root", root, "-dir", "core/z", "-repeat", "0", stable, stable}, &out, &errOut); code != 2 {
+	if code := main1([]string{"-root", root, "-move", "none", "-dir", "core/z", "-repeat", "0", stable, stable}, &out, &errOut); code != 2 {
 		t.Errorf("-repeat 0: exit = %d, want 2; err %q", code, errOut.String())
 	}
 }
@@ -361,7 +361,7 @@ func TestAFileThatGainsFailuresWithoutLosingPassesIsNamed(t *testing.T) {
 		"printf 'RBGO_DETAIL\\terror\\tY\\tc\\td\\n%.0s' 1 2\n")
 
 	var out, errOut bytes.Buffer
-	main1([]string{"-root", root, "-dir", "core/v", "-quiet", guarded, opened}, &out, &errOut)
+	main1([]string{"-root", root, "-move", "none", "-dir", "core/v", "-quiet", guarded, opened}, &out, &errOut)
 	if !strings.Contains(out.String(), "fail+error 0 → 5") {
 		t.Errorf("the new failures are not named:\n%s", out.String())
 	}
@@ -376,9 +376,365 @@ func TestAFileThatGainsFailuresWithoutLosingPassesIsNamed(t *testing.T) {
 	// The control: a file that is quiet on both engines stays out of a -quiet
 	// report, or every unchanged file would be printed.
 	out.Reset()
-	main1([]string{"-root", root, "-dir", "core/v", "-quiet", guarded, guarded}, &out, &errOut)
+	main1([]string{"-root", root, "-move", "none", "-dir", "core/v", "-quiet", guarded, guarded}, &out, &errOut)
 	if strings.Contains(out.String(), "d_spec.rb") {
 		t.Errorf("an unchanged file was printed under -quiet:\n%s", out.String())
+	}
+}
+
+// ⛔ THE GATE. -move has no default, because the results cannot answer it: a
+// run across a version move and a run within one produce the same table, and
+// only one of them is a reading of the engines.
+//
+// Without it the tool refuses, and the refusal has to come BEFORE the engines
+// run — a sweep of core/ is an hour, and an hour spent on a figure already
+// known to be incomplete is the cost this gate exists to avoid. The fake engine
+// here records every call, so "did not run" is asserted rather than assumed.
+func TestAMoveMustBeDeclaredAndTheRefusalPrecedesTheRun(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake engines are POSIX shell scripts")
+	}
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "core", "q"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "core", "q", "e_spec.rb"), []byte("#\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ran := filepath.Join(root, "ran")
+	engine := fakeEngine(t, root, "counting", "echo x >> '"+ran+"'\necho 'RBGO_RESULT pass=1 fail=0 error=0 skip=0'\n")
+
+	var out, errOut bytes.Buffer
+	if code := main1([]string{"-root", root, "-dir", "core/q", engine, engine}, &out, &errOut); code != 2 {
+		t.Errorf("a missing -move: exit = %d, want 2", code)
+	}
+	if !strings.Contains(errOut.String(), "-move is required") {
+		t.Errorf("the refusal does not say what is missing:\n%s", errOut.String())
+	}
+	if _, err := os.Stat(ran); err == nil {
+		t.Error("an engine was started before the declaration was checked")
+	}
+
+	// And the malformed spellings, each exit 2 rather than a silent "no move".
+	for _, bad := range []string{"3.4.1", "3.4.1:", ":4.0.9", "4.0.9:4.0.9", "4.0:4.0.0"} {
+		out.Reset()
+		errOut.Reset()
+		if code := main1([]string{"-root", root, "-move", bad, "-dir", "core/q", engine, engine}, &out, &errOut); code != 2 {
+			t.Errorf("-move %q: exit = %d, want 2; err %q", bad, code, errOut.String())
+		}
+	}
+}
+
+// ⛔ THE REFUSAL THAT WOULD HAVE CAUGHT THE PUBLISHED FIGURE. The command is
+// well-formed and the table it produces is readable; it simply is not a table
+// about the move, because the move's heaviest files are under a directory -dir
+// never named. There is nothing in the RESULTS that could say so.
+func TestAMoveReachingOutsideTheMeasuredSetIsRefused(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake engines are POSIX shell scripts")
+	}
+	root := t.TempDir()
+	for _, d := range []string{"core/set", "core/binding"} {
+		if err := os.MkdirAll(filepath.Join(root, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, "core", "set", "divide_spec.rb"), []byte("#\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// The file the move opens, and the one -dir core/set cannot see.
+	if err := os.WriteFile(filepath.Join(root, "core", "binding", "implicit_parameters_spec.rb"), []byte(
+		"describe \"Binding#implicit_parameters\" do\n"+
+			"  ruby_version_is \"4.0\" do\n"+
+			"    it \"exists\" do\n"+
+			"    end\n"+
+			"  end\n"+
+			"end\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	engine := fakeEngine(t, root, "e", "echo 'RBGO_RESULT pass=1 fail=0 error=0 skip=0'\n")
+
+	var out, errOut bytes.Buffer
+	if code := main1([]string{"-root", root, "-move", "3.4.1:4.0.9", "-dir", "core/set", engine, engine}, &out, &errOut); code != 2 {
+		t.Fatalf("exit = %d, want 2; err %q", code, errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "core/binding/implicit_parameters_spec.rb") {
+		t.Errorf("the refusal does not name the file it cannot see:\n%s", errOut.String())
+	}
+
+	// -partial is the named derogation, and it STAMPS the report rather than
+	// silencing the gate: an opt-in that only removes a message would leave the
+	// same number published with nothing attached to it.
+	out.Reset()
+	errOut.Reset()
+	if code := main1([]string{"-root", root, "-move", "3.4.1:4.0.9", "-partial", "-dir", "core/set", engine, engine}, &out, &errOut); code != 0 {
+		t.Fatalf("-partial: exit = %d, want 0; err %q", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "PARTIAL") {
+		t.Errorf("-partial did not stamp the report:\n%s", out.String())
+	}
+
+	// And widening -dir to cover the surface is accepted, which is the control:
+	// without it the refusal above would only prove the gate always fires.
+	out.Reset()
+	errOut.Reset()
+	if code := main1([]string{"-root", root, "-move", "3.4.1:4.0.9", "-dir", "core", engine, engine}, &out, &errOut); code != 0 {
+		t.Fatalf("widened -dir: exit = %d, want 0; err %q", code, errOut.String())
+	}
+	if strings.Contains(out.String(), "PARTIAL") {
+		t.Errorf("a complete run was stamped PARTIAL:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "THE MOVE OPENS") {
+		t.Errorf("the opened file is not marked in the table:\n%s", out.String())
+	}
+}
+
+// A file the move opens is marked and kept even when nothing moved, because a
+// delta of zero on such a file is the signature of the defect, not of calm.
+func TestAFileTheMoveOpensSurvivesQuiet(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake engines are POSIX shell scripts")
+	}
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "core", "binding"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "core", "binding", "implicit_parameters_spec.rb"), []byte(
+		"ruby_version_is \"4.0\" do\n  it \"a\" do\n  end\n  it \"b\" do\n  end\nend\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Both engines score the same: delta zero, and under -quiet the row would
+	// have been dropped before this gate existed.
+	engine := fakeEngine(t, root, "e", "echo 'RBGO_RESULT pass=0 fail=0 error=0 skip=0'\n")
+
+	var out, errOut bytes.Buffer
+	if code := main1([]string{"-root", root, "-move", "3.4.1:4.0.9", "-quiet", "-dir", "core/binding", engine, engine}, &out, &errOut); code != 0 {
+		t.Fatalf("exit = %d, want 0; err %q", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "implicit_parameters_spec.rb") {
+		t.Errorf("-quiet dropped a file the move opens:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "≥2 examples") {
+		t.Errorf("the opened example count is not reported:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "the declared move 3.4.1 → 4.0.9 accounts for 1 file(s)") {
+		t.Errorf("the summary does not separate the move's share:\n%s", out.String())
+	}
+
+	// The control: declared as no move, the same run under -quiet prints
+	// nothing about the file — which is what makes the line above a reading of
+	// the declaration rather than of the file name.
+	out.Reset()
+	if code := main1([]string{"-root", root, "-move", "none", "-quiet", "-dir", "core/binding", engine, engine}, &out, &errOut); code != 0 {
+		t.Fatalf("control: exit = %d, want 0; err %q", code, errOut.String())
+	}
+	if strings.Contains(out.String(), "implicit_parameters_spec.rb") {
+		t.Errorf("a quiet file was printed with no move declared:\n%s", out.String())
+	}
+}
+
+// ⛔ THE REPEAT OFFENCE. On 2026-11-01 `pass=118 fail=1` was published for
+// PR #858 from a binary built BEFORE that branch existed; it carried the
+// previous branch's code, and the true figure was 117/2. The same shape is in
+// the notes from an earlier arc — a control built from the working tree rather
+// than from the commit, attributing +3 to the wrong fix. Written down twice,
+// and it happened a third time.
+//
+// `go build` stamps vcs.revision and vcs.modified into every binary, so the
+// binary can be asked. The policy is tested as a table because the alternative
+// is building Go binaries inside a test to observe a decision that does not
+// depend on building them.
+func TestProvenanceRefusesWhatCannotBeAttributed(t *testing.T) {
+	clean := func(rev, head string) buildFacts {
+		return buildFacts{known: true, rev: rev, treeRev: head}
+	}
+	for _, tc := range []struct {
+		name    string
+		facts   []buildFacts
+		refuse  bool
+		stamped bool
+		says    string
+	}{{
+		name:  "two distinct commits, both clean — the only fully attributable case",
+		facts: []buildFacts{clean("aaaaaaaaaaaa1", "aaaaaaaaaaaa1"), clean("bbbbbbbbbbbb2", "bbbbbbbbbbbb2")},
+	}, {
+		name:   "the same revision twice: one of them was not rebuilt",
+		facts:  []buildFacts{clean("aaaaaaaaaaaa1", ""), clean("aaaaaaaaaaaa1", "")},
+		refuse: true,
+		says:   "nothing to compare",
+	}, {
+		name:   "a dirty tree: the revision does not name the code in the binary",
+		facts:  []buildFacts{clean("aaaaaaaaaaaa1", ""), {known: true, rev: "bbbbbbbbbbbb2", dirty: true}},
+		refuse: true,
+		says:   "uncommitted changes",
+	}, {
+		// #858, exactly.
+		name:   "the tree moved on after the binary was built",
+		facts:  []buildFacts{clean("aaaaaaaaaaaa1", "aaaaaaaaaaaa1"), clean("bbbbbbbbbbbb2", "cccccccccccc3")},
+		refuse: true,
+		says:   "not the code you are measuring",
+	}, {
+		// MRI, or a shell fake: legitimately not a Go binary. Not a refusal,
+		// but the table must not look like an attributable one.
+		name:    "an engine with no build information is stamped, not refused",
+		facts:   []buildFacts{{}, clean("bbbbbbbbbbbb2", "bbbbbbbbbbbb2")},
+		stamped: true,
+	}} {
+		t.Run(tc.name, func(t *testing.T) {
+			var errOut bytes.Buffer
+			p, err := checkProvenance([]string{"./a", "./b"}, tc.facts, false, &errOut)
+			if tc.refuse {
+				if err == nil {
+					t.Fatalf("not refused; printed %q", errOut.String())
+				}
+				if !strings.Contains(errOut.String(), tc.says) {
+					t.Errorf("the refusal does not say why: %q", errOut.String())
+				}
+				// ⛔ And the derogation STAMPS rather than silences: an opt-in
+				// that only removed a message would leave the same number
+				// published with nothing attached to it.
+				errOut.Reset()
+				p, err = checkProvenance([]string{"./a", "./b"}, tc.facts, true, &errOut)
+				if err != nil {
+					t.Fatalf("-unprovenanced still refused: %v", err)
+				}
+				if !strings.Contains(p.stamp, "UNPROVENANCED") {
+					t.Errorf("the derogation did not stamp the report: %q", p.stamp)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("refused: %q", errOut.String())
+			}
+			if strings.Contains(p.stamp, "UNPROVENANCED") != tc.stamped {
+				t.Errorf("stamp = %q, want stamped=%v", p.stamp, tc.stamped)
+			}
+			// Both engines are always named, so a pasted table says what
+			// produced it.
+			if len(p.lines) != 2 {
+				t.Errorf("provenance lines = %v, want one per engine", p.lines)
+			}
+		})
+	}
+}
+
+// The header has to carry both revisions into the table a reader will paste,
+// because the published figure that was wrong carried nothing at all.
+func TestTheTableNamesWhatProducedIt(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake engines are POSIX shell scripts")
+	}
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "core", "p"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "core", "p", "f_spec.rb"), []byte("#\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a := fakeEngine(t, root, "a", "echo 'RBGO_RESULT pass=1 fail=0 error=0 skip=0'\n")
+	b := fakeEngine(t, root, "b", "echo 'RBGO_RESULT pass=1 fail=0 error=0 skip=0'\n")
+
+	saved := readBuildFacts
+	t.Cleanup(func() { readBuildFacts = saved })
+	readBuildFacts = func(path string) buildFacts {
+		if strings.HasSuffix(path, "/a") {
+			return buildFacts{known: true, rev: "1111111111112222", treeRev: "1111111111112222"}
+		}
+		return buildFacts{known: true, rev: "3333333333334444", treeRev: "3333333333334444"}
+	}
+
+	var out, errOut bytes.Buffer
+	if code := main1([]string{"-root", root, "-move", "none", "-dir", "core/p", a, b}, &out, &errOut); code != 0 {
+		t.Fatalf("exit = %d, want 0; err %q", code, errOut.String())
+	}
+	for _, want := range []string{"PROVENANCE", "111111111111", "333333333333"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("the table does not carry %q:\n%s", want, out.String())
+		}
+	}
+	if strings.Contains(out.String(), "UNPROVENANCED") {
+		t.Errorf("two clean distinct commits were stamped:\n%s", out.String())
+	}
+}
+
+// ⛔ A NET GAIN HIDES AN EXAMPLE THAT WENT RED, and this is the measurement
+// that proved it rather than a hypothesis. On 2026-11-02 a control and a
+// treatment built from the same commit minus one change read:
+//
+//	core/thread/raise_spec.rb   51 → 68   +17
+//	53 file(s) … 1 file(s) moved, 0 regressed
+//
+// True, and incomplete. Nineteen examples turned green and TWO turned red —
+// the two were found by comparing the failure DESCRIPTIONS of the two runs, and
+// no count of passes, of failures, or of both can show a swap.
+//
+// The example that broke had been passing BECAUSE of a different defect, which
+// is why it reads as a clean win: nothing about it looks wrong from the
+// outside.
+func TestAnExampleThatWentRedInsideAnImprovedFileIsNamed(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake engines are POSIX shell scripts")
+	}
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "core", "r"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "core", "r", "g_spec.rb"), []byte("#\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Control: 5 passing, 3 failing — "alpha", "beta", "gamma".
+	control := fakeEngine(t, root, "ctl", "echo 'RBGO_RESULT pass=5 fail=3 error=0 skip=0'\n"+
+		"printf 'RBGO_DETAIL\\tfail\\tSpecFail\\talpha\\tmsg one\\n'\n"+
+		"printf 'RBGO_DETAIL\\tfail\\tSpecFail\\tbeta\\tmsg two\\n'\n"+
+		"printf 'RBGO_DETAIL\\tfail\\tSpecFail\\tgamma\\tmsg three\\n'\n")
+	// Treatment: 7 passing, 1 failing — a clear improvement by every count, and
+	// the one failure is a DIFFERENT example: "delta" was green and is not.
+	treatment := fakeEngine(t, root, "treat", "echo 'RBGO_RESULT pass=7 fail=1 error=0 skip=0'\n"+
+		"printf 'RBGO_DETAIL\\tfail\\tSpecFail\\tdelta\\tmsg four\\n'\n")
+
+	var out, errOut bytes.Buffer
+	code := main1([]string{"-root", root, "-move", "none", "-dir", "core/r", control, treatment}, &out, &errOut)
+	if !strings.Contains(out.String(), "WENT RED") || !strings.Contains(out.String(), "delta") {
+		t.Errorf("the example that broke is not named:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "1 example(s) WENT RED") {
+		t.Errorf("the summary does not count it:\n%s", out.String())
+	}
+	// ⛔ And it is a REGRESSION, whatever the totals did: +2 passing and two
+	// fewer failures would otherwise carry it out on exit 0.
+	if code != 1 {
+		t.Errorf("exit = %d, want 1 (an example went red)", code)
+	}
+
+	// THE CONTROL: the same shapes with no swap must stay silent, or every
+	// improved file would be flagged. Here the treatment simply fixes "gamma".
+	fixed := fakeEngine(t, root, "fixed", "echo 'RBGO_RESULT pass=7 fail=2 error=0 skip=0'\n"+
+		"printf 'RBGO_DETAIL\\tfail\\tSpecFail\\talpha\\tmsg one\\n'\n"+
+		"printf 'RBGO_DETAIL\\tfail\\tSpecFail\\tbeta\\tmsg two\\n'\n")
+	out.Reset()
+	errOut.Reset()
+	if code := main1([]string{"-root", root, "-move", "none", "-dir", "core/r", control, fixed}, &out, &errOut); code != 0 {
+		t.Errorf("a genuine improvement: exit = %d, want 0; out %q", code, out.String())
+	}
+	if strings.Contains(out.String(), "WENT RED") {
+		t.Errorf("a file that only improved was flagged:\n%s", out.String())
+	}
+
+	// ⛔ And a MESSAGE that differs is not an example that broke: the same
+	// description carrying an object address prints differently between two
+	// runs of the same binary, and keying on it would make every file look
+	// changed.
+	sameLabels := fakeEngine(t, root, "addr", "echo 'RBGO_RESULT pass=5 fail=3 error=0 skip=0'\n"+
+		"printf 'RBGO_DETAIL\\tfail\\tSpecFail\\talpha\\texpected #<Class:0xdeadbeef>\\n'\n"+
+		"printf 'RBGO_DETAIL\\tfail\\tSpecFail\\tbeta\\tmsg two\\n'\n"+
+		"printf 'RBGO_DETAIL\\tfail\\tSpecFail\\tgamma\\tmsg three\\n'\n")
+	out.Reset()
+	errOut.Reset()
+	if code := main1([]string{"-root", root, "-move", "none", "-dir", "core/r", control, sameLabels}, &out, &errOut); code != 0 {
+		t.Errorf("differing messages: exit = %d, want 0; out %q", code, out.String())
+	}
+	if strings.Contains(out.String(), "WENT RED") {
+		t.Errorf("a differing message was read as an example that broke:\n%s", out.String())
 	}
 }
 

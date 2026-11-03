@@ -1,6 +1,7 @@
 // guards censuses ruby/spec's `ruby_version_is` by SHAPE, because the two
 // shapes move the population in different directions and only one of them has
-// ever been counted.
+// ever been counted. The reading itself lives in internal/guardcensus, which
+// cmd/specdelta's version-move gate uses too, so the two cannot drift.
 //
 //	BLOCK     ruby_version_is "4.0" do … end
 //	          The examples inside are SKIPPED while CUR_VERSION is below the
@@ -18,26 +19,10 @@
 // silently. This is the static half of that measurement — the half that needs
 // no sweep, and so can be run on a loaded machine, where a sweep cannot.
 //
-// ⛔ THE SHAPE IS DECIDED BY WHAT OPENS A BLOCK, NOT BY THE PARENTHESES. A
-// first draft keyed on "no parentheses, and the line ends in do". It was wrong
-// twice, and both were found by PRINTING THE SITES instead of only the totals:
-//
-//	ruby_version_is "4.0" do # https://bugs.ruby-lang.org/issues/21844
-//	    a block guard whose trailing comment defeats a `do\s*$` anchor
-//	ruby_version_is("4.0") do
-//	    a block guard that IS parenthesised
-//
-// Five guards at "4.0" hide in those two shapes, so a census anchored that way
-// reports 56 where there are 61.
-//
-// ⛔ THE EXAMPLE COUNT IS A LOWER BOUND AND SAYS SO. Counting `it` blocks
-// inside a guard needs Ruby `end`-matching, which is a heuristic without a
-// parser — and a static count cannot see shared examples (`it_behaves_like`)
-// at all. The control below restricts the count to exactly the guards a
-// `do\s*$` anchor finds, where #799 measured 56 guards and 167 examples: the
-// guard number reproduces and the example number does not, which places the
-// difference in the counting rather than in the census. Tuning the heuristic
-// until it reached 167 would be fitting the instrument to the expected answer.
+// With -move FROM:TO it answers the question that half of #799 actually
+// needed and nobody asked: what does the target version ADD? That reading is
+// now also a precondition of cmd/specdelta's verdict, rather than a report
+// someone has to remember to run.
 //
 // Exit status: 0 the census ran; 2 the corpus could not be read — a refusal,
 // not an empty census.
@@ -46,179 +31,22 @@ package main
 import (
 	"flag"
 	"fmt"
-	"io/fs"
 	"os"
-	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
+
+	gc "github.com/go-embedded-ruby/ruby/scripts/conformance/rubyspec/internal/guardcensus"
 )
-
-var (
-	callRe    = regexp.MustCompile(`ruby_version_is`)
-	argRe     = regexp.MustCompile(`ruby_version_is\s*\(?\s*["']([^"']*)["']\s*(?:(\.\.\.?)\s*["']([^"']*)["']\s*)?\)?`)
-	opensRe   = regexp.MustCompile(`(?:\bdo\b|\{)\s*(?:\|[^|]*\|)?\s*$`)
-	bracesRe  = regexp.MustCompile(`ruby_version_is\s*\(?[^)]*\)?\s*\{`)
-	commentRe = regexp.MustCompile(`\s+#(?:[^{].*)?$`)
-	// oldAnchorRe is the earlier census's shape, kept ONLY so its number can
-	// be reproduced as a control. Nothing else should use it.
-	oldAnchorRe = regexp.MustCompile(`ruby_version_is\s+["'][^"']*["']\s*(\.\.\.?\s*["'][^"']*["']\s*)?do\s*$`)
-	itRe        = regexp.MustCompile(`^\s*it[\s(]`)
-	openKw      = regexp.MustCompile(`(^|\s)(def|class|module|case|begin|while|until|unless|if)\s`)
-	modifIf     = regexp.MustCompile(`\S\s+(if|unless|while|until)\s`)
-	endKw       = regexp.MustCompile(`^\s*end\b`)
-	doKw        = regexp.MustCompile(`\bdo\b\s*(\|[^|]*\|)?\s*(#.*)?$`)
-	braceEnd    = regexp.MustCompile(`^\s*\}`)
-)
-
-// shape is what a mention of ruby_version_is does.
-type shape int
-
-const (
-	block shape = iota
-	inline
-	unknown
-)
-
-func (s shape) String() string {
-	switch s {
-	case block:
-		return "block"
-	case inline:
-		return "inline"
-	}
-	return "unclassified"
-}
-
-// Site is one mention.
-type Site struct {
-	File, Text string
-	Line       int
-	From, To   string
-	Shape      shape
-	InIt       bool // an inline inside an `it` moves exactly one example
-	Examples   int  // `it` blocks inside a block guard: a LOWER BOUND
-	OldAnchor  bool // a `do$` anchor would have found it
-}
-
-// Key is the version range a site guards, as it reads in the source.
-func (s Site) Key() string {
-	if s.To != "" {
-		return s.From + "..." + s.To
-	}
-	if s.From == "" {
-		return `"" (open lower bound)`
-	}
-	return s.From
-}
-
-// Classify decides what a single line of Ruby does with ruby_version_is.
-// Split out because it is the part that was wrong twice, so it is the part a
-// test drives directly.
-func Classify(line string) (Site, bool) {
-	if !callRe.MatchString(line) {
-		return Site{}, false
-	}
-	s := Site{Text: strings.TrimSpace(line)}
-	m := argRe.FindStringSubmatch(line)
-	if m == nil {
-		s.Shape = unknown
-		return s, true
-	}
-	s.From = m[1]
-	if m[2] != "" {
-		s.To = m[3]
-	}
-	s.OldAnchor = oldAnchorRe.MatchString(line)
-	bare := commentRe.ReplaceAllString(line, "")
-	if opensRe.MatchString(bare) || bracesRe.MatchString(bare) {
-		s.Shape = block
-	} else {
-		s.Shape = inline
-	}
-	return s, true
-}
-
-// ExamplesIn counts the `it` blocks between a guard and its matching `end`.
-// A LOWER BOUND: shared examples expand at run time and are invisible here.
-func ExamplesIn(lines []string, start int) int {
-	depth, n := 1, 0
-	for i := start + 1; i < len(lines) && depth > 0; i++ {
-		l := lines[i]
-		if strings.HasPrefix(strings.TrimSpace(l), "#") {
-			continue
-		}
-		if endKw.MatchString(l) || braceEnd.MatchString(l) {
-			depth--
-			continue
-		}
-		if doKw.MatchString(l) || (openKw.MatchString(l) && !modifIf.MatchString(l)) {
-			depth++
-		}
-		if itRe.MatchString(l) {
-			n++
-		}
-	}
-	return n
-}
-
-// Census reads one spec file.
-func Census(path string, src []byte) []Site {
-	lines := strings.Split(strings.ReplaceAll(string(src), "\r\n", "\n"), "\n")
-	var out []Site
-	itDepth := 0
-	for i, line := range lines {
-		if itRe.MatchString(line) {
-			itDepth++
-		} else if strings.TrimSpace(line) == "end" && itDepth > 0 {
-			itDepth--
-		}
-		s, ok := Classify(line)
-		if !ok {
-			continue
-		}
-		s.File, s.Line, s.InIt = path, i+1, itDepth > 0
-		if s.Shape == block {
-			s.Examples = ExamplesIn(lines, i)
-		}
-		out = append(out, s)
-	}
-	return out
-}
 
 func main() {
 	root := flag.String("root", ".", "the ruby/spec checkout")
 	list := flag.Bool("list", false, "print every inline site and every guard the old anchor missed")
+	move := flag.String("move", "", "a version move FROM:TO, e.g. 3.4.1:4.0.9 — report what it opens, closes and flips")
 	flag.Parse()
 
-	var sites []Site
-	files := 0
-	walk := func(p string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() || !strings.HasSuffix(p, "_spec.rb") {
-			return nil
-		}
-		files++
-		b, rerr := os.ReadFile(p)
-		if rerr != nil {
-			return rerr
-		}
-		sites = append(sites, Census(strings.TrimPrefix(strings.TrimPrefix(p, *root), "/"), b)...)
-		return nil
-	}
-
-	// ⛔ language/ and core/ ONLY, named rather than filtered. A draft walked
-	// the checkout minus a denylist of directory names and counted 2207 files
-	// where the gate counts 2206: a denylist inherits whatever it has not
-	// heard of. The gate sweeps exactly two suites, so this walks exactly two.
-	var err error
-	for _, suite := range []string{"language", "core"} {
-		if err = filepath.WalkDir(filepath.Join(*root, suite), walk); err != nil {
-			break
-		}
-	}
+	// ⛔ language/ and core/ ONLY, named rather than filtered: the gate sweeps
+	// exactly two suites, so this walks exactly two.
+	sites, files, err := gc.Walk(*root, []string{"language", "core"})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "guards: walking %s: %v\n", *root, err)
 		os.Exit(2)
@@ -228,12 +56,12 @@ func main() {
 		os.Exit(2)
 	}
 
-	var blocks, inlines, unk []Site
+	var blocks, inlines, unk []gc.Site
 	for _, s := range sites {
 		switch s.Shape {
-		case block:
+		case gc.Block:
 			blocks = append(blocks, s)
-		case inline:
+		case gc.Inline:
 			inlines = append(inlines, s)
 		default:
 			unk = append(unk, s)
@@ -280,6 +108,15 @@ func main() {
 	fmt.Printf("  %d inline sites sit inside an `it` (one example each);\n", inIt)
 	fmt.Printf("  %d sit at describe level, where one site can steer SEVERAL examples\n\n", len(inlines)-inIt)
 
+	if *move != "" {
+		from, to, ok := strings.Cut(*move, ":")
+		if !ok || from == "" || to == "" {
+			fmt.Fprintf(os.Stderr, "guards: -move wants FROM:TO, e.g. 3.4.1:4.0.9; got %q\n", *move)
+			os.Exit(2)
+		}
+		reportMove(gc.ClassifyMove(sites, from, to), *list)
+	}
+
 	if *list {
 		fmt.Println(`BLOCK guards at "4.0" a ` + "`do$`" + ` anchor does NOT find:`)
 		for _, s := range blocks {
@@ -307,7 +144,36 @@ func main() {
 	}
 }
 
-func tally(sites []Site, withExamples bool) {
+// reportMove prints what the move does to the corpus's own population. The
+// OPENED section comes first and names its files, because that is the half a
+// pass-only delta cannot see: a file whose every example is guarded away on one
+// side scores zero on both counters there and moves by nothing.
+func reportMove(m gc.Move, list bool) {
+	fmt.Printf("MOVE %s -> %s -- what the CORPUS does, before any engine runs\n", m.From, m.To)
+	fmt.Printf("  OPENED   %4d block guards in %3d files  (>= %d examples appear; a lower bound)\n",
+		len(m.Opened), len(gc.Files(m.Opened)), m.ExamplesOpened())
+	fmt.Printf("  CLOSED   %4d block guards in %3d files  (examples vanish)\n",
+		len(m.Closed), len(gc.Files(m.Closed)))
+	fmt.Printf("  FLIPPED  %4d inline sites in %3d files  (the same example asserts something else)\n\n",
+		len(m.Flipped), len(gc.Files(m.Flipped)))
+	if !list {
+		fmt.Println("  -list names the files.")
+		fmt.Println()
+		return
+	}
+	for _, s := range m.Opened {
+		fmt.Printf("  OPENED  %s:%d  >=%d examples  %s\n", s.File, s.Line, s.Examples, s.Text)
+	}
+	for _, s := range m.Closed {
+		fmt.Printf("  CLOSED  %s:%d  %s\n", s.File, s.Line, s.Text)
+	}
+	for _, s := range m.Flipped {
+		fmt.Printf("  FLIPPED %s:%d  %s\n", s.File, s.Line, s.Text)
+	}
+	fmt.Println()
+}
+
+func tally(sites []gc.Site, withExamples bool) {
 	type agg struct{ guards, examples int }
 	by := map[string]*agg{}
 	for _, s := range sites {
