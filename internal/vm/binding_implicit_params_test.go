@@ -150,6 +150,61 @@ func TestBindingImplicitParameterErrors(t *testing.T) {
 	}
 }
 
+// The arity of all three is fixed in MRI (0, 1 and 1), so a wrong count is an
+// ArgumentError and not a silently ignored argument.
+//
+// ⛔ Named by the coverage gate rather than thought of: the three refusals were
+// written and never driven, which is the same as not having them.
+func TestBindingImplicitParameterArity(t *testing.T) {
+	for _, tc := range []struct{ name, src, want string }{{
+		name: "implicit_parameters takes none",
+		src:  `begin; binding.implicit_parameters(1); rescue ArgumentError => e; e.message; end`,
+		want: `wrong number of arguments (given 1, expected 0)`,
+	}, {
+		name: "implicit_parameter_get takes one",
+		src:  `begin; binding.implicit_parameter_get(:_1, 2); rescue ArgumentError => e; e.message; end`,
+		want: `wrong number of arguments (given 2, expected 1)`,
+	}, {
+		name: "implicit_parameter_defined? takes one",
+		src:  `begin; binding.implicit_parameter_defined?; rescue ArgumentError => e; e.message; end`,
+		want: `wrong number of arguments (given 0, expected 1)`,
+	}} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := evalString(t, tc.src); got != tc.want {
+				t.Errorf("%s\n got %q\nwant %q", tc.src, got, tc.want)
+			}
+		})
+	}
+}
+
+// Binding#dup and #clone copy the implicit-parameter map rather than sharing
+// it, the same way they copy the name list — so the copy answers for the same
+// scope and a later change to one cannot reach the other.
+//
+// ⛔ Also named by the coverage gate: every dup in the suite happened to be of
+// a binding with NO implicit parameters, so the copy was never exercised.
+func TestADuplicatedBindingKeepsItsImplicitParameters(t *testing.T) {
+	for _, tc := range []struct{ name, src, want string }{{
+		name: "dup of a binding that has one",
+		src:  `r = nil; [7].each { _1; r = binding.dup.implicit_parameter_get(:_1) }; r.inspect`,
+		want: `7`,
+	}, {
+		name: "clone of a binding that has one",
+		src:  `r = nil; [7].each { it; r = binding.clone.implicit_parameters }; r.inspect`,
+		want: `[:it]`,
+	}, {
+		name: "dup of a binding that has none keeps having none",
+		src:  `a = 1; binding.dup.implicit_parameters.inspect`,
+		want: `[]`,
+	}} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := evalString(t, tc.src); got != tc.want {
+				t.Errorf("%s\n got %s\nwant %s", tc.src, got, tc.want)
+			}
+		})
+	}
+}
+
 // ⛔ THE CONTROL. An implicit parameter is not a local variable, and `it` has
 // never been one — that part is already rbgo's behaviour and must stay. Without
 // this, the change above could have made `it` visible to #local_variables and

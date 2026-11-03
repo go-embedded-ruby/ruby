@@ -375,7 +375,10 @@ type ISeq struct {
 	// blanked Locals for `it` to the same end; this records what was blanked
 	// instead of discarding it.
 	//
-	// It may be shorter than NumLocals, or nil: a slot past its end is ordinary.
+	// It is DENSE and starts at slot 0: a block whose parameters the parser
+	// synthesised has no anonymous slot among them, so there is no gap to
+	// represent. Empty or nil for every other scope, and a slot past its end is
+	// an ordinary local.
 	ImplicitParams []string
 
 	Children []*ISeq // nested ISeqs (method bodies / class bodies defined here)

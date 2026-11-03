@@ -2222,10 +2222,12 @@ func hideImplicitBlockParams(b *builder, blk *ast.Block, positionals []string) {
 	if !blockParamsAreImplicit(blk) {
 		return
 	}
+	// ⛔ EVERY positional here is implicit, so the list is DENSE and recorded
+	// without a guard. A `name == ""` arm looked prudent and was unreachable:
+	// blockParamsAreImplicit already means the parser synthesised the whole
+	// parameter list, so there is no anonymous slot among them. The coverage
+	// gate named it, which is the right way to find out.
 	for i, name := range positionals {
-		if name == "" {
-			continue
-		}
 		b.markImplicitParam(i, name)
 		if name != "it" {
 			continue

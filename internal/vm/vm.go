@@ -404,9 +404,6 @@ func (vm *VM) collectBindingLocals(b *Binding, i int) {
 	// get_local_variable_ptr(..., FALSE) and the reason a numbered parameter in a
 	// parent or a nested scope is invisible here.
 	for slot, n := range fc.iseq.ImplicitParams {
-		if n == "" {
-			continue
-		}
 		if b.implicit == nil {
 			b.implicit = map[string]int{}
 		}
