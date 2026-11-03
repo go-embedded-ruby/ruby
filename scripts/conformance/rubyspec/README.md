@@ -287,8 +287,10 @@ specdelta: the move 3.4.1 → 4.0.9 touches 49 file(s) that -dir core/set does n
     core/binding/implicit_parameter_get_spec.rb
     core/binding/implicit_parameters_spec.rb
     …
-  A number from this run would not be a number about the move. Widen -dir, or
-  pass -partial to say so on purpose — the report is then stamped PARTIAL.
+  A number from this run would not be a number about the move. Either
+    -dir core,language
+  which measures the whole surface, or -partial to say so on purpose —
+  the report is then stamped PARTIAL.
 ```
 
 The refusal comes **first** because a `core/` sweep is an hour, and an hour
@@ -297,6 +299,39 @@ avoid. A measured file the move opens is marked `⛔ THE MOVE OPENS ≥N example
 here` and is **never dropped by `-quiet`** — a delta of zero on such a file is
 the signature of the defect, not of calm — and the summary reports the move's
 share apart from the engines'.
+
+### ⛔ `-dir` names a set, because the refusal's advice has to be followable
+
+That refusal first read *"Widen `-dir`"*, and `-dir` took **one** directory.
+The surface of the move this repository is actually making spans **two** suites
+— `core/` and `language/` — so from `-dir core` the only widening available was
+the whole corpus: `library/`, `optional/`, `command_line/`, `security/`, and
+hours of sweep over files the move never touches.
+
+That left `-partial` as the only reachable exit, which would have stamped the
+headline figure for #799 `PARTIAL` not because the surface was incomplete but
+because the flag could not express a complete one. **A derogation that is the
+normal road is not a derogation**, and a gate whose honest exit nobody can
+reach is not a gate.
+
+So `-dir` is comma-separated, and the refusal computes the `-dir` that *would*
+cover the surface from the census rather than telling the reader to widen:
+
+```sh
+specdelta -root ~/ruby-spec-corpus -move 3.4.1:4.0.9 -dir core,language \
+    -repeat 3 -quiet ./rbgo-341 ./rbgo-409
+```
+
+Top-level suites and no deeper, on purpose: the 50 exact directories would be
+unreadable and would go stale the moment the corpus moves, while
+`core,language` is both the honest surface and something a reader can retype.
+It reaches `core/` and `language/` and **not** `library/` — a suggestion that
+over-reached would re-create the problem it fixes.
+
+A file reached through two named directories (`-dir core,core/set`) is measured
+**once**. Counted twice it would be counted on both sides, which makes the
+totals move with how the caller spelled `-dir` rather than with the engines.
+And `-dir core,` does not quietly become the whole corpus.
 
 **⛔ Provenance, and it is a repeat offence.** On 2026-11-01 `pass=118 fail=1`
 was published for [#858](https://github.com/go-embedded-ruby/ruby/pull/858) from
