@@ -1,0 +1,161 @@
+name: rubyspec-sweep
+
+# The ruby/spec sweep, defined ONCE and called twice: by rubyspec-ratchet.yml to
+# judge every push and pull request, and by rubyspec-baseline.yml to re-record
+# BASELINE on demand.
+#
+# ⛔ THIS FILE EXISTS SO THE TWO CANNOT DRIFT. The gate below is pinned to
+# ubuntu-24.04 because the environment changes the answer -- `setrlimit` read 28
+# on one Ubuntu major and 29 on the next, same commit (#838). A baseline
+# recorded in a different environment from the one that enforces it is a
+# baseline recorded in the wrong environment, and the difference is invisible:
+# both runs print a number.
+#
+# Two YAML files agreeing about `runs-on`, `go-version` and `TIMEOUT` would be an
+# agreement that has to be maintained, and the whole point of the pinning is that
+# nobody notices when it lapses. One definition and two callers is the same
+# agreement enforced by construction.
+on:
+  workflow_call:
+    inputs:
+      update_baseline:
+        description: re-record BASELINE from this sweep instead of judging against it
+        type: boolean
+        default: false
+      absorb:
+        description: with update_baseline, record even though files went backwards (the baseline is stamped)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  sweep:
+    name: ruby/spec ${{ inputs.update_baseline && 're-record' || 'ratchet' }}
+    # ⛔ PINNED, and this is the one lane in this repository that must be.
+    # BASELINE pins everything else about the measurement -- the corpus SHA, a
+    # real path rather than a symlink, TIMEOUT raised to 60s, an isolated
+    # snapshot, three agreeing sweeps -- and then `ubuntu-latest` re-pointed
+    # without notice and the gate changed its answer.
+    #
+    # Measured (#838): run 40355659600 at commit e54df08, re-run 28 hours later.
+    #   attempt 1, 2026-10-26, Image: ubuntu-24.04 -> success
+    #   attempt 2, 2026-10-27, Image: ubuntu-26.04 -> FAILURE
+    #       core/process/setrlimit_spec.rb: 28 passing, baseline 29
+    # Same commit, same go-version, same SPEC_SHA. `setrlimit` measures
+    # resource limits, which is among the first things to differ between two
+    # Ubuntu majors. Four pull requests sat blocked behind it, none of them the
+    # cause.
+    #
+    # A gate whose environment is a moving label is a reading, not a gate; and
+    # the failure is the quiet kind, because nobody re-runs a green lane.
+    # Moving to 26.04 stays possible -- as a deliberate change with its own
+    # measurement and its own BASELINE delta, like a SPEC_SHA bump. Re-recording
+    # blind is what must not happen: the same run also showed kernel/require +1,
+    # equally environmental, and `UPDATE_BASELINE=1` would bank it as progress.
+    # cmd/ratchet now refuses that write rather than performing it (#876); this
+    # file is the other half, so that what records and what enforces are the
+    # same machine.
+    #
+    # The other lanes keep `ubuntu-latest` deliberately: they build and test,
+    # where an image roll is news worth having, not a baseline to protect.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: 1.27.3
+      - run: go version
+      - name: What the runner has to start with
+        run: |
+          echo "== cpus ==";   nproc
+          echo "== memory =="; free -m
+          echo "== disk ==";   df -h /
+
+      - name: Run ruby/spec ratchet
+        shell: bash
+        # Raise the per-file timeout above run.sh's 25s default: a few heavy spec
+        # files (large core suites) can exceed 25s on a loaded/degraded runner and
+        # then "fail to load", dropping ~150 examples each and producing a spurious
+        # below-floor REGRESSION. 60s absorbs that jitter without masking real hangs.
+        env:
+          TIMEOUT: "60"
+          UPDATE_BASELINE: ${{ inputs.update_baseline && '1' || '0' }}
+          ABSORB: ${{ inputs.absorb && '1' || '0' }}
+        # The lane dies intermittently with "the runner has received a
+        # shutdown signal", three to five minutes into a sweep that takes nine
+        # when it finishes. This watcher is what found out why, on its first
+        # failure: memory available fell from 9325 MB to 269 MB in thirty
+        # seconds, and the runner was gone two seconds later.
+        #
+        # Four spec files ask for tens of gigabytes on their own — measured over
+        # the whole corpus, peak resident set per file:
+        #
+        #   core/io/seek_spec.rb                            63.9 GB
+        #   language/singleton_class_spec.rb                59.4 GB
+        #   core/array/product_spec.rb                      37.4 GB
+        #   core/enumerator/arithmetic_sequence/size_spec.rb 34.8 GB
+        #   core/enumerator/lazy/flat_map_spec.rb           17.6 GB
+        #   core/string/multiply_spec.rb                     6.2 GB
+        #
+        # against a runner with sixteen. Whichever of them the sweep reaches
+        # first takes the machine with it, which is why the failure moves around
+        # and why it sometimes finishes. They are runaway allocations in rbgo —
+        # MRI does not materialise any of these — and they are worth fixing
+        # there rather than worked around here.
+        #
+        # The watcher stays: it is what will say so next time, instead of the
+        # shrug this lane produced for three days.
+        run: |
+          ( while true; do
+              printf '[watch %s] disk_avail=%s mem_avail=%sMB load=%s\n' \
+                "$(date -u +%H:%M:%S)" \
+                "$(df -h --output=avail / | tail -1 | tr -d ' ')" \
+                "$(awk '/MemAvailable/{print int($2/1024)}' /proc/meminfo)" \
+                "$(cut -d' ' -f1-3 /proc/loadavg)"
+              sleep 30
+            done ) &
+          watcher=$!
+          # Take the ratchet's own status and exit with it, rather than leaving
+          # the step's status to whatever tearing down the watcher leaves behind.
+          #
+          # An EXIT trap did the tearing down at first, and twice reported a run
+          # that had printed "ruby/spec ratchet OK" as a failure — "Terminated",
+          # then exit 1. The race is not reproducible on demand, which is reason
+          # to remove the mechanism rather than to keep timing it: the status is
+          # captured before anything is killed, and handed back explicitly.
+          #
+          # The child sleep outlives a kill of the subshell alone, so it is
+          # killed first and waited for — otherwise the runner reports an orphan
+          # it had to terminate, which is noise in the very log this exists to
+          # make readable.
+          set +e
+          scripts/conformance/rubyspec/run.sh
+          status=$?
+          set -e
+          pkill -P "$watcher" 2>/dev/null || true
+          kill "$watcher" 2>/dev/null || true
+          wait "$watcher" 2>/dev/null || true
+          exit "$status"
+
+      # ⛔ The diff is printed, and the file is uploaded, ONLY on a re-record.
+      # Nothing is committed from here: a lane that pushed to a branch would be
+      # a lane that can change the gate it just ran, and the person asking for a
+      # re-record is exactly the person who should read the delta before it
+      # becomes the record.
+      - name: What this re-record would change
+        if: ${{ inputs.update_baseline && always() }}
+        run: git --no-pager diff --stat -- scripts/conformance/rubyspec/BASELINE
+
+      # No always() here, deliberately, unlike the diff above: a REFUSED
+      # re-record leaves BASELINE untouched, and uploading it under this name
+      # would offer the unchanged file as "the re-recorded baseline" to someone
+      # who had not read the log.
+      - name: The re-recorded baseline
+        if: ${{ inputs.update_baseline }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: BASELINE
+          path: scripts/conformance/rubyspec/BASELINE
+          if-no-files-found: error
