@@ -80,6 +80,32 @@ and be recorded as not loading, which bakes the load into the gate. The CI job
 (`.github/workflows/rubyspec-ratchet.yml`) enforces the baseline on every push
 and pull request, and raises `TIMEOUT` to 60s for exactly this reason.
 
+### ⛔ Record it where it is enforced — `workflow_dispatch: rubyspec-baseline`
+
+An unloaded machine is not enough, because it is still the **wrong** machine.
+The gate is pinned to `ubuntu-24.04` precisely because the environment changes
+the answer — `setrlimit` read 28 on one Ubuntu major and 29 on the next, same
+commit (#838) — so a baseline recorded anywhere else is recorded somewhere the
+gate will never run. Measured on one developer's laptop: **+9 examples** against
+the CI-recorded baseline, for no change in the code at all.
+
+`UPDATE_BASELINE=1` was a local command and nothing else, so *every* baseline
+was recorded on the wrong machine, and the difference is invisible because both
+machines print a number. Run the **rubyspec-baseline** lane instead
+(Actions → rubyspec-baseline → Run workflow). It downloads as an artefact
+called `BASELINE`, with the diffstat printed beside it; commit that file.
+
+It and the gate are **one definition with two callers**
+(`.github/workflows/rubyspec-sweep.yml`): the pinned image, the Go version, the
+raised `TIMEOUT` and the memory watcher are written once. Two lanes agreeing
+about `runs-on` would be an agreement somebody has to maintain, and the whole
+point of pinning is that nobody notices when it lapses.
+
+Nothing is committed from the lane. A lane that pushed to a branch would be a
+lane that can change the gate it just ran, and the person who asked for the
+re-record is exactly the person who should read the delta before it becomes the
+record.
+
 ### ⛔ A re-record reads the old baseline first, and refuses to bank a loss
 
 `-update` used to write straight over `BASELINE` **without reading it**, so the
