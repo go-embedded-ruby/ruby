@@ -921,7 +921,7 @@ func (vm *VM) registerThreadClass() {
 		})
 		return object.NewArrayFromSlice(keys)
 	})
-	// raise([exc[, msg]]) delivers an exception to the thread asynchronously: it is
+	// raise([exc[, msg[, backtrace]]][, cause:]) delivers an exception to the thread asynchronously: it is
 	// picked up at the target's next interpreter safepoint (a backward jump or a
 	// method/block entry) and raised in the target's own context. With no arguments
 	// it raises a RuntimeError with an empty message (MRI); otherwise the arguments
@@ -935,12 +935,12 @@ func (vm *VM) registerThreadClass() {
 		if t.isDone() {
 			return object.NilV
 		}
-		var exc object.Value
-		if len(args) == 0 {
-			exc = vm.send(vm.consts["RuntimeError"].(*RClass), "new", []object.Value{object.NewString("")}, nil)
-		} else {
-			exc = vm.raiseExceptionObject(args)
-		}
+		// Built by the SHARED builder Fiber#raise uses: a hand-rolled copy here
+		// dropped the cause: keyword Ruby 4.0 adds and the backtrace argument
+		// Kernel#raise has always taken. It runs in the CALLER's context, so the
+		// automatic chaining reads the caller's $! rather than the target's —
+		// which is what ruby/spec's :kernel_raise_across_contexts pins.
+		exc := vm.asyncRaiseException(args)
 		if t == vm.currentThread {
 			panic(vm.excError(vm.captureBacktrace(exc)))
 		}

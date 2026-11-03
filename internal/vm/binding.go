@@ -41,6 +41,18 @@ type Binding struct {
 	// fresh block-less scope, it continues the captured one.
 	block *Proc
 
+	// implicit maps an IMPLICIT parameter's name — `it`, or `_1`..`_N` — to its
+	// slot in env, the binding's own (depth 0) scope. Only depth 0: MRI reads
+	// these with get_local_variable_ptr(&env, lid, FALSE), where the final
+	// argument is "search the parent scopes" and is TRUE for every local-variable
+	// method and FALSE for every implicit-parameter one (proc.c v4.0.9:688, 734,
+	// 782). That single flag is the whole of "ignores a numbered parameter
+	// defined in a parent scope", which ruby/spec pins four times over.
+	//
+	// nil for a scope with none, which is every scope that is not a block whose
+	// parameters the parser synthesised.
+	implicit map[string]int
+
 	// method is the __method__/__callee__ pair of the frame the binding was
 	// captured in, so eval'd code reports the enclosing method. MRI reaches the
 	// same answer from the binding's own frame (rb_vm_frame_method_entry on the
@@ -267,6 +279,9 @@ func (vm *VM) registerBinding() {
 			names:   append([]string(nil), b.names...),
 			locs:    append([]bindLoc(nil), b.locs...),
 			added:   append([]string(nil), b.added...),
+			// Shared by value, not by reference: nothing mutates the map after
+			// capture, but a copy keeps that true if anything ever does.
+			implicit: copyImplicit(b.implicit),
 		}
 	}
 	cBinding.define("dup", bindingDup)
@@ -305,6 +320,103 @@ func (vm *VM) registerBinding() {
 	cBinding.define("local_variable_defined?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return object.Bool(self.(*Binding).slotOf(vm.bindingVarName(args[0])) >= 0)
 	})
+
+	// Ruby 4.0's implicit-parameter trio (proc.c v4.0.9:680-783). They are the
+	// other half of taking `_1` out of #local_variables: the implicit parameters
+	// do not vanish, they move to an API of their own.
+	//
+	// bind_implicit_parameters answers [:it] when `it` is in scope and the
+	// numbered parameters otherwise — never a mixture, because a block cannot
+	// have both.
+	cBinding.define("implicit_parameters", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) != 0 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 0)", len(args))
+		}
+		return self.(*Binding).implicitParameterNames()
+	})
+	cBinding.define("implicit_parameter_get", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) != 1 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 1)", len(args))
+		}
+		b := self.(*Binding)
+		name := vm.implicitParamName(args[0])
+		slot, ok := b.implicit[name]
+		if !ok {
+			raise("NameError", "implicit parameter '%s' is not defined for %s", name, b.ToS())
+		}
+		return b.env.slots[slot]
+	})
+	cBinding.define("implicit_parameter_defined?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) != 1 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 1)", len(args))
+		}
+		b := self.(*Binding)
+		_, ok := b.implicit[vm.implicitParamName(args[0])]
+		return object.Bool(ok)
+	})
+}
+
+// implicitParamName coerces the argument of #implicit_parameter_get /
+// #implicit_parameter_defined? and REFUSES a name that is not an implicit
+// parameter's at all.
+//
+// ⛔ THE TWO REFUSALS ARE DIFFERENT AND BOTH ARE PINNED. MRI checks the shape of
+// the NAME before it looks for a value (proc.c v4.0.9:726, 775):
+//
+//	:a   -> NameError "'a' is not an implicit parameter"          — never could be
+//	:_1  -> NameError "implicit parameter '_1' is not defined for …" — could be, is not
+//
+// Collapsing them would pass "not defined" for a name no scope could ever hold.
+// The TypeError for a non-String/Symbol is bindingVarName's, which is already
+// MRI's message.
+func (vm *VM) implicitParamName(v object.Value) string {
+	name := vm.bindingVarName(v)
+	if !isImplicitParamName(name) {
+		raise("NameError", "'%s' is not an implicit parameter", name)
+	}
+	return name
+}
+
+func copyImplicit(m map[string]int) map[string]int {
+	if m == nil {
+		return nil
+	}
+	out := make(map[string]int, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
+}
+
+// isImplicitParamName is MRI's rb_implicit_param_p: `it`, or `_` followed by a
+// single digit 1..9. `_0` and `_10` are ordinary locals.
+func isImplicitParamName(name string) bool {
+	if name == "it" {
+		return true
+	}
+	return len(name) == 2 && name[0] == '_' && name[1] >= '1' && name[1] <= '9'
+}
+
+// implicitParameterNames is bind_implicit_parameters (proc.c v4.0.9:680): [:it]
+// when `it` is this scope's implicit parameter, otherwise the numbered ones in
+// order. A block has one kind or the other and never both — `proc { |x| _1 }` is
+// a syntax error — so the `it` arm returns before the numbered ones are looked
+// at, as MRI's does.
+func (b *Binding) implicitParameterNames() object.Value {
+	if _, ok := b.implicit["it"]; ok {
+		return object.NewArray(object.Symbol("it"))
+	}
+	var elems []object.Value
+	// Ascending by name, which for `_1`..`_9` is ascending by slot too. MRI
+	// builds the list from the local table in order for the same reason.
+	for d := byte('1'); d <= '9'; d++ {
+		n := string([]byte{'_', d})
+		if _, ok := b.implicit[n]; !ok {
+			break
+		}
+		elems = append(elems, object.Symbol(n))
+	}
+	return object.NewArrayFromSlice(elems)
 }
 
 // localVariableNames is the Symbol array Binding#local_variables and

@@ -360,8 +360,29 @@ type ISeq struct {
 	BlockSlot  int      // slot of the &block param, or -1
 	NumLocals  int      // total local slots (params first, then assigns)
 	Locals     []string // local-variable names by slot (for Binding); "" for anonymous slots
-	Children   []*ISeq  // nested ISeqs (method bodies / class bodies defined here)
-	Super      string   // for a class body: the superclass name ("" → Object)
+
+	// ImplicitParams names the slots holding a block's IMPLICIT parameters —
+	// `it`, or `_1`..`_N` — by slot, "" elsewhere. It is a SECOND channel beside
+	// Locals because the two answer different questions and 4.0 separated them:
+	// an implicit parameter is not a local variable (it is absent from
+	// Binding#local_variables and unreachable by #local_variable_get) and yet it
+	// has a name and a value, which Binding#implicit_parameters,
+	// #implicit_parameter_get and #implicit_parameter_defined? return.
+	//
+	// MRI keeps them in the same local table under IDs the program cannot spell:
+	// `it` under idItImplicit rather than idIt, and the numbered parameters under
+	// IDs rb_numparam_id_p recognises (proc.c v4.0.9:680-783). rbgo already
+	// blanked Locals for `it` to the same end; this records what was blanked
+	// instead of discarding it.
+	//
+	// It is DENSE and starts at slot 0: a block whose parameters the parser
+	// synthesised has no anonymous slot among them, so there is no gap to
+	// represent. Empty or nil for every other scope, and a slot past its end is
+	// an ordinary local.
+	ImplicitParams []string
+
+	Children []*ISeq // nested ISeqs (method bodies / class bodies defined here)
+	Super    string  // for a class body: the superclass name ("" → Object)
 
 	// Lines is the source map: which source line each instruction came from,
 	// COMPRESSED to one entry per line CHANGE and kept sorted by PC.
