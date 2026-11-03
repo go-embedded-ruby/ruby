@@ -227,9 +227,18 @@ func TestImplicitParametersAreNotLocalVariables(t *testing.T) {
 			`rescue NameError => e; r = e.message; end }; r`,
 		want: `local variable 'it' is not defined for #<Binding>`,
 	}, {
-		name: "while _1 stays visible at the version rbgo reports",
+		name: "and _1 is hidden the same way from 4.0",
 		src:  `r = nil; [1].each { _1; r = binding.local_variables.include?(:_1) }; r.inspect`,
-		want: `true`,
+		want: `false`,
+	}, {
+		// ⛔ But NOT the same way through local_variable_get. `it` is a legal
+		// local variable name, so asking for it gets the ordinary "not defined"
+		// above; `_1` can never be one, and MRI refuses it by name before any
+		// lookup (proc.c v4.0.9:549). Two different messages, deliberately.
+		name: "though with a different refusal, because _1 is not a NAME a local can have",
+		src: `r = nil; [1].each { _1; begin; binding.local_variable_get(:_1); ` +
+			`rescue NameError => e; r = e.message; end }; r`,
+		want: `numbered parameter '_1' is not a local variable`,
 	}} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := evalString(t, tc.src); got != tc.want {

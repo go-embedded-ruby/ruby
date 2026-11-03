@@ -360,13 +360,18 @@ func TestImplicitBlockParamsAreHidden(t *testing.T) {
 	if len(writtenIt.Params) != 1 || writtenIt.Params[0] != "it" {
 		t.Errorf("f { |it| it }: Params = %q, want [\"it\"]", writtenIt.Params)
 	}
-	// The numbered parameters keep theirs, in both tables.
+	// ⛔ THE NUMBERED PARAMETERS SPLIT THE TWO TABLES, and this asymmetry is the
+	// whole of Ruby 4.0's change. They keep their names in Params, because
+	// `proc { _1 }.parameters` is [[:opt, :_1]] under no version guard at all
+	// (numbered_parameters_spec.rb:85), and lose them in Locals, because from
+	// 4.0 they are not local variables (:112-135). `it` loses both; a numbered
+	// parameter loses one.
 	np := blockOf(t, "f { _1 + _2 }")
 	if len(np.Params) != 2 || np.Params[0] != "_1" || np.Params[1] != "_2" {
-		t.Errorf("f { _1 + _2 }: Params = %q, want [\"_1\" \"_2\"]", np.Params)
+		t.Errorf("f { _1 + _2 }: Params = %q, want [\"_1\" \"_2\"] -- #parameters is ungated", np.Params)
 	}
-	if len(np.Locals) < 2 || np.Locals[0] != "_1" || np.Locals[1] != "_2" {
-		t.Errorf("f { _1 + _2 }: Locals = %q, want the numbered names kept", np.Locals)
+	if len(np.Locals) < 2 || np.Locals[0] != "" || np.Locals[1] != "" {
+		t.Errorf("f { _1 + _2 }: Locals = %q, want the numbered names blanked from 4.0", np.Locals)
 	}
 }
 

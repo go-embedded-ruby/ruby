@@ -21,7 +21,7 @@ import (
 // function-local, which is how a CLI ends up printing a version the running VM
 // does not report.
 const (
-	rubyVersion = "3.4.1"
+	rubyVersion = "4.0.9"
 	releaseDate = "2024-12-25"
 	revision    = "48d4efcb85000e1ebae42004e963b5d0cedddcf2"
 )

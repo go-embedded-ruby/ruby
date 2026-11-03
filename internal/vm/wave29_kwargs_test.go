@@ -275,10 +275,11 @@ func TestImplicitItIsInvisible(t *testing.T) {
 		{"defined?(it) is still resolved lexically", `p(-> { it; defined?(it) }.call(1))`, `"local-variable"`},
 		{"it still binds the argument", `p(-> { it }.call(7))`, "7"},
 		{"it affects arity", "p(-> { it }.arity)", "1"},
-		// The numbered parameters are NOT hidden: they are named in #parameters,
-		// and for the Ruby version rbgo reports they are visible to a Binding.
+		// ⛔ The numbered parameters are hidden from ONE table of the two. They
+		// keep their names in #parameters, which carries no version guard, and
+		// leave the local table from 4.0 -- unlike `it`, which leaves both.
 		{"_1 keeps its name", "p(proc { _1 }.parameters)", "[[:opt, :_1]]"},
-		{"_1 is a binding local", `p(-> { _1; binding.local_variables }.call("a"))`, "[:_1]"},
+		{"_1 is not a binding local", `p(-> { _1; binding.local_variables }.call("a"))`, "[]"},
 	} {
 		if got := runSrc(t, tc.src); got != tc.want {
 			t.Errorf("%s:\ngot  %q\nwant %q", tc.name, got, tc.want)
