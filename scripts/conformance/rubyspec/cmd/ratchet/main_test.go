@@ -166,6 +166,126 @@ func TestRatchetUpdateRoundTrips(t *testing.T) {
 	}
 }
 
+// ⛔ -update used to write straight over the baseline WITHOUT READING IT, so the
+// one thing it could never report was whether the sweep replacing the record was
+// better or worse than it. The hazard was written down twice in this repository
+// — cmd/guards' header, and the ratchet lane's comment about an Ubuntu image
+// roll ("UPDATE_BASELINE=1 would bank it as progress") — and gated in neither.
+//
+// recordOver re-records `sweep` over the three-file baseline and returns the
+// tool's output, its error, and what the baseline file holds afterwards.
+func recordOver(t *testing.T, sweep string, extra ...string) (string, error, string) {
+	t.Helper()
+	dir := t.TempDir()
+	bp := filepath.Join(dir, "BASELINE")
+	if err := os.WriteFile(bp, []byte(baseline3), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out strings.Builder
+	err := run(append([]string{"-baseline", bp, "-update"}, extra...), strings.NewReader(sweep), &out)
+	after, rerr := os.ReadFile(bp)
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	return out.String(), err, string(after)
+}
+
+func TestARerecordWillNotSilentlyBankALoss(t *testing.T) {
+	// a_spec goes 10 → 9 while b_spec gains: a NET of zero, which is exactly the
+	// shape no total can see.
+	lost := "OK\tcore/a_spec.rb\t9\nOK\tcore/b_spec.rb\t21\nFILEFAIL\tcore/c_spec.rb\n"
+
+	out, err, after := recordOver(t, lost)
+	if !errors.Is(err, errWouldAbsorb) {
+		t.Fatalf("err = %v, want errWouldAbsorb; out:\n%s", err, out)
+	}
+	if !errors.Is(err, errWouldAbsorb) || errors.Is(err, errRegression) {
+		t.Errorf("the refusal must be distinct from a plain regression verdict")
+	}
+	if !strings.Contains(out, "core/a_spec.rb: 9 passing, baseline 10 (-1)") {
+		t.Errorf("the refusal does not name the file that went backwards:\n%s", out)
+	}
+	// ⛔ And it must not have half-written. A refusal that truncated the file
+	// would destroy the very record it declined to replace.
+	if after != baseline3 {
+		t.Errorf("the refused re-record changed the baseline:\n%q", after)
+	}
+
+	// -absorb is the named derogation, and it STAMPS THE ARTEFACT: the console
+	// scrolls away, the baseline outlives the run by months.
+	out, err, after = recordOver(t, lost, "-absorb")
+	if err != nil {
+		t.Fatalf("-absorb: %v\n%s", err, out)
+	}
+	if !strings.Contains(after, "ABSORBED 1 file(s)") || !strings.Contains(after, "core/a_spec.rb: 9 passing, baseline 10 (-1)") {
+		t.Errorf("-absorb did not stamp the baseline with what it absorbed:\n%s", after)
+	}
+	if !strings.Contains(after, "OK\tcore/a_spec.rb\t9\n") {
+		t.Errorf("-absorb did not actually record the sweep:\n%s", after)
+	}
+
+	// The CONTROL, without which the above only proves the gate always fires:
+	// a re-record that merely locks in a win is accepted, and is NOT stamped.
+	won := "OK\tcore/a_spec.rb\t12\nOK\tcore/b_spec.rb\t20\nFILEFAIL\tcore/c_spec.rb\n"
+	out, err, after = recordOver(t, won)
+	if err != nil {
+		t.Fatalf("a winning re-record was refused: %v\n%s", err, out)
+	}
+	if strings.Contains(after, "ABSORBED") {
+		t.Errorf("a clean re-record was stamped:\n%s", after)
+	}
+	if !strings.Contains(out, "improved (1)") {
+		t.Errorf("the re-record does not report what it locked in:\n%s", out)
+	}
+}
+
+// The other two ways a file goes backwards are the same refusal, and a first
+// recording -- with no baseline to be worse than -- is not one at all.
+func TestTheRerecordRefusalCoversEveryWayBackwards(t *testing.T) {
+	for _, tc := range []struct {
+		name, sweep, want string
+	}{
+		{
+			"a file stops loading",
+			"OK\tcore/a_spec.rb\t10\nFILEFAIL\tcore/b_spec.rb\nFILEFAIL\tcore/c_spec.rb\n",
+			"core/b_spec.rb",
+		},
+		{
+			"a file vanishes from the sweep",
+			"OK\tcore/a_spec.rb\t10\nFILEFAIL\tcore/c_spec.rb\n",
+			"core/b_spec.rb",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			out, err, after := recordOver(t, tc.sweep)
+			if !errors.Is(err, errWouldAbsorb) {
+				t.Fatalf("err = %v, want errWouldAbsorb; out:\n%s", err, out)
+			}
+			if !strings.Contains(out, tc.want) {
+				t.Errorf("the refusal does not name %s:\n%s", tc.want, out)
+			}
+			if after != baseline3 {
+				t.Errorf("the refused re-record changed the baseline")
+			}
+		})
+	}
+
+	t.Run("the first recording has nothing to go backwards from", func(t *testing.T) {
+		bp := filepath.Join(t.TempDir(), "BASELINE")
+		var out strings.Builder
+		if err := run([]string{"-baseline", bp, "-update"}, strings.NewReader(baseline3), &out); err != nil {
+			t.Fatalf("a first recording was refused: %v\n%s", err, out.String())
+		}
+		got, err := os.ReadFile(bp)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(got), "OK\tcore/a_spec.rb\t10\n") {
+			t.Errorf("the first recording did not write the sweep:\n%s", got)
+		}
+	})
+}
+
 // TestRatchetMissingBaselineIsAnError: pointing at a baseline that is not there
 // must fail loudly. A tool that treats an absent baseline as "nothing to beat"
 // would pass forever.

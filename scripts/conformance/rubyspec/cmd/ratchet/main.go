@@ -33,6 +33,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // state is what the baseline records for one file, and what a sweep measures.
@@ -183,12 +184,21 @@ func section(w io.Writer, title string, items []string, limit int) {
 // verdict is reachable from a test.
 var errRegression = errors.New("regression")
 
+// errWouldAbsorb is the re-record refusing to overwrite a better baseline with
+// a worse sweep. It is kept DISTINCT from errRegression although both exit 1:
+// one says "this branch broke something", the other says "I declined to erase
+// the evidence that something is broken", and a reader who confuses them looks
+// in the wrong place.
+var errWouldAbsorb = errors.New("would absorb a regression")
+
 func main() {
 	err := run(os.Args[1:], os.Stdin, os.Stdout)
 	switch {
 	case err == nil:
 		return
-	case errors.Is(err, errRegression):
+	case errors.Is(err, errRegression), errors.Is(err, errWouldAbsorb):
+		// Both are answers, not malfunctions: exit 1, never the 2 that means
+		// the tool could not read its input.
 		os.Exit(1)
 	default:
 		fmt.Fprintf(os.Stderr, "ratchet: %v\n", err)
@@ -202,6 +212,7 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 	baseline := fs.String("baseline", "", "per-file baseline TSV (required)")
 	results := fs.String("results", "", "sweep results TSV (default: stdin)")
 	update := fs.Bool("update", false, "rewrite the baseline from this sweep and exit 0")
+	absorb := fs.Bool("absorb", false, "with -update, re-record even though files went backwards; the baseline is stamped with their names")
 	limit := fs.Int("limit", 40, "cap each printed section at N entries (0 = no cap)")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -225,9 +236,67 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 	}
 
 	if *update {
-		const header = "# ruby/spec per-file baseline. Regenerate with UPDATE_BASELINE=1 scripts/conformance/rubyspec/run.sh.\n" +
+		header := "# ruby/spec per-file baseline. Regenerate with UPDATE_BASELINE=1 scripts/conformance/rubyspec/run.sh.\n" +
 			"# One record per spec file: OK<TAB>path<TAB>passing, or FILEFAIL<TAB>path.\n" +
 			"# Judged per file, so no margin is needed and every move is attributable.\n"
+
+		// ⛔ A RE-RECORD READS THE OLD BASELINE FIRST. It used to write straight
+		// over it, so the one thing it could never report is the one thing that
+		// matters: -update had no idea whether this sweep was better or worse
+		// than the record it was replacing. The comparison simply never happened.
+		//
+		// The hazard was already written down, in this repository, twice —
+		// cmd/guards' header ("UPDATE_BASELINE=1 records whatever it sees and
+		// would absorb a loss") and the ratchet lane's own comment about an
+		// Ubuntu image roll: "the same run also showed kernel/require +1,
+		// equally environmental, and UPDATE_BASELINE=1 would bank it as
+		// progress." A note in two places and no refusal in either.
+		//
+		// You re-record to lock in a WIN. A file that went backwards is either a
+		// real regression or an environment that moved, and both need a person,
+		// not an overwrite that erases the evidence of itself.
+		var base map[string]state
+		if bf, err := os.Open(*baseline); err == nil {
+			base, err = parse(bf, "baseline")
+			bf.Close()
+			if err != nil {
+				return err
+			}
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+		// No baseline yet is the first recording, and has nothing to go
+		// backwards from — distinct from a baseline that exists and is worse.
+		if base != nil {
+			v := compare(base, got)
+			fmt.Fprintf(stdout, "re-record: %d files measured, %d in the baseline being replaced\n", len(got), len(base))
+			section(stdout, "REGRESSED", v.regressed, *limit)
+			section(stdout, "FAILED TO LOAD (the baseline says they load)", v.unloaded, *limit)
+			section(stdout, "MISSING FROM THE SWEEP ENTIRELY", v.missing, *limit)
+			section(stdout, "improved", v.improved, *limit)
+			section(stdout, "now loading", v.nowLoading, *limit)
+			section(stdout, "new files, not in the baseline", v.added, *limit)
+			if v.bad() {
+				n := len(v.regressed) + len(v.unloaded) + len(v.missing)
+				if !*absorb {
+					fmt.Fprintf(stdout, "\n::error::REFUSING to re-record: %d file(s) went backwards -- named above\n", n)
+					fmt.Fprintln(stdout, "A re-record locks in a win. Fix the regression, or pass -absorb to record")
+					fmt.Fprintln(stdout, "it on purpose -- the baseline then carries a line naming every file absorbed.")
+					return errWouldAbsorb
+				}
+				// ⛔ The derogation STAMPS THE ARTEFACT, not just the log. A
+				// console warning scrolls away and the baseline outlives it by
+				// months; the next reader has to be able to see the loss in the
+				// file that was written, without having the run that wrote it.
+				header += fmt.Sprintf("# ⛔ ABSORBED %d file(s) that went backwards, recorded with -absorb on %s:\n",
+					n, time.Now().UTC().Format("2006-01-02"))
+				for _, s := range append(append(append([]string{}, v.regressed...), v.unloaded...), v.missing...) {
+					header += "#     " + s + "\n"
+				}
+				fmt.Fprintf(stdout, "\n⛔ -absorb: recording %d file(s) that went backwards; the baseline names them.\n", n)
+			}
+		}
+
 		f, err := os.Create(*baseline)
 		if err != nil {
 			return err
