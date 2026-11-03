@@ -271,7 +271,13 @@ puts RbConfig::CONFIG["RUBY_INSTALL_NAME"]
 puts RbConfig::CONFIG["bindir"]
 puts RbConfig::CONFIG["ruby_version"]
 puts RbConfig::CONFIG["rubylibdir"]`
-	want := "ruby\nruby\n/usr/bin\n3.4.1\n/usr/lib/ruby"
+	// ⛔ "ruby_version" here is rbgo's FULL version string, and in MRI that key
+	// may hold the API version instead ("4.0.0" for every 4.0.x), since it
+	// names a library directory shared across teeny releases. Filed as #878
+	// rather than guessed at: nothing in ruby/spec asserts this key's value, so
+	// the corpus cannot settle it, and a version bump is not the place to
+	// change behaviour on a hunch.
+	want := "ruby\nruby\n/usr/bin\n4.0.9\n/usr/lib/ruby"
 	if got := runSrc(t, src); got != want {
 		t.Errorf("RbConfig keys => %q, want %q", got, want)
 	}

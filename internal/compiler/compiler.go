@@ -2202,12 +2202,22 @@ func blockParamsAreImplicit(blk *ast.Block) bool {
 // name AFTER the body is compiled: resolution during the body used the real
 // name, and the ISeq that remains carries none.
 //
-// The numbered parameters `_1`..`_9` are deliberately NOT hidden. They are named
-// in #parameters ([[:opt, :_1]]) and, for the Ruby version rbgo reports
-// (RUBY_VERSION 3.4.1), they are visible to a Binding too — ruby/spec pins that
-// under `ruby_version_is ""..."4.0"` and pins the hiding only from 4.0. Hiding
-// them here would be answering a question rbgo has not yet said it is answering;
-// it belongs with the RUBY_VERSION bump.
+// ⛔ THE NUMBERED PARAMETERS ARE HIDDEN FROM b.locals AND NOT FROM b.params, and
+// that asymmetry is the whole of Ruby 4.0's change here. `_1` leaves
+// Binding#local_variables but STAYS in Proc#parameters:
+//
+//	proc { _1 }.parameters          # => [[:opt, :_1]]   -- ungated, every version
+//	-> { _1; binding.local_variables }.call("a")
+//	                                # => [:_1] below 4.0, [] from 4.0
+//
+// numbered_parameters_spec.rb:85 ("affects block parameters") carries no version
+// guard at all, so blanking b.params as well would trade four examples for two.
+// `it` is blanked from BOTH, because MRI gives it no name in #parameters either
+// (`-> { it }.parameters` is [[:req]], NAMELESS).
+//
+// This was held back until the RUBY_VERSION bump, correctly: below 4.0
+// ruby/spec asserts the OPPOSITE, under `ruby_version_is ""..."4.0"`. The two
+// land together.
 //
 // ⛔ BOTH KINDS ARE RECORDED, hidden or not. Ruby 4.0 adds
 // Binding#implicit_parameters, #implicit_parameter_get and
@@ -2229,13 +2239,13 @@ func hideImplicitBlockParams(b *builder, blk *ast.Block, positionals []string) {
 	// gate named it, which is the right way to find out.
 	for i, name := range positionals {
 		b.markImplicitParam(i, name)
-		if name != "it" {
-			continue
-		}
+		// Out of the local table: both kinds, from 4.0.
 		if i < len(b.locals) {
 			b.locals[i] = ""
 		}
-		if i < len(b.params) {
+		// Out of #parameters: `it` only. A numbered parameter keeps its name
+		// there, which numbered_parameters_spec.rb:85 asserts with no guard.
+		if name == "it" && i < len(b.params) {
 			b.params[i] = ""
 		}
 	}

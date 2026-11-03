@@ -1,0 +1,39 @@
+name: rubyspec-baseline
+
+# Re-record scripts/conformance/rubyspec/BASELINE, on demand, in the SAME
+# environment that enforces it.
+#
+# ⛔ WHY THIS LANE HAD TO EXIST. `UPDATE_BASELINE=1` was a local command and
+# nothing else, so the only way to produce a baseline was to record it on a
+# developer's machine -- while the gate runs on a pinned ubuntu-24.04 that was
+# pinned precisely because the environment changes the answer (#838: setrlimit
+# read 28 on one Ubuntu major and 29 on the next, same commit). The recording
+# machine and the enforcing machine were therefore guaranteed to differ, and the
+# difference is invisible, because both of them print a number. Measured on one
+# developer's laptop: +9 examples against the CI-recorded baseline, for no
+# change in the code at all.
+#
+# So a genuine improvement could not be banked honestly, and the Ruby 4.0
+# version move (#799) -- which re-records by definition -- had no correct way to
+# land. This lane is that way.
+on:
+  workflow_dispatch:
+    inputs:
+      absorb:
+        description: >-
+          Record even though files went backwards. cmd/ratchet REFUSES by
+          default; this stamps the baseline with the name of every file absorbed.
+          A version move is the honest case: the corpus stops asking for
+          examples, and the baseline should say so.
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  record:
+    uses: ./.github/workflows/rubyspec-sweep.yml
+    with:
+      update_baseline: true
+      absorb: ${{ inputs.absorb }}
