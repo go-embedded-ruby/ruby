@@ -292,6 +292,7 @@ func (vm *VM) registerBinding() {
 	cBinding.define("local_variable_get", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		b := self.(*Binding)
 		name := vm.bindingVarName(args[0])
+		refuseNumberedParam(name)
 		i := b.slotOf(name)
 		if i < 0 {
 			raise("NameError", "local variable '%s' is not defined for %s", name, b.ToS())
@@ -302,6 +303,7 @@ func (vm *VM) registerBinding() {
 	cBinding.define("local_variable_set", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		b := self.(*Binding)
 		name := vm.bindingVarName(args[0])
+		refuseNumberedParam(name)
 		if i := b.slotOf(name); i >= 0 {
 			// The write lands where the name LIVES, which for a binding taken inside a
 			// block is an ANCESTOR env. Writing b.env.slots[i] instead put the value in
@@ -318,7 +320,12 @@ func (vm *VM) registerBinding() {
 		return args[1]
 	})
 	cBinding.define("local_variable_defined?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Bool(self.(*Binding).slotOf(vm.bindingVarName(args[0])) >= 0)
+		name := vm.bindingVarName(args[0])
+		// ⛔ RAISES, it does not answer false. MRI puts the refusal before the
+		// lookup (proc.c v4.0.9:649), so this is not "no such local" — it is
+		// "that is not the kind of question this method answers".
+		refuseNumberedParam(name)
+		return object.Bool(self.(*Binding).slotOf(name) >= 0)
 	})
 
 	// Ruby 4.0's implicit-parameter trio (proc.c v4.0.9:680-783). They are the
@@ -388,13 +395,39 @@ func copyImplicit(m map[string]int) map[string]int {
 	return out
 }
 
-// isImplicitParamName is MRI's rb_implicit_param_p: `it`, or `_` followed by a
-// single digit 1..9. `_0` and `_10` are ordinary locals.
+// isImplicitParamName is MRI's rb_implicit_param_p (proc.c v4.0.9:517-521):
+// `it`, or `_` followed by a single digit 1..9. `_0` and `_10` are ordinary
+// locals.
 func isImplicitParamName(name string) bool {
-	if name == "it" {
-		return true
-	}
+	return name == "it" || isNumberedParamName(name)
+}
+
+// isNumberedParamName is MRI's rb_numparam_id_p (proc.c v4.0.9:511-515), which
+// tests `_1`..`_9` and NOT `it`.
+//
+// ⛔ THE TWO PREDICATES ARE NOT INTERCHANGEABLE, and MRI uses this narrower one
+// in all three of Binding's local-variable methods (proc.c:549, 602, 649) while
+// rb_implicit_param_p is used elsewhere. The reason is not a detail: `it` is a
+// LEGAL local variable name in Ruby — `it = 5` compiles — so
+// `binding.local_variable_get(:it)` must answer normally, while `_1` can never
+// be a local and is refused. Widening the refusal to rb_implicit_param_p would
+// break every binding that happens to hold a variable called `it`.
+func isNumberedParamName(name string) bool {
 	return len(name) == 2 && name[0] == '_' && name[1] >= '1' && name[1] <= '9'
+}
+
+// refuseNumberedParam is the guard MRI puts at the top of #local_variable_get,
+// #local_variable_set and #local_variable_defined? (proc.c v4.0.9:549, 602,
+// 649), from Ruby 4.0.
+//
+// ⛔ IT TESTS THE NAME, NOT THE BINDING, and fires BEFORE any lookup — so
+// `binding.local_variable_get(:_1)` raises this even in a binding that has no
+// numbered parameter at all, and even at the top level. `_1` is not a local
+// variable that happens to be hidden; it is not a local variable name.
+func refuseNumberedParam(name string) {
+	if isNumberedParamName(name) {
+		raise("NameError", "numbered parameter '%s' is not a local variable", name)
+	}
 }
 
 // implicitParameterNames is bind_implicit_parameters (proc.c v4.0.9:680): [:it]
