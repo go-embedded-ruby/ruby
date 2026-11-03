@@ -5720,6 +5720,15 @@ func (vm *VM) bootstrap() {
 			if object.IsNil(r.Lo) {
 				raise("RangeError", "cannot get the maximum of beginless range")
 			}
+			// ⛔ An Integer range answers ARITHMETICALLY. Building the range to
+			// take n off the end costs O(size of the range) and nothing about
+			// that cost has to do with n: measured, ~24 bytes per element, so
+			// `(0..10**9).max(2)` asked for about 24 GB to answer with two
+			// integers. #min(n) and #first(n) were already lazy, which is what
+			// made it one method's defect rather than the representation's.
+			if want, ok := integerRangeMaxN(r, vm.repeatLong(args[0])); ok {
+				return want
+			}
 			elems := vm.rangeElemsV(r)
 			n := clampCount(vm.repeatLong(args[0]), len(elems))
 			out := make([]object.Value, n)
@@ -11982,6 +11991,49 @@ func (vm *VM) rangeFirstN(r *object.Range, n int) []object.Value {
 
 // rangeInts extracts integer endpoints. ok is false when either endpoint is not
 // an Integer (string/float ranges are not iterable in this phase).
+// integerRangeMaxN answers Range#max(n) for a bounded Integer range without
+// building the range, and reports false for anything else (a String range, a
+// Float end, a Bignum endpoint) so the caller keeps its existing path.
+//
+// ⛔ THE COUNT IS CLAMPED WITHOUT COMPUTING THE SIZE. `top - lo + 1` overflows
+// int64 for a range like (-2**62..2**62), and an overflowed size clamps n to a
+// negative number — a wrong answer on exactly the inputs this function exists
+// to make cheap. The span is taken in uint64, where it is exact for every
+// int64 pair with top >= lo, and compared against n instead.
+func integerRangeMaxN(r *object.Range, n int64) (object.Value, bool) {
+	lo, hi, ok := rangeInts(r)
+	if !ok {
+		return nil, false
+	}
+	if n < 0 {
+		raise("ArgumentError", "negative array size")
+	}
+	top := hi
+	if r.Exclusive {
+		// An exclusive Integer end excludes by yielding its predecessor. If hi
+		// is the smallest int64 there is no predecessor, and the range is empty
+		// anyway for any lo.
+		if hi == math.MinInt64 {
+			return object.NewArrayFromSlice(nil), true
+		}
+		top--
+	}
+	if top < lo {
+		return object.NewArrayFromSlice(nil), true
+	}
+	span := uint64(top) - uint64(lo) // exact: the number of steps from lo to top
+	count := n
+	if uint64(n) > span {
+		// n is int64 and n > span, so span+1 cannot overflow int64 here.
+		count = int64(span) + 1
+	}
+	out := make([]object.Value, count)
+	for i := int64(0); i < count; i++ {
+		out[i] = object.IntValue(top - i)
+	}
+	return object.NewArrayFromSlice(out), true
+}
+
 func rangeInts(r *object.Range) (lo, hi int64, ok bool) {
 	li, lok := r.Lo.(object.Integer)
 	hi2, hok := r.Hi.(object.Integer)
