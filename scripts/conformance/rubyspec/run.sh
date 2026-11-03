@@ -114,6 +114,12 @@ trap 'rm -f "$RESULTS" "$RATCHET"' EXIT
 
 echo
 if [ "${UPDATE_BASELINE:-0}" = "1" ]; then
+  # ABSORB=1 is the named derogation, passed straight through to the judge. The
+  # refusal and the stamp both live in Go (cmd/ratchet, #876); this line only
+  # carries the flag, so there is no second place where the rule could differ.
+  if [ "${ABSORB:-0}" = "1" ]; then
+    exec "$RATCHET" -baseline "$BASELINE" -results "$RESULTS" -update -absorb
+  fi
   exec "$RATCHET" -baseline "$BASELINE" -results "$RESULTS" -update
 fi
 exec "$RATCHET" -baseline "$BASELINE" -results "$RESULTS"
