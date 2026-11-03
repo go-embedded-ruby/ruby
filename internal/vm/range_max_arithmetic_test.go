@@ -42,6 +42,13 @@ func TestRangeMaxNIsArithmeticNotMaterialised(t *testing.T) {
 		{"a range whose size overflows int64", `p(((-(2**62))..(2**62)).max(2))`,
 			"[4611686018427387904, 4611686018427387903]"},
 
+		// ⛔ AN EXCLUSIVE END AT THE int64 FLOOR has no predecessor to step down
+		// to, so `top--` would underflow. The range is empty for every possible
+		// begin, and the coverage gate is what showed this guard was never
+		// driven -- reachable from Ruby, since -2**63 is an Integer and not a
+		// Bignum.
+		{"an exclusive end at the int64 floor", `p((0...(-2**63)).max(2))`, "[]"},
+
 		// Controls: the paths this must NOT have taken over.
 		{"a String range still works", `p(("a".."f").max(2))`, `["f", "e"]`},
 		{"min(n) is unchanged", `p((1..10).min(2))`, "[1, 2]"},
