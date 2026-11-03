@@ -106,6 +106,34 @@ lane that can change the gate it just ran, and the person who asked for the
 re-record is exactly the person who should read the delta before it becomes the
 record.
 
+### ⛔ A flaky file must be recorded at its FLOOR, not at the draw you got
+
+`core/random/bytes_spec.rb` answers **8 or 9 on the same binary** — documented
+in four places in this repository before it bit, including `cmd/specdelta`'s own
+comment, which exists *because* that file once reported `-1` between two engines
+that differed only in a version string.
+
+The 4.0.9 re-record drew **9** and banked it. The gate then failed on the very
+next pull request, naming a regression that was a coin flip:
+
+```text
+passing examples: 23672 (baseline 23673, -1)
+-- REGRESSED (1) --
+   core/random/bytes_spec.rb: 8 passing, baseline 9 (-1)
+```
+
+That is not a conformance failure, it is a **~50 % flaky gate**, self-inflicted
+by recording a maximum as if it were a guarantee. A baseline row means *"no run
+may come in below this"*, so for an unstable file the only honest row is its
+**lowest** observed value: at 8 the gate is deterministic, a 9 shows up as an
+improvement, and a genuine drop to 7 is still caught.
+
+Its row is therefore pinned to `8` by hand, and a re-record that raises it again
+should be corrected rather than accepted — the number to trust is the floor, not
+the luckiest sweep. `cmd/specdelta` already refuses to build a verdict on a
+single run (`-repeat`, and the `UNSTABLE` marking); the ratchet has no such
+notion, which is the real gap.
+
 ### ⛔ A re-record reads the old baseline first, and refuses to bank a loss
 
 `-update` used to write straight over `BASELINE` **without reading it**, so the

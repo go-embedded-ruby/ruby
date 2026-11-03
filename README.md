@@ -6,14 +6,14 @@
 [![License](https://img.shields.io/badge/license-BSD--3--Clause-blue)](LICENSE)
 [![Go](https://img.shields.io/github/go-mod/go-version/go-embedded-ruby/ruby?label=go&color=00ADD8)](https://go.dev/dl/)
 [![Release](https://img.shields.io/github/v/release/go-embedded-ruby/ruby?label=release&color=blue)](https://github.com/go-embedded-ruby/ruby/releases/latest)
-[![ruby/spec](https://img.shields.io/badge/ruby%2Fspec-23%2C673%20examples%20passing-1a7f37)](#runtime-conformance--rubyspec)
+[![ruby/spec](https://img.shields.io/badge/ruby%2Fspec-23%2C672%20examples%20passing-1a7f37)](#runtime-conformance--rubyspec)
 
 **A Ruby interpreter written in pure Go, with cgo disabled** — so you can embed it
 in a Go program with `import "github.com/go-embedded-ruby/ruby"`, or ship it as a
 single static binary that cross-compiles wherever Go does, with no C toolchain and
 no libruby.
 
-**How complete is it?** It runs **23,673** of ruby/spec's `language/` + `core/`
+**How complete is it?** It runs **23,672** of ruby/spec's `language/` + `core/`
 examples ([what that counts](#runtime-conformance--rubyspec)) — a large and growing
 subset of the language, and **not** a drop-in replacement for CRuby. Read
 [What does not work yet](#what-does-not-work-yet) before you depend on it; the
@@ -1256,7 +1256,7 @@ specification of the language — through `rbgo` under a minimal MSpec-compatibl
 shim, and gates CI on a **per-file** baseline
 ([`scripts/conformance/rubyspec/`](scripts/conformance/rubyspec/), in
 `BASELINE`). No file may pass fewer examples than its record or stop loading, so
-measured language conformance moves in one direction; the total, **23,673**, is
+measured language conformance moves in one direction; the total, **23,672**, is
 a derived summary rather than the thing gated. Run it with
 `scripts/conformance/rubyspec/run.sh`, and see *Runtime conformance* under
 *Status* for the full breakdown.
