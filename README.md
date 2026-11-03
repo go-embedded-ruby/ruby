@@ -229,7 +229,10 @@ args/kwargs, `class << self` (singleton class), masgn to any target
 (ivar/cvar/gvar/attr/index/constant + nested destructuring), `alias`/`undef`,
 anonymous params + forwarding (`def f(*, **, &)` / `g(...)`), special globals
 (`$$` etc.), shorthand hash `{x:}`, quoted / operator / char-literal symbols,
-rationals & imaginaries (`2r` / `3i`), unicode identifiers, `for…in…end` loops,
+rationals & imaginaries (`2r` / `3i`), unicode identifiers — including the case
+rule that makes `Ἅbb` a **constant** and `μm` a local, titlecase letters
+counting as uppercase and caseless ones (CJK, Hebrew, Arabic) as lowercase —
+`for…in…end` loops,
 block keyword params, begin-less rescue/ensure, and `!~` — on top of the
 pre-existing core (full object model, metaprogramming, Fiber/Thread, Marshal,
 regexp, the scientific bindings, and the js/wasm target) detailed below.
