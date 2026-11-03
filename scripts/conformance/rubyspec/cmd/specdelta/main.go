@@ -117,7 +117,13 @@ func main1(args []string, out, errOut io.Writer) int {
 	fs := flag.NewFlagSet("specdelta", flag.ContinueOnError)
 	fs.SetOutput(errOut)
 	root := fs.String("root", ".", "the ruby/spec checkout")
-	dir := fs.String("dir", "", "a directory under -root to walk (recursively), e.g. core/set")
+	// ⛔ A SET, comma-separated. The move gate below refuses a surface -dir does
+	// not cover and advises widening it; with one directory that advice was not
+	// followable, because the 3.4.1→4.0.9 surface spans core/ AND language/ and
+	// the only widening from `core` was the whole corpus — library/, optional/,
+	// command_line/ and hours of them. The only reachable exit was -partial, so
+	// the derogation was the normal road and the gate stamped every real answer.
+	dir := fs.String("dir", "", "directories under -root to walk (recursively), comma-separated, e.g. core/set or core,language")
 	timeout := fs.Duration("timeout", 60*time.Second, "per-file limit for one engine")
 	quiet := fs.Bool("quiet", false, "print only the files that moved")
 	// ⛔ One run per engine cannot tell a FLAKE from a difference, and the first
@@ -140,11 +146,12 @@ func main1(args []string, out, errOut io.Writer) int {
 		fmt.Fprintln(errOut, "specdelta: name exactly two interpreters — the control first, the treatment second")
 		return 2
 	}
-	if *dir == "" {
+	dirs := splitDirs(*dir)
+	if len(dirs) == 0 {
 		fmt.Fprintln(errOut, "specdelta: -dir is required")
 		return 2
 	}
-	files, err := specFiles(*root, *dir)
+	files, err := specFiles(*root, dirs)
 	if err != nil {
 		fmt.Fprintf(errOut, "specdelta: %v\n", err)
 		return 2
@@ -152,7 +159,7 @@ func main1(args []string, out, errOut io.Writer) int {
 	if len(files) == 0 {
 		// ⛔ An empty population is a refusal, not a clean result: a mistyped
 		// -dir would otherwise print "0 files, no regressions" and pass.
-		fmt.Fprintf(errOut, "specdelta: no _spec.rb files under %s\n", filepath.Join(*root, *dir))
+		fmt.Fprintf(errOut, "specdelta: no _spec.rb files under %s\n", strings.Join(dirs, ", "))
 		return 2
 	}
 
@@ -163,7 +170,7 @@ func main1(args []string, out, errOut io.Writer) int {
 
 	// THE MOVE GATE, before a single engine is started: a run whose surface is
 	// already known to be incomplete must not cost an hour first.
-	mv, err := declaredMove(*move, *root, *dir, files, errOut, *partial)
+	mv, err := declaredMove(*move, *root, dirs, files, errOut, *partial)
 	if err != nil {
 		return 2
 	}
@@ -409,7 +416,7 @@ func (d declared) partialNote() string {
 // readable table saying nothing about the move, because the three files the
 // move hits hardest are under core/binding. There is no way to see that in the
 // results; it is only visible in the corpus, before anything runs.
-func declaredMove(spec, root, dir string, files []string, errOut io.Writer, allowPartial bool) (declared, error) {
+func declaredMove(spec, root string, dirs []string, files []string, errOut io.Writer, allowPartial bool) (declared, error) {
 	if spec == "" {
 		fmt.Fprint(errOut, `specdelta: -move is required.
 
@@ -472,7 +479,7 @@ side, 37 failures on the other, and a pass delta of zero either way.
 		return d, nil
 	}
 	sort.Strings(outside)
-	fmt.Fprintf(errOut, "specdelta: the move %s → %s touches %d file(s) that -dir %s does not measure:\n", from, to, len(outside), dir)
+	fmt.Fprintf(errOut, "specdelta: the move %s → %s touches %d file(s) that -dir %s does not measure:\n", from, to, len(outside), strings.Join(dirs, ","))
 	for i, f := range outside {
 		if i == 12 {
 			fmt.Fprintf(errOut, "    … and %d more\n", len(outside)-i)
@@ -481,8 +488,14 @@ side, 37 failures on the other, and a pass delta of zero either way.
 		fmt.Fprintf(errOut, "    %s\n", f)
 	}
 	if !allowPartial {
-		fmt.Fprintln(errOut, "  A number from this run would not be a number about the move. Widen -dir, or")
-		fmt.Fprintln(errOut, "  pass -partial to say so on purpose — the report is then stamped PARTIAL.")
+		// ⛔ Name the -dir that WOULD cover it. "Widen -dir" was advice the
+		// reader could not act on while -dir held one directory: widening
+		// `core` meant the whole corpus. An exit nobody can reach makes the
+		// derogation the normal road, which is the opposite of a gate.
+		fmt.Fprintln(errOut, "  A number from this run would not be a number about the move. Either")
+		fmt.Fprintf(errOut, "    -dir %s\n", strings.Join(coveringDirs(dirs, d.move.Touched()), ","))
+		fmt.Fprintln(errOut, "  which measures the whole surface, or -partial to say so on purpose —")
+		fmt.Fprintln(errOut, "  the report is then stamped PARTIAL.")
 		return declared{}, errRefused
 	}
 	d.partial = true
@@ -639,37 +652,103 @@ func abs(n int) int {
 	return n
 }
 
-// specFiles lists the *_spec.rb files under root/dir, as paths relative to root
-// — which is how the shim expects to be handed them.
-func specFiles(root, dir string) ([]string, error) {
-	base := filepath.Join(root, dir)
-	info, err := os.Stat(base)
-	if err != nil {
-		return nil, err
-	}
-	if !info.IsDir() {
-		return nil, fmt.Errorf("%s is not a directory", base)
-	}
+// splitDirs reads the comma-separated -dir into a set, in the order given and
+// without repeats. An empty element is dropped rather than read as the root:
+// `-dir core,` must not quietly become the whole corpus.
+func splitDirs(s string) []string {
 	var out []string
-	err = filepath.Walk(base, func(p string, fi os.FileInfo, err error) error {
-		if err != nil {
-			return err
+	seen := map[string]bool{}
+	for _, part := range strings.Split(s, ",") {
+		d := filepath.ToSlash(strings.TrimSpace(part))
+		if d == "" || seen[d] {
+			continue
 		}
-		if fi.IsDir() || !strings.HasSuffix(p, "_spec.rb") {
+		seen[d] = true
+		out = append(out, d)
+	}
+	return out
+}
+
+// specFiles lists the *_spec.rb files under each of root/dirs, as paths
+// relative to root — which is how the shim expects to be handed them.
+//
+// ⛔ The result is DEDUPLICATED. `-dir core,core/set` names core/set twice, and
+// a file run twice would be counted twice on both sides: a total that moves
+// with how the caller spelled the set, not with the engines.
+func specFiles(root string, dirs []string) ([]string, error) {
+	seen := map[string]bool{}
+	var out []string
+	for _, dir := range dirs {
+		base := filepath.Join(root, dir)
+		info, err := os.Stat(base)
+		if err != nil {
+			return nil, err
+		}
+		if !info.IsDir() {
+			return nil, fmt.Errorf("%s is not a directory", base)
+		}
+		err = filepath.Walk(base, func(p string, fi os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			if fi.IsDir() || !strings.HasSuffix(p, "_spec.rb") {
+				return nil
+			}
+			rel, err := filepath.Rel(root, p)
+			if err != nil {
+				return err
+			}
+			rel = filepath.ToSlash(rel)
+			if seen[rel] {
+				return nil
+			}
+			seen[rel] = true
+			out = append(out, rel)
 			return nil
-		}
-		rel, err := filepath.Rel(root, p)
+		})
 		if err != nil {
-			return err
+			return nil, err
 		}
-		out = append(out, rel)
-		return nil
-	})
-	if err != nil {
-		return nil, err
 	}
 	sort.Strings(out)
 	return out, nil
+}
+
+// coveringDirs is the -dir the refusal advises: the set already asked for, plus
+// the top-level suite of every file the move touches that it does not reach.
+//
+// Top level and no deeper on purpose. A list of the 50 exact directories would
+// be unreadable and would go stale the moment the corpus moves; `core,language`
+// is both the honest surface and something a reader can retype.
+func coveringDirs(dirs, touched []string) []string {
+	out := append([]string(nil), dirs...)
+	have := map[string]bool{}
+	for _, d := range out {
+		have[d] = true
+	}
+	for _, f := range touched {
+		top := filepath.ToSlash(f)
+		if i := strings.Index(top, "/"); i >= 0 {
+			top = top[:i]
+		}
+		if covered(have, filepath.ToSlash(f)) || have[top] {
+			continue
+		}
+		have[top] = true
+		out = append(out, top)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// covered says whether one of the named directories already contains f.
+func covered(dirs map[string]bool, f string) bool {
+	for d := range dirs {
+		if f == d || strings.HasPrefix(f, d+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 // runRepeatedly runs one file under one engine `times` over, and returns the

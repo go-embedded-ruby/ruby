@@ -738,6 +738,104 @@ func TestAnExampleThatWentRedInsideAnImprovedFileIsNamed(t *testing.T) {
 	}
 }
 
+// ⛔ The surface of the real 3.4.1→4.0.9 move spans core/ AND language/, and
+// -dir took ONE directory. The refusal advised "widen -dir", which from `core`
+// meant the whole corpus — library/, optional/, command_line/ and hours of
+// them. So the only reachable exit was -partial, and every real answer came out
+// stamped. A gate whose honest exit nobody can reach is not a gate.
+func TestTheSurfaceSpanningTwoSuitesHasAnExitThatIsNotADerogation(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake engines are POSIX shell scripts")
+	}
+	root := t.TempDir()
+	guarded := "describe \"x\" do\n  ruby_version_is \"4.0\" do\n    it \"exists\" do\n    end\n  end\nend\n"
+	write := func(p, body string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Join(root, filepath.Dir(p)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(p)), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("core/set/divide_spec.rb", guarded)
+	write("language/variables_spec.rb", guarded)
+	// Outside the surface the move touches, and in the real corpus the costly
+	// half: the advised -dir must not reach it.
+	write("library/erb/erb_spec.rb", "#\n")
+	engine := fakeEngine(t, root, "e", "echo 'RBGO_RESULT pass=1 fail=0 error=0 skip=0'\n")
+	move := []string{"-root", root, "-move", "3.4.1:4.0.9"}
+
+	// -dir core misses language/, so it is refused — and the refusal NAMES the
+	// -dir that would cover the surface instead of telling the reader to widen.
+	var out, errOut bytes.Buffer
+	if code := main1(append(append([]string{}, move...), "-dir", "core", engine, engine), &out, &errOut); code != 2 {
+		t.Fatalf("exit = %d, want 2; err %q", code, errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "-dir core,language") {
+		t.Errorf("the refusal does not name the -dir that would cover the surface:\n%s", errOut.String())
+	}
+	// And it does not drag in the suite the move never touches.
+	if strings.Contains(errOut.String(), "library") {
+		t.Errorf("the advised -dir reaches outside the surface:\n%s", errOut.String())
+	}
+
+	// Retyping exactly what it advised is accepted, unstamped. This is the
+	// control: without it the refusal above would only prove the gate fires.
+	out.Reset()
+	errOut.Reset()
+	if code := main1(append(append([]string{}, move...), "-dir", "core,language", engine, engine), &out, &errOut); code != 0 {
+		t.Fatalf("the advised -dir: exit = %d, want 0; err %q", code, errOut.String())
+	}
+	if strings.Contains(out.String(), "PARTIAL") {
+		t.Errorf("a run covering the whole surface was stamped PARTIAL:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "2 file(s):") {
+		t.Errorf("the measured set is not the two suites:\n%s", out.String())
+	}
+}
+
+// ⛔ A file reached through two named directories must be measured ONCE. Counted
+// twice it is counted on both sides, so the totals move with how the caller
+// spelled -dir rather than with the engines.
+func TestADirectoryNamedTwiceDoesNotCountItsFilesTwice(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake engines are POSIX shell scripts")
+	}
+	root := t.TempDir()
+	for _, p := range []string{"core/set/divide_spec.rb", "language/variables_spec.rb"} {
+		if err := os.MkdirAll(filepath.Join(root, filepath.Dir(p)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(p)), []byte("#\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	engine := fakeEngine(t, root, "e", "echo 'RBGO_RESULT pass=2 fail=0 error=0 skip=0'\n")
+
+	for _, tc := range []struct {
+		name, dir, want string
+	}{
+		// core and core/set reach the same file; it is measured once.
+		{"the same file through a directory and its parent", "core,core/set,core", "1 file(s): control 2 passing"},
+		{"the set spelled once", "core,language", "2 file(s): control 4 passing"},
+		// An empty element must not be read as the root: `-dir core,` would
+		// otherwise quietly sweep the whole corpus, which is the opposite of
+		// what the trailing comma suggests.
+		{"a trailing comma is not the root", "core,", "1 file(s): control 2 passing"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var out, errOut bytes.Buffer
+			if code := main1([]string{"-root", root, "-move", "none", "-dir", tc.dir, engine, engine}, &out, &errOut); code != 0 {
+				t.Fatalf("exit = %d, want 0; err %q", code, errOut.String())
+			}
+			if !strings.Contains(out.String(), tc.want) {
+				t.Errorf("-dir %q: want %q in\n%s", tc.dir, tc.want, out.String())
+			}
+		})
+	}
+}
+
 func fakeEngine(t *testing.T, dir, name, body string) string {
 	t.Helper()
 	p := filepath.Join(dir, name)
