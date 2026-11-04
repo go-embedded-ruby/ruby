@@ -533,12 +533,48 @@ func (d *mDumper) writeClassRef(c *RClass) {
 		}
 		raise("TypeError", "can't dump anonymous class %s", c.ToS())
 	}
+	// ⛔ Since Ruby 4.0 a class path that is not ASCII carries its encoding, the
+	// same way a String does. marshal.c's T_CLASS and T_MODULE arms call
+	// w_encivar(path) BEFORE the type byte — which emits the 'I' wrapper — and
+	// w_encname(encname) after the bytes:
+	//
+	//	VALUE encname = w_encivar(path, arg);
+	//	w_byte(TYPE_CLASS, arg);
+	//	w_bytes(RSTRING_PTR(path), RSTRING_LEN(path), arg);
+	//	w_encname(encname, arg);
+	//
+	// w_encivar returns nil for an ASCII-only path, so every ordinary class name
+	// dumps exactly as before and the wrapper appears only where MRI puts it.
+	enc := classPathEncIvar(c.name)
+	if enc != nil {
+		d.buf = append(d.buf, 'I')
+	}
 	if c.isModule {
 		d.buf = append(d.buf, 'm')
 	} else {
 		d.buf = append(d.buf, 'c')
 	}
 	d.writeBytes(c.name)
+	if enc != nil {
+		d.writeLong(1)
+		d.writeEncodingIvar(enc)
+	}
+}
+
+// classPathEncIvar is MRI's w_encivar for a class path: nil when the path is
+// ASCII-only (is_ascii_string), otherwise the encoding ivar to record.
+//
+// A constant name in rbgo is a Go string and therefore UTF-8, which is the
+// encoding MRI reports for a multibyte constant too — encoding_name maps it to
+// the short :E => true form. There is no way to reach the :encoding long form
+// from here, because there is no way to name a constant in another encoding.
+func classPathEncIvar(name string) *marshalEncIvar {
+	for i := 0; i < len(name); i++ {
+		if name[i] >= 0x80 {
+			return marshalEncodingIvar("UTF-8")
+		}
+	}
+	return nil
 }
 
 // writeTime emits Time's user-defined dump: the 8-byte packed form (MRI's
