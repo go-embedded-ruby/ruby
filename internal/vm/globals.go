@@ -412,7 +412,16 @@ func (vm *VM) storeGVar(name string, v object.Value) {
 		}
 		vm.lastMatch = object.NilV
 		return
-	case "$/", "$-0", `$\`, "$,":
+	case "$/", "$-0":
+		// ⛔ $/ and $-0 take a DIFFERENT setter from $\ and $, since 4.0, and
+		// reading the four as one would carry the new freezing into two
+		// variables MRI deliberately left alone (io.c v4.0.9 Init_IO):
+		//     rb_define_hooked_variable("$,",   …, rb_deprecated_str_setter);
+		//     rb_define_hooked_variable("$/",   …, deprecated_rs_setter);
+		//     rb_define_hooked_variable("$-0",  …, deprecated_rs_setter);
+		//     rb_define_hooked_variable("$\\",  …, rb_deprecated_str_setter);
+		v = vm.checkRecordSepGvar(name, v)
+	case `$\`, "$,":
 		v = vm.checkStrGvar(name, v)
 	case "$;", "$-F":
 		v = vm.checkFieldSepGvar(name, v)
@@ -449,6 +458,73 @@ func (vm *VM) checkStrGvar(name string, v object.Value) object.Value {
 	}
 	vm.warnDeprecatedGvar("non-nil '" + name + "' is deprecated")
 	return v
+}
+
+// checkRecordSepGvar applies io.c v4.0.9 deprecated_rs_setter to $/ and $-0,
+// which from Ruby 4.0 no longer store the object they were handed:
+//
+//	rb_deprecated_str_setter(val, id, &val);       // TypeError, and the warning
+//	if (!NIL_P(val)) {
+//	    if (rb_str_equal(val, rb_default_rs)) val = rb_default_rs;
+//	    else                                  val = rb_str_frozen_bare_string(val);
+//	}
+//
+// ⛔ THE EQUALITY BRANCH COMES FIRST, and it overrides the "a frozen bare String
+// is kept" rule for the one value most likely to be assigned. A frozen, plain
+// "\n" satisfies that rule word for word and is still NOT what gets stored:
+//
+//	$/ = "\n".dup.freeze
+//	$/.equal?(that string)   # => false
+//	$/.equal?($/ as it was)  # => true, the canonical separator
+//
+// Measured on ruby 4.0.7 before this was written. No example in ruby/spec
+// reaches it — language/predefined_spec.rb uses "abc" throughout, which can only
+// take the second branch — so the suite passes either way and the identity is
+// wrong. Proposed upstream as ruby/spec#1410.
+func (vm *VM) checkRecordSepGvar(name string, v object.Value) object.Value {
+	v = vm.checkStrGvar(name, v)
+	if object.IsNil(v) {
+		return v
+	}
+	s := v.(*object.String)
+	// rb_str_equal against a one-byte US-ASCII "\n": byte equality decides it.
+	// Any ASCII-compatible encoding holding that single byte IS == "\n", and an
+	// ASCII-incompatible one (UTF-16, UTF-32) cannot hold it in one byte at all,
+	// so there is no case where the encodings would change the answer.
+	if s.Str() == defaultRecordSeparator.Str() {
+		return defaultRecordSeparator
+	}
+	return frozenBareString(s)
+}
+
+// frozenBareString is string.c v4.0.9 rb_str_frozen_bare_string:
+//
+//	if (BARE_STRING_P(orig) && OBJ_FROZEN_RAW(orig)) return orig;
+//	return str_new_frozen(rb_cString, orig);
+//
+// where BARE_STRING_P (string.c:372) is `RBASIC_CLASS(str) == rb_cString &&
+// !rb_shape_obj_has_ivars(str)`. "Bare" is therefore BOTH halves: the exact
+// class, AND no instance variables. A String subclass carrying @ivar fails both
+// and a frozen plain String passes both, which is precisely what the three
+// examples in language/predefined_spec.rb distinguish.
+//
+// ⛔ ONLY THE IVAR HALF IS TESTED HERE, and that is not an omission. In rbgo a
+// *object.String is class String by construction (classOf maps the Go type
+// straight to vm.cString), and an instance of a String SUBCLASS never reaches
+// this function at all — checkStrGvar's type assertion rejects it first, with
+// "value of $/ must be String". MRI accepts one, because its check is T_STRING
+// and a subclass is still T_STRING. That divergence is a defect of its own,
+// filed rather than papered over here: it is why
+// predefined_spec.rb's "makes a new frozen String from the assigned String"
+// still fails, and fixing it belongs with the assertion, not with this rule.
+func frozenBareString(s *object.String) *object.String {
+	if s.Frozen && genericIvarsOf(s, false) == nil {
+		return s
+	}
+	out := object.NewString(s.Str())
+	out.Enc = s.Enc
+	out.Frozen = true
+	return out
 }
 
 // checkFieldSepGvar applies string.c v3_4_0 rb_fs_setter to $; / $-F: nil, a
