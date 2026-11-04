@@ -749,6 +749,19 @@ been removed — two were, on that pass:
   sends one byte to each; `warn` goes to stderr. Covered by
   `internal/vm/diagnostic_stream_test.go`.
 
+The two prose entries were re-checked again on `6eb7e4ad` (darwin/arm64,
+2026-11-04), same method and same MRI; the table further down was *not* re-swept
+on that pass, so its dates still stand. One of the two had gone:
+
+- *"A backtick command holds the interpreter lock."* While `` `cmd` `` ran,
+  every other Ruby `Thread` was said to stop. The probe this file carried
+  printed `frozen` in October and prints `ran` now, five runs out of five, and
+  `rubydiff` reports the whole program AGREE with MRI 4.0.7 — the two engines
+  produce the same output, not merely different-but-no-longer-compared output.
+  It is removed rather than reworded, and what closed it is deliberately *not*
+  attributed here: an entry that stops reproducing is a measurement, and naming
+  a cause without a control would be a guess dressed as a fact.
+
 **`Timeout.timeout` never times out.** The module and `Timeout::Error` exist and
 `rescue Timeout::Error` resolves, but the block runs to completion and its value
 is returned: enforcing a deadline needs pre-emptive interruption of a running
@@ -763,23 +776,14 @@ This one **fails open**, which is why it is stated here rather than left in the
 table below. `Timeout.timeout` is the ordinary Ruby way to bound work that might
 hang, so code relying on it for that is unprotected under rbgo — and unprotected
 *silently*, because the call returns successfully. The block is also yielded
-`nil` where MRI yields the limit.
-
-**A backtick command holds the interpreter lock.** While `` `cmd` `` runs, every
-other Ruby `Thread` is stopped; under MRI they keep running. `Kernel#sleep` does
-yield, so this is specific to the subprocess path:
-
-```console
-$ rbgo -e 't = Thread.new { loop { $n = ($n||0)+1; sleep 0.01 } }; sleep 0.05
-          b = $n; `sleep 1`; puts($n > b ? "ran" : "frozen")'
-frozen                   # MRI 4.0.7: ran
-```
+`nil` where MRI yields the limit — re-measured on 2026-11-04, where rbgo prints
+`returned` then `nil` and MRI 4.0.7 prints `raised` then `0.3`.
 
 Otherwise:
 
 | | how it differs from MRI 4.0.5 |
 | --- | --- |
-| `RUBY_VERSION` | `RUBY_VERSION` reports `"4.0.9"`, the latest MRI release (2026-10-23). The Ruby 4.0 **`Ruby` namespace** *is* implemented — all nine of `Ruby::{VERSION,RELEASE_DATE,PLATFORM,PATCHLEVEL,REVISION,COPYRIGHT,ENGINE,ENGINE_VERSION,DESCRIPTION}` are the **same objects** as their `RUBY_`-prefixed globals, as `version.c` defines them, so `Ruby::VERSION.equal?(RUBY_VERSION)` is `true`. The move from `3.4.1` was measured before it was made, with both engines built from one commit minus the version string: **+144 passing** over `core` and `language`, and **27 examples that went red**, which no pass total shows — see [#799](https://github.com/go-embedded-ruby/ruby/issues/799) for the list of what each of the 27 needs |
+| `RUBY_VERSION` | rbgo reports `"4.0.9"`, the latest MRI release (2026-10-23). The Ruby 4.0 **`Ruby` namespace** *is* implemented — all nine of `Ruby::{VERSION,RELEASE_DATE,PLATFORM,PATCHLEVEL,REVISION,COPYRIGHT,ENGINE,ENGINE_VERSION,DESCRIPTION}` are the **same objects** as their `RUBY_`-prefixed globals, as `version.c` defines them, so `Ruby::VERSION.equal?(RUBY_VERSION)` is `true`. The move from `3.4.1` was measured before it was made, with both engines built from one commit minus the version string: **+144 passing** over `core` and `language`, and **27 examples that went red**, which no pass total shows — see [#799](https://github.com/go-embedded-ruby/ruby/issues/799) for the list of what each of the 27 needs |
 | `Numeric#to_int` | not defined — `Complex(2.9, 0).to_int` raises `NoMethodError`; MRI returns `2` |
 | `File::Stat#==` | `a == b` is `false` for two stats of the same file (MRI: `true`); `a.==(b)` answers `true` |
 | `File#stat` on a file unlinked while open | raises `Errno::ENOENT`; MRI answers from the open descriptor. rbgo's streams are buffered by path and hold no descriptor |
@@ -1264,7 +1268,7 @@ specification of the language — through `rbgo` under a minimal MSpec-compatibl
 shim, and gates CI on a **per-file** baseline
 ([`scripts/conformance/rubyspec/`](scripts/conformance/rubyspec/), in
 `BASELINE`). No file may pass fewer examples than its record or stop loading, so
-measured language conformance moves in one direction; their sum is **23,672**,
+measured language conformance moves in one direction; the total, **23,672**, is
 a derived summary rather than the thing gated. Run it with
 `scripts/conformance/rubyspec/run.sh`, and see *Runtime conformance* under
 *Status* for the full breakdown.
