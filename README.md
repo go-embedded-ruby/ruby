@@ -433,6 +433,11 @@ JRuby**):
   (`$LOAD_PATH = []` → `NameError`), the checked ones enforce their type
   (`$stdout = nil` → `TypeError: $stdout must have write method, NilClass
   given`), and **`trace_var`**/`untrace_var` hook assignment to a global.
+  The separators are not interchangeable: `$,` and `$\` take `rb_str_setter`
+  and store what they are handed, while `$/` and `$-0` take MRI's
+  `deprecated_rs_setter` and store a **frozen plain String** of the same bytes
+  — so `$/ = s` leaves `s` untouched, `$/.frozen?` is true, and `$/` is not
+  `s.equal?` unless `s` was already a frozen bare String.
 - **Strings:** mutable (reference semantics) with `<<`/concat/replace/prepend/
   insert/`[]=`/slice!/the bang methods and `freeze`/`FrozenError`;
   interpolation, heredocs (`<<`/`<<-`/`<<~`), `%w`/`%i` and `%q`/`%Q`/`%W`/`%I`
@@ -532,7 +537,10 @@ JRuby**):
   `+ - * / **` with broadcasting (a number on either side),
   `sqrt`/`exp`/`log`/`sin`/`cos`/`abs`/`square`/`clip`,
   `NDArray.maximum`/`minimum`; reductions `sum`/`mean`/`max`/`min`/`prod`/
-  `argmax`/`argmin` (whole array, or `(axis, keepdims: true)`) and `cumsum`;
+  `argmax`/`argmin` (whole array, or along one axis with `keepdims: true`) and
+  `cumsum` (flattened, or along one axis). The axis may be given positionally
+  (`a.sum(0)`) or by keyword as NumPy spells it (`a.sum(axis: 0)`); both at
+  once raises `ArgumentError`;
   `matmul`/`dot`/`NDArray.outer`, `NDArray.concatenate`/`stack` (`axis:`);
   `shape`/`ndim`/`size`/`to_a` (flat), and `p a` prints NumPy's repr
   (`array([[0., 1.], ...])`). Every argument is checked: a wrong count or type
