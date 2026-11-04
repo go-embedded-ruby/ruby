@@ -19,8 +19,8 @@ import (
 // The Ruby surface is the one the go-ndarray playground's code generator emits
 // (Go | Ruby | NumPy): creation (zeros/ones/full/arange/linspace/eye/from),
 // views (reshape/transpose/flatten/squeeze/expand_dims and NumPy basic indexing
-// through #[]), elementwise ufuncs and **, reductions with an axis and
-// keepdims:, products and joins. Semantics are go-ndarray's, which are NumPy's,
+// through #[]), elementwise ufuncs and **, reductions with an axis (positional,
+// a.sum(0), or NumPy's keyword, a.sum(axis: 0)) and keepdims:, products and joins. Semantics are go-ndarray's, which are NumPy's,
 // in float64.
 //
 // Every method checks its own arguments. A wrong count raises ArgumentError, a
@@ -165,6 +165,23 @@ func ndKw(args []object.Value, names ...string) ([]object.Value, map[string]obje
 func ndKeep(kw map[string]object.Value) bool {
 	v, ok := kw["keepdims"]
 	return ok && v.Truthy()
+}
+
+// ndOptAxis reads the optional axis of a reduction, given positionally (a.sum(0))
+// or as NumPy's keyword (a.sum(axis: 0)). Absent or nil means no axis; giving
+// both forms is an ArgumentError, as NumPy's duplicate argument is a TypeError.
+func (vm *VM) ndOptAxis(args []object.Value, kw map[string]object.Value) (int, bool) {
+	v, ok := kw["axis"]
+	if len(args) == 1 {
+		if ok {
+			raise("ArgumentError", "axis given both positionally and as a keyword")
+		}
+		v, ok = args[0], true
+	}
+	if !ok || object.IsNil(v) {
+		return 0, false
+	}
+	return vm.ndInt(v), true
 }
 
 // ndOnes is the all-ones shape of the given rank: what a whole-array reduction
@@ -549,11 +566,11 @@ func (vm *VM) registerNDArray() {
 	// the reduced axes as length 1 (all of them when there is no axis).
 	reduce := func(name string, whole func(*nd.Array) (float64, error), along func(*nd.Array, int, bool) (*nd.Array, error)) {
 		d(name, func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-			args, kw := ndKw(args, "keepdims")
+			args, kw := ndKw(args, "axis", "keepdims")
 			ndArgc(args, 0, 1)
 			a, keep := self(v), ndKeep(kw)
-			if len(args) == 1 && !object.IsNil(args[0]) {
-				return mustArray(along(a, vm.ndInt(args[0]), keep))
+			if axis, ok := vm.ndOptAxis(args, kw); ok {
+				return mustArray(along(a, axis, keep))
 			}
 			r, err := whole(a)
 			if err != nil {
@@ -578,11 +595,11 @@ func (vm *VM) registerNDArray() {
 	// indices along the axis.
 	argReduce := func(name string, whole func(*nd.Array) (int, error), along func(*nd.Array, int, bool) (*nd.Array, error)) {
 		d(name, func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-			args, kw := ndKw(args, "keepdims")
+			args, kw := ndKw(args, "axis", "keepdims")
 			ndArgc(args, 0, 1)
 			a, keep := self(v), ndKeep(kw)
-			if len(args) == 1 && !object.IsNil(args[0]) {
-				return mustArray(along(a, vm.ndInt(args[0]), keep))
+			if axis, ok := vm.ndOptAxis(args, kw); ok {
+				return mustArray(along(a, axis, keep))
 			}
 			i, err := whole(a)
 			if err != nil {
@@ -599,9 +616,10 @@ func (vm *VM) registerNDArray() {
 
 	// cumsum: flattened with no axis, else along the axis.
 	d("cumsum", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
+		args, kw := ndKw(args, "axis")
 		ndArgc(args, 0, 1)
-		if len(args) == 1 && !object.IsNil(args[0]) {
-			return mustArray(self(v).CumSum(vm.ndInt(args[0])))
+		if axis, ok := vm.ndOptAxis(args, kw); ok {
+			return mustArray(self(v).CumSum(axis))
 		}
 		return &NDArray{a: self(v).CumSumFlat()}
 	})
