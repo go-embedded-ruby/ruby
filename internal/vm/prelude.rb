@@ -1446,60 +1446,77 @@ class Set
 
   # divide(&block): partition self into a Set of subsets. With a 1-argument block
   # each subset shares a block value; with a 2-argument block the block is a
-  # relation and the subsets are the strongly-connected components of the induced
-  # digraph (an Enumerator without a block).
+  # relation and the subsets are its MUTUALLY-related groups (an Enumerator
+  # without a block).
+  #
+  # The outer Set is a plain Set even for a subclass receiver, on both paths:
+  # set_i_divide builds it with set_alloc_with_size(rb_cSet, ...) (set.c:1002 at
+  # v4.0.9) and set_divide_arity2 with set_s_create(0, 0, rb_cSet) (set.c:946).
+  # Only the SUBSETS take the receiver's class.
   def divide(&func)
     return enum_for(:divide) { size } unless func
     if func.arity == 2
       __divide_graph(&func)
     else
-      self.class.new(classify(&func).values)
+      Set.new(classify(&func).values)
     end
   end
 
+  # ⛔ Ruby 4.0 replaced the ALGORITHM here, not just the yield pattern. This was
+  # Tarjan's strongly-connected components over the full n x n relation, which is
+  # what MRI's lib/set.rb did up to 3.x. set_divide_arity2 (set.c:923 at v4.0.9)
+  # is union-find over each UNORDERED pair once, merging i and j only when the
+  # block is truthy BOTH ways.
+  #
+  # The two are different functions, not two spellings of one. A directed cycle
+  # 1->2->3->1 with no reverse edge is a single strongly-connected component and
+  # has no mutually-related pair at all: SCC answers [[1, 2, 3]], union-find
+  # answers [[1], [2], [3]]. Measured on MRI 4.0.7, it is the latter.
+  #
+  # ruby/spec sees only the yields, and asserts them both ways five lines apart
+  # (core/set/divide_spec.rb:35 from 4.0, :43 below it) — that pair is how a
+  # reader tells a version swap from a defect.
   def __divide_graph(&func)
     items = to_a
     n = items.size
-    adj = Array.new(n) { [] }
+    parents = Array.new(n) { |i| i }
+    # Union-find with path compression, set.c:898.
+    root = lambda do |i|
+      r = i
+      r = parents[r] while parents[r] != r
+      while parents[i] != r
+        nxt = parents[i]
+        parents[i] = r
+        i = nxt
+      end
+      r
+    end
+    0.upto(n - 2) do |i|
+      item1 = items[i]
+      (i + 1).upto(n - 1) do |j|
+        item2 = items[j]
+        # ⛔ && SHORT-CIRCUITS, and that is observable: a falsy first answer
+        # means the reversed pair is never yielded at all. The spec's example
+        # cannot see it, because its block body `ret << [x, y]` is truthy.
+        next unless func.call(item1, item2) && func.call(item2, item1)
+        ri = root.call(i)
+        rj = root.call(j)
+        parents[rj] = ri if ri != rj
+      end
+    end
+    # Grouped in index order, so the subsets come out in the order their first
+    # member appears — MRI walks i ascending and keys a Hash by root (set.c:948).
+    groups = {}
+    order = []
     n.times do |i|
-      n.times do |j|
-        adj[i] << j if func.call(items[i], items[j])
+      r = root.call(i)
+      unless groups.key?(r)
+        groups[r] = []
+        order << r
       end
+      groups[r] << items[i]
     end
-    idx = 0
-    indices = Array.new(n)
-    low = Array.new(n, 0)
-    onstack = Array.new(n, false)
-    stack = []
-    comps = []
-    connect = nil
-    connect = lambda do |v|
-      indices[v] = idx
-      low[v] = idx
-      idx += 1
-      stack.push(v)
-      onstack[v] = true
-      adj[v].each do |w|
-        if indices[w].nil?
-          connect.call(w)
-          low[v] = low[w] if low[w] < low[v]
-        elsif onstack[w]
-          low[v] = indices[w] if indices[w] < low[v]
-        end
-      end
-      if low[v] == indices[v]
-        comp = []
-        loop do
-          w = stack.pop
-          onstack[w] = false
-          comp << items[w]
-          break if w == v
-        end
-        comps << comp
-      end
-    end
-    n.times { |v| connect.call(v) if indices[v].nil? }
-    self.class.new(comps.map { |c| self.class.new(c) })
+    Set.new(order.map { |r| self.class.new(groups[r]) })
   end
   private :__divide_graph
 
