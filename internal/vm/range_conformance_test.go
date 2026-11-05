@@ -259,8 +259,20 @@ end
 
 		{"max_endless", `(1..).max`, "RangeError"},
 		{"max_n_endless", `(1..).max(2)`, "RangeError"},
-		{"max_n_beginless", `(..1.0).max(2)`, "RangeError"},
-		{"max_excl_beginless_int", `(...1).max`, "TypeError"},
+		// ⛔ These two rows pinned the PRE-4.0 refusals, and ruby/spec marks both
+		// `ruby_version_is ""..."4.0"`. They are not relaxed here, they are
+		// MOVED to what 4.0 refuses instead, so the file still asserts a
+		// refusal for each shape:
+		//
+		//   (..1.0).max(2)  RangeError "beginless"  ->  TypeError, not walkable
+		//   (...1).max      TypeError "non Integer begin"  ->  answers 0
+		//
+		// The second shape has no refusal left at all, so its row names the one
+		// that took its place: an exclusive beginless end that is not Numeric,
+		// which still cannot be walked. `(...1).max == 0` is asserted in
+		// range_max_beginless_test.go, where the answer belongs.
+		{"max_n_beginless_non_integer", `(..1.0).max(2)`, "TypeError"},
+		{"max_excl_beginless_non_numeric", `(..."f").max`, "RangeError"},
 		{"max_excl_float", `(1.5...3.5).max`, "TypeError"},
 		{"max_block_beginless", `(..1).max {|a, b| a }`, "RangeError"},
 
