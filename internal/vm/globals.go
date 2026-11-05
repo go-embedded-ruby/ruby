@@ -283,6 +283,34 @@ func (vm *VM) warnDeprecatedGvar(msg string) {
 	vm.send(w, "warn", []object.Value{object.NewString("warning: " + msg + "\n")}, nil)
 }
 
+// warnDeprecated is error.c's rb_category_warn(RB_WARN_CATEGORY_DEPRECATED, …):
+// the caller's file and line, then the message, carrying the :deprecated
+// category, and emitted only when deprecation_warning_enabled() agrees.
+//
+// ⛔ THAT GATE IS TWO CONDITIONS, and only one of them is the obvious one.
+// MRI requires a NON-NIL $VERBOSE *and* Warning[:deprecated]; measured on
+// MRI 4.0.7, `$VERBOSE = nil` with the category on is silent, while
+// `$VERBOSE = false` with the category on warns. Checking only the category —
+// which is what `iterator?` did here until this function existed — makes rbgo
+// speak where MRI says nothing, and `$VERBOSE = nil` is how a program asks for
+// exactly that silence.
+//
+// The category is not decoration either: a `Warning.warn` override receives it
+// as `category: :deprecated`, and a handler that filters on it saw nil from the
+// old call site.
+func (vm *VM) warnDeprecated(msg string) {
+	if !vm.warnEnabled() {
+		return
+	}
+	w := vm.consts["Warning"]
+	if w == nil || !vm.send(w, "[]", []object.Value{object.SymVal("deprecated")}, nil).Truthy() {
+		return
+	}
+	// warnUplevelPrefix already ends in "warning: " — it is the whole
+	// "<file>:<line>: warning: " head MRI prints, not just the location.
+	vm.warningWarn(object.NewString(vm.warnUplevelPrefix(0)+msg+"\n"), object.SymVal("deprecated"))
+}
+
 // gvarGet is variable.c's rb_gvar_get (variable.c:1052 at v4.0.9): the
 // RUBY-LEVEL read of a global, which is gvar plus the warning MRI emits for a
 // global nothing ever assigned. The getgvar instruction and the two AOT tiers
