@@ -1007,7 +1007,7 @@ func expandTildePath(p string) string {
 	if name == "" { // "~" or "~/..." -> $HOME
 		home := os.Getenv("HOME")
 		if home == "" {
-			raise("ArgumentError", "couldn't find HOME environment -- expanding `~'")
+			raise("ArgumentError", "couldn't find HOME environment -- expanding '~'")
 		}
 		if !isAbsPath(toSlash(home)) {
 			raise("ArgumentError", "non-absolute home")

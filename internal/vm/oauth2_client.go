@@ -88,7 +88,7 @@ func (vm *VM) registerOAuth2StrategyMethods(cls *RClass) {
 	cls.define("authorize_url", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		s := self.(*OAuth2Strategy)
 		if s.grant != "auth_code" {
-			raise("NoMethodError", "undefined method `authorize_url' for %s", s.className)
+			raise("NoMethodError", "undefined method 'authorize_url' for %s", s.className)
 		}
 		return object.NewString(s.client.AuthCode().AuthorizeURL(oauth2Params(args)))
 	})

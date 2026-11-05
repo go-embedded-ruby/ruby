@@ -672,7 +672,7 @@ func (vm *VM) repeatLong(b object.Value) int64 {
 		if v.I.IsInt64() {
 			return v.I.Int64()
 		}
-		raise("RangeError", "bignum too big to convert into `long'")
+		raise("RangeError", "bignum too big to convert into 'long'")
 	case object.Float:
 		f := float64(v)
 		if math.IsNaN(f) {

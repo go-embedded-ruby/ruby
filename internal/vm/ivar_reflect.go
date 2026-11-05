@@ -68,7 +68,7 @@ func (vm *VM) ivarNameArg(arg object.Value) string {
 		}
 	}
 	if !validIvarName(name) {
-		raise("NameError", "`%s' is not allowed as an instance variable name", name)
+		raise("NameError", "'%s' is not allowed as an instance variable name", name)
 	}
 	return name
 }

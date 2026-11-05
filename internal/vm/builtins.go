@@ -6025,7 +6025,7 @@ func (vm *VM) bootstrap() {
 		if i, ok := self.(object.Integer); ok {
 			return int64(i)
 		}
-		raise("RangeError", "bignum too big to convert into `long'")
+		raise("RangeError", "bignum too big to convert into 'long'")
 		return 0
 	}
 	vm.cInteger.defineArgc("abs", 0, func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -10285,7 +10285,7 @@ func cvarNameArg(v object.Value) string {
 		raise("TypeError", "%s is not a symbol nor a string", v.Inspect())
 	}
 	if !strings.HasPrefix(name, "@@") || len(name) == 2 {
-		raise("NameError", "`%s' is not allowed as a class variable name", name)
+		raise("NameError", "'%s' is not allowed as a class variable name", name)
 	}
 	return name
 }

@@ -33,8 +33,12 @@ func TestWave16NameCoercion(t *testing.T) {
 			"can't convert Object to String (Object#to_str gives Integer)"},
 		{"Module.new.const_set(\"x\", 1)", "NameError", "wrong constant name x"},
 		{"Module.new.const_set(\"Name=\", 1)", "NameError", "wrong constant name Name="},
-		{"Class.new.class_variable_get(:foo)", "NameError", "`foo' is not allowed as a class variable name"},
-		{"Class.new.class_variable_get(:@@)", "NameError", "`@@' is not allowed as a class variable name"},
+		// ⛔ These two moved with the quoting, not because they were wrong. MRI
+		// writes 'foo' and not `foo' since 3.4, and v4.0.9 is straight-quoted
+		// throughout (numeric.c:3207, file.c:3908). Measured on 4.0.7:
+		// "'nope' is not allowed as an instance variable name".
+		{"Class.new.class_variable_get(:foo)", "NameError", "'foo' is not allowed as a class variable name"},
+		{"Class.new.class_variable_get(:@@)", "NameError", "'@@' is not allowed as a class variable name"},
 	}
 	for _, c := range errs {
 		if cls, msg := evalErr(t, c.src); cls != c.class || msg != c.msg {
