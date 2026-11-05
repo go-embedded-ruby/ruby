@@ -481,11 +481,36 @@ func (vm *VM) checkStrGvar(name string, v object.Value) object.Value {
 	if object.IsNil(v) {
 		return object.NilV
 	}
-	if _, ok := v.(*object.String); !ok {
+	if _, ok := stringTyped(v); !ok {
 		raise("TypeError", "value of %s must be String", name)
 	}
 	vm.warnDeprecatedGvar("non-nil '" + name + "' is deprecated")
+	// MRI's rb_str_setter stores what it was handed, subclass and all:
+	// `$, = Class.new(String).new("x")` keeps that object, unfrozen. Only $/
+	// and $-0 replace it, and they do it in checkRecordSepGvar.
 	return v
+}
+
+// stringTyped is RB_TYPE_P(val, T_STRING): it reports whether v is a String,
+// INCLUDING an instance of a String subclass — which rbgo represents as an
+// RObject wrapping one, not as an *object.String. (regexp.go's stringLike is a
+// different question: it coerces a Symbol too, and answers with the bytes.)
+//
+// ⛔ Every separator global refused `Class.new(String).new("x")` because the
+// test here was `v.(*object.String)`, an exact-type assertion. MRI's are
+// RB_TYPE_P(val, T_STRING) in rb_str_setter and rb_check_string_type in
+// rb_fs_check, and BOTH are true for a subclass. Measured on MRI 4.0.7: $/,
+// $-0, $,, $\ and $; all accept one, and only $/ and $-0 convert it.
+func stringTyped(v object.Value) (*object.String, bool) {
+	switch s := v.(type) {
+	case *object.String:
+		return s, true
+	case *RObject:
+		if b, ok := s.builtin.(*object.String); ok {
+			return b, true
+		}
+	}
+	return nil, false
 }
 
 // checkRecordSepGvar applies io.c v4.0.9 deprecated_rs_setter to $/ and $-0,
@@ -514,7 +539,7 @@ func (vm *VM) checkRecordSepGvar(name string, v object.Value) object.Value {
 	if object.IsNil(v) {
 		return v
 	}
-	s := v.(*object.String)
+	s, _ := stringTyped(v) // checkStrGvar has already refused anything else
 	// rb_str_equal against a one-byte US-ASCII "\n": byte equality decides it.
 	// Any ASCII-compatible encoding holding that single byte IS == "\n", and an
 	// ASCII-incompatible one (UTF-16, UTF-32) cannot hold it in one byte at all,
@@ -522,7 +547,7 @@ func (vm *VM) checkRecordSepGvar(name string, v object.Value) object.Value {
 	if s.Str() == defaultRecordSeparator.Str() {
 		return defaultRecordSeparator
 	}
-	return frozenBareString(s)
+	return frozenBareString(v, s)
 }
 
 // frozenBareString is string.c v4.0.9 rb_str_frozen_bare_string:
@@ -536,18 +561,24 @@ func (vm *VM) checkRecordSepGvar(name string, v object.Value) object.Value {
 // and a frozen plain String passes both, which is precisely what the three
 // examples in language/predefined_spec.rb distinguish.
 //
-// ⛔ ONLY THE IVAR HALF IS TESTED HERE, and that is not an omission. In rbgo a
+// ⛔ BOTH HALVES ARE TESTED, and they are tested on DIFFERENT values. orig is
+// what Ruby handed over — an *object.String, or an RObject wrapping one when
+// the assignment came from a String subclass — and s is the String inside it.
+// The class half is `orig` being an *object.String at all, because in rbgo a
 // *object.String is class String by construction (classOf maps the Go type
-// straight to vm.cString), and an instance of a String SUBCLASS never reaches
-// this function at all — checkStrGvar's type assertion rejects it first, with
-// "value of $/ must be String". MRI accepts one, because its check is T_STRING
-// and a subclass is still T_STRING. That divergence is a defect of its own,
-// filed rather than papered over here: it is why
-// predefined_spec.rb's "makes a new frozen String from the assigned String"
-// still fails, and fixing it belongs with the assertion, not with this rule.
-func frozenBareString(s *object.String) *object.String {
-	if s.Frozen && genericIvarsOf(s, false) == nil {
-		return s
+// straight to vm.cString) while a subclass instance is an RObject. The ivar
+// half is read from s.
+//
+// Until the subclass was accepted at all this function only ever saw the exact
+// type, so the class half had nothing to test and was left out with a note
+// saying so. The note outlived its reason: `checkStrGvar` now admits a
+// subclass, and without the `orig` test the subclass instance would be
+// returned AS IS — frozen or not, @ivar and all — which is the opposite of
+// what predefined_spec.rb's "makes a new frozen String from the assigned
+// String" asserts.
+func frozenBareString(orig object.Value, s *object.String) *object.String {
+	if bare, ok := orig.(*object.String); ok && bare.Frozen && genericIvarsOf(bare, false) == nil {
+		return bare
 	}
 	out := object.NewString(s.Str())
 	out.Enc = s.Enc
@@ -563,16 +594,24 @@ func (vm *VM) checkFieldSepGvar(name string, v object.Value) object.Value {
 	if object.IsNil(v) {
 		return object.NilV
 	}
-	switch v.(type) {
-	case *object.String, *Regexp:
-	default:
-		if vm.respondsToDynamic(v, "to_str") {
-			if s, ok := vm.send(v, "to_str", nil, nil).(*object.String); ok {
-				v = s
-				break
+	// ⛔ rb_check_string_type answers YES for a String subclass and hands the
+	// object back unchanged, so `$; = Class.new(String).new("x")` keeps that
+	// object in MRI. Testing only *object.String sent it down the #to_str path
+	// instead, which a String subclass answers — so the assignment succeeded
+	// and silently replaced the object with a plain String. A wrong answer is
+	// worse here than the TypeError the other separators gave.
+	if _, ok := stringTyped(v); !ok {
+		switch v.(type) {
+		case *Regexp:
+		default:
+			if vm.respondsToDynamic(v, "to_str") {
+				if s, ok := vm.send(v, "to_str", nil, nil).(*object.String); ok {
+					v = s
+					break
+				}
 			}
+			raise("TypeError", "value of %s must be String or Regexp", name)
 		}
-		raise("TypeError", "value of %s must be String or Regexp", name)
 	}
 	vm.warnDeprecatedGvar("non-nil '" + name + "' is deprecated")
 	return v
