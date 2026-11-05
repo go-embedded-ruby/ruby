@@ -209,6 +209,12 @@ func (vm *VM) registerObjectSpace() {
 		if len(args) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
 		}
+		// Deprecated in 4.0 (gc.c: rb_category_warn(RB_WARN_CATEGORY_DEPRECATED,
+		// "ObjectSpace._id2ref is deprecated")). It still answers; it only says
+		// so, and only when the :deprecated category is on — the argument check
+		// above stays FIRST, so `ObjectSpace._id2ref` with no argument raises
+		// without warning, as MRI does.
+		vm.warnDeprecated("ObjectSpace._id2ref is deprecated")
 		id := intArg(args[0])
 		if id&1 == 1 { // odd => fixnum id 2n+1
 			return object.IntValue(id >> 1)

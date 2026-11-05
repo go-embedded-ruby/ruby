@@ -218,9 +218,11 @@ func (vm *VM) registerKernelIntrospection() {
 		if len(args) != 0 {
 			raise("ArgumentError", "wrong number of arguments (given %d, expected 0)", len(args))
 		}
-		if vm.send(vm.consts["Warning"], "[]", []object.Value{object.SymVal("deprecated")}, nil).Truthy() {
-			vm.writeWarningStr(vm.warnUplevelPrefix(0) + "iterator? is deprecated; use block_given? instead\n")
-		}
+		// ⛔ This used to test the category alone and write the string itself,
+		// which warned where MRI is silent ($VERBOSE = nil) and handed a
+		// Warning.warn override `category: nil`. warnDeprecated is MRI's own
+		// gate; both divergences were measured against 4.0.7 before the change.
+		vm.warnDeprecated("iterator? is deprecated; use block_given? instead")
 		return object.Bool(vm.callerBlockGiven())
 	})
 	// Both are rb_define_global_function, i.e. the module-function split: a PRIVATE
