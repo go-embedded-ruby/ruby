@@ -1013,9 +1013,20 @@ func (vm *VM) bootstrap() {
 		// untouched; a built-in value subclass (builtin != nil) likewise keeps its
 		// wrapped value's inspect.
 		if o, ok := self.(*RObject); ok && o.builtin == nil && o.structVals == nil {
-			return object.NewString(vm.defaultObjectInspect(o))
+			// Ruby 4.0 lets an object name the ivars its #inspect may show.
+			return object.NewString(vm.defaultObjectInspect(o, vm.inspectIvarFilter(o)))
 		}
 		return object.NewString(self.Inspect())
+	})
+	// Kernel#instance_variables_to_inspect, new in 4.0: object.c defines it as a
+	// PRIVATE method returning nil (rb_obj_instance_variables_to_inspect), so
+	// every Object answers the hook and the default answer means "show them
+	// all". Its name was already in kernelPrivateNames, which is what makes it
+	// private once the rehome pass runs; until now nothing defined it, so
+	// `Object.new.respond_to?(:instance_variables_to_inspect, true)` was false
+	// where MRI says true.
+	vm.cObject.defineArgc("instance_variables_to_inspect", 0, func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.NilV
 	})
 	vm.cObject.define("nil?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		_, isNil := self.(object.Nil)
@@ -6668,7 +6679,7 @@ func (vm *VM) rehomeKernelMethods() {
 // pointer), and — when it has any — its instance variables in first-assignment
 // order, each value #inspect'd. Only reached for a plain RObject; value types and
 // Structs keep their own #inspect.
-func (vm *VM) defaultObjectInspect(o *RObject) string {
+func (vm *VM) defaultObjectInspect(o *RObject, only map[string]bool) string {
 	var b strings.Builder
 	b.WriteString("#<")
 	b.WriteString(o.class.name)
@@ -6704,19 +6715,82 @@ func (vm *VM) defaultObjectInspect(o *RObject) string {
 		return b.String()
 	}
 	defer object.ReprLeave(o)
-	for i, nv := range ivarNamesInOrder(o) {
-		if i == 0 {
+	shown := 0
+	for _, nv := range ivarNamesInOrder(o) {
+		name := nv.ToS()
+		if only != nil && !only[name] {
+			continue
+		}
+		if shown == 0 {
 			b.WriteByte(' ')
 		} else {
 			b.WriteString(", ")
 		}
-		name := nv.ToS()
+		shown++
 		b.WriteString(name)
 		b.WriteByte('=')
 		b.WriteString(vm.inspectStr(getIvar(o, name)))
 	}
 	b.WriteByte('>')
 	return b.String()
+}
+
+// inspectIvarFilter asks o for Ruby 4.0's #instance_variables_to_inspect and
+// returns the set of names #inspect may show, or nil for "all of them".
+//
+// object.c's rb_obj_inspect at v4.0.9:
+//
+//	VALUE ivars = rb_check_funcall(obj, id_instance_variables_to_inspect, 0, 0);
+//	if (UNDEF_P(ivars) || NIL_P(ivars)) { n = rb_ivar_count(obj); ivars = Qnil; }
+//	else if (RB_TYPE_P(ivars, T_ARRAY)) { n = RARRAY_LEN(ivars); }
+//	else rb_raise(rb_eTypeError, "Expected #instance_variables_to_inspect to "
+//	              "return an Array or nil, but it returned %"PRIsVALUE, ...);
+//
+// Three details are not guesses; each was measured against MRI 4.0.7:
+//
+//   - The elements are compared as SYMBOLS, by identity. `["@host", "@user"]`
+//     matches nothing and inspects as `#<Object:0x…>` — a String that spells
+//     the same name is not the name.
+//   - The ORDER is the object's, not the list's. `%i[@user @host]` still
+//     prints `@host=…, @user=…`, because inspect_i walks the object's ivars
+//     and tests each for membership.
+//   - rb_check_funcall ignores visibility, so a hook defined public works
+//     exactly as the private one the documentation shows.
+func (vm *VM) inspectIvarFilter(o *RObject) map[string]bool {
+	const hook = "instance_variables_to_inspect"
+	m := vm.findMethod(o, hook)
+	if m == nil {
+		// Not defined at all — a BasicObject reached through
+		// Kernel.instance_method(:inspect).bind(obj). MRI's Qundef, same answer
+		// as nil: show everything.
+		return nil
+	}
+	// ⛔ #inspect is on the path of every `p` and every error message, and this
+	// hook made it dispatch a method it will almost never need: the default
+	// returns nil for every object nobody has overridden it on. Resolving the
+	// name twice and comparing the records costs two cache-backed lookups where
+	// the send costs a frame. Pointer equality is the right test — an override
+	// anywhere in the chain produces a different record, and the default one is
+	// shared by every object that has not overridden it.
+	if m == lookupMethod(vm.cObject, hook) {
+		return nil
+	}
+	v := vm.send(o, hook, nil, nil)
+	if object.IsNil(v) {
+		return nil
+	}
+	arr, ok := v.(*object.Array)
+	if !ok {
+		raise("TypeError", "Expected #instance_variables_to_inspect to return an Array or nil, but it returned %s",
+			vm.classOf(v).name)
+	}
+	only := make(map[string]bool, len(arr.Elems))
+	for _, e := range arr.Elems {
+		if s, ok := e.(object.Symbol); ok {
+			only[string(s)] = true
+		}
+	}
+	return only
 }
 
 // nativeNew allocates an instance of the receiver class and runs initialize,
