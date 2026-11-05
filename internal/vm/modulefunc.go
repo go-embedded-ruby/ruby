@@ -531,7 +531,7 @@ func (vm *VM) coerceConstName(v object.Value) string {
 func (vm *VM) coerceCvarName(v object.Value) string {
 	name := vm.coerceNameArg(v)
 	if len(name) < 3 || name[0] != '@' || name[1] != '@' {
-		raise("NameError", "`%s' is not allowed as a class variable name", name)
+		raise("NameError", "'%s' is not allowed as a class variable name", name)
 	}
 	return name
 }

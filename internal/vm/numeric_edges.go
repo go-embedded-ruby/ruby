@@ -46,11 +46,11 @@ func (vm *VM) toRoundInt(a object.Value) int {
 	switch v := a.(type) {
 	case object.Integer:
 		if int64(v) < math.MinInt32 || int64(v) > math.MaxInt32 {
-			raise("RangeError", "integer %d too big to convert to `int'", int64(v))
+			raise("RangeError", "integer %d too big to convert to 'int'", int64(v))
 		}
 		return clampInt(v)
 	case *object.Bignum:
-		raise("RangeError", "bignum too big to convert into `long'")
+		raise("RangeError", "bignum too big to convert into 'long'")
 	case object.Float:
 		f := math.Trunc(float64(v))
 		if math.IsNaN(float64(v)) || math.IsInf(float64(v), 0) || f < math.MinInt32 || f > math.MaxInt32 {

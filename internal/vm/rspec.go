@@ -249,7 +249,7 @@ func (vm *VM) registerRSpecMatcherClass(mod *RClass) {
 	d("of", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		m := self(v)
 		if m.chain == nil || m.chain.within == nil {
-			raise("NoMethodError", "undefined method `of' for matcher")
+			raise("NoMethodError", "undefined method 'of' for matcher")
 		}
 		return &RSpecMatcher{m: rspec.BeWithin(m.chain.within.delta).Of(rspecFloatArg(args))}
 	})
@@ -257,7 +257,7 @@ func (vm *VM) registerRSpecMatcherClass(mod *RClass) {
 	d("with", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		m := self(v)
 		if m.chain == nil || m.chain.respTo == nil {
-			raise("NoMethodError", "undefined method `with' for matcher")
+			raise("NoMethodError", "undefined method 'with' for matcher")
 		}
 		n := clampInt(rspecIntArg(args))
 		return &RSpecMatcher{m: rspec.RespondTo(m.chain.respTo.names...).With(n)}

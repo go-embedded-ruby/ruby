@@ -113,7 +113,7 @@ func (vm *VM) registerOpenTelemetryProvider(cls *RClass) {
 	cls.define("add_span_processor", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		p := v.(*OTelTracerProvider)
 		if p.sdk == nil {
-			raise("NoMethodError", "undefined method `add_span_processor' for a non-SDK tracer provider")
+			raise("NoMethodError", "undefined method 'add_span_processor' for a non-SDK tracer provider")
 		}
 		if len(args) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")

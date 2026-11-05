@@ -500,7 +500,7 @@ func dirHomeStr() string {
 	if h, err := osCurrentUserHome(); err == nil && h != "" {
 		return h
 	}
-	raise("ArgumentError", "couldn't find HOME environment -- expanding `~'")
+	raise("ArgumentError", "couldn't find HOME environment -- expanding '~'")
 	return ""
 }
 
