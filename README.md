@@ -13,7 +13,7 @@ in a Go program with `import "github.com/go-embedded-ruby/ruby"`, or ship it as 
 single static binary that cross-compiles wherever Go does, with no C toolchain and
 no libruby.
 
-**How complete is it?** It runs **23,672** of ruby/spec's `language/` + `core/`
+**How complete is it?** It passes **23,672** of ruby/spec's `language/` + `core/`
 examples ([what that counts](#runtime-conformance--rubyspec)) — a large and growing
 subset of the language, and **not** a drop-in replacement for CRuby. Read
 [What does not work yet](#what-does-not-work-yet) before you depend on it; the
@@ -749,6 +749,19 @@ been removed — two were, on that pass:
   sends one byte to each; `warn` goes to stderr. Covered by
   `internal/vm/diagnostic_stream_test.go`.
 
+The two prose entries were re-checked again on `6eb7e4ad` (darwin/arm64,
+2026-11-04), same method and same MRI; the table further down was *not* re-swept
+on that pass, so its dates still stand. One of the two had gone:
+
+- *"A backtick command holds the interpreter lock."* While `` `cmd` `` ran,
+  every other Ruby `Thread` was said to stop. The probe this file carried
+  printed `frozen` in October and prints `ran` now, five runs out of five, and
+  `rubydiff` reports the whole program AGREE with MRI 4.0.7 — the two engines
+  produce the same output, not merely different-but-no-longer-compared output.
+  It is removed rather than reworded, and what closed it is deliberately *not*
+  attributed here: an entry that stops reproducing is a measurement, and naming
+  a cause without a control would be a guess dressed as a fact.
+
 **`Timeout.timeout` never times out.** The module and `Timeout::Error` exist and
 `rescue Timeout::Error` resolves, but the block runs to completion and its value
 is returned: enforcing a deadline needs pre-emptive interruption of a running
@@ -763,17 +776,8 @@ This one **fails open**, which is why it is stated here rather than left in the
 table below. `Timeout.timeout` is the ordinary Ruby way to bound work that might
 hang, so code relying on it for that is unprotected under rbgo — and unprotected
 *silently*, because the call returns successfully. The block is also yielded
-`nil` where MRI yields the limit.
-
-**A backtick command holds the interpreter lock.** While `` `cmd` `` runs, every
-other Ruby `Thread` is stopped; under MRI they keep running. `Kernel#sleep` does
-yield, so this is specific to the subprocess path:
-
-```console
-$ rbgo -e 't = Thread.new { loop { $n = ($n||0)+1; sleep 0.01 } }; sleep 0.05
-          b = $n; `sleep 1`; puts($n > b ? "ran" : "frozen")'
-frozen                   # MRI 4.0.7: ran
-```
+`nil` where MRI yields the limit — re-measured on 2026-11-04, where rbgo prints
+`returned` then `nil` and MRI 4.0.7 prints `raised` then `0.3`.
 
 Otherwise:
 
