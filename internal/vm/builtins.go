@@ -1013,9 +1013,20 @@ func (vm *VM) bootstrap() {
 		// untouched; a built-in value subclass (builtin != nil) likewise keeps its
 		// wrapped value's inspect.
 		if o, ok := self.(*RObject); ok && o.builtin == nil && o.structVals == nil {
-			return object.NewString(vm.defaultObjectInspect(o))
+			// Ruby 4.0 lets an object name the ivars its #inspect may show.
+			return object.NewString(vm.defaultObjectInspect(o, vm.inspectIvarFilter(o)))
 		}
 		return object.NewString(self.Inspect())
+	})
+	// Kernel#instance_variables_to_inspect, new in 4.0: object.c defines it as a
+	// PRIVATE method returning nil (rb_obj_instance_variables_to_inspect), so
+	// every Object answers the hook and the default answer means "show them
+	// all". Its name was already in kernelPrivateNames, which is what makes it
+	// private once the rehome pass runs; until now nothing defined it, so
+	// `Object.new.respond_to?(:instance_variables_to_inspect, true)` was false
+	// where MRI says true.
+	vm.cObject.defineArgc("instance_variables_to_inspect", 0, func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.NilV
 	})
 	vm.cObject.define("nil?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		_, isNil := self.(object.Nil)
@@ -5711,14 +5722,28 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cRange.defineArgc("max", -1, func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		r := self.(*object.Range)
-		if len(args) > 0 { // max(n): the n largest, descending
-			if object.IsNil(r.Hi) {
-				raise("RangeError", "cannot get the maximum of endless range")
-			}
-			// A beginless range cannot be walked from its start, so its n largest
-			// are unobtainable (MRI raises RangeError rather than iterating).
+		if object.IsNil(r.Hi) {
+			raise("RangeError", "cannot get the maximum of endless range")
+		}
+		// ⛔ range_max asks this BEFORE looking at the n argument, and the order
+		// is observable: `(..1).max(2) { |a,b| a<=>b }` raises in MRI, where
+		// answering the n first would hand back [1, 0]. A block, or an exclusive
+		// range whose end is not Numeric, has to walk elements, and a beginless
+		// range has none to offer.
+		if blk != nil || (r.Exclusive && !isNumericValue(r.Hi)) {
 			if object.IsNil(r.Lo) {
-				raise("RangeError", "cannot get the maximum of beginless range")
+				raise("RangeError", "cannot get the maximum of beginless range with custom comparison method")
+			}
+		}
+		if len(args) > 0 { // max(n): the n largest, descending
+			// A beginless NON-Integer range is not walkable at all: MRI's
+			// reverse_each falls through to Enumerable, whose #each raises
+			// "can't iterate from NilClass". A TypeError, not the RangeError
+			// that pre-4.0 refused every beginless range with.
+			if object.IsNil(r.Lo) {
+				if _, ok := toBigInt(r.Hi); !ok {
+					raise("TypeError", "can't iterate from NilClass")
+				}
 			}
 			// ⛔ An Integer range answers ARITHMETICALLY. Building the range to
 			// take n off the end costs O(size of the range) and nothing about
@@ -5740,30 +5765,38 @@ func (vm *VM) bootstrap() {
 		if blk != nil {
 			return vm.rangeExtremeByBlock(r, blk, false)
 		}
-		// The maximum comes from the endpoints without iterating: endless raises, an
-		// empty range is nil, an inclusive range is the end. An exclusive range with
-		// an Integer end is end-1; with any other end it is the last element reached
+		// The maximum comes from the endpoints without iterating: an empty range
+		// is nil, an inclusive range is the end. An exclusive range with an
+		// Integer end is end-1; with any other end it is the last element reached
 		// by #succ (a String range yields it, a Float range raises TypeError).
-		if object.IsNil(r.Hi) {
-			raise("RangeError", "cannot get the maximum of endless range")
-		}
 		if rangeEmpty(vm, r) {
 			return object.NilV
 		}
 		if r.Exclusive {
-			// An Integer (or Bignum) end excludes by yielding its predecessor — but
-			// only for a bounded range: excluding an Integer end still requires an
-			// Integer begin (MRI 3.x), so a beginless exclusive Integer range raises.
+			// An Integer (or Bignum) end excludes by yielding its predecessor.
+			//
+			// ⛔ Until 4.0 this also demanded an Integer BEGIN, so `(...1).max`
+			// raised "cannot exclude end value with non Integer begin value" — a
+			// nil begin counting as "non Integer". range_max now guards that
+			// check with `!NIL_P(b) &&`, so a beginless range skips it and the
+			// answer is the predecessor of the end: MRI 4.0.7 gives `(...1).max`
+			// as 0, and `(...-2**63).max` as -9223372036854775809.
 			switch r.Hi.(type) {
 			case object.Integer, *object.Bignum:
-				if object.IsNil(r.Lo) {
-					raise("TypeError", "cannot exclude end value with non Integer begin value")
+				if !object.IsNil(r.Lo) {
+					switch r.Lo.(type) {
+					case object.Integer, *object.Bignum:
+					default:
+						raise("TypeError", "cannot exclude end value with non Integer begin value")
+					}
 				}
 				return vm.send(r.Hi, "-", []object.Value{object.IntValue(1)}, nil)
 			}
-			// A numeric (Float/Rational) end, or a beginless range, has no
-			// predecessor reachable by #succ.
-			if object.IsNil(r.Lo) || isNumericValue(r.Hi) {
+			// A numeric (Float/Rational) end has no predecessor reachable by
+			// #succ. A beginless range never arrives here: a non-Numeric end took
+			// the walk-the-elements guard at the top of the method, and a Numeric
+			// one is caught by this raise.
+			if isNumericValue(r.Hi) {
 				raise("TypeError", "cannot exclude non Integer end value")
 			}
 			// A non-empty iterable range (e.g. String): the last element before
@@ -6646,7 +6679,7 @@ func (vm *VM) rehomeKernelMethods() {
 // pointer), and — when it has any — its instance variables in first-assignment
 // order, each value #inspect'd. Only reached for a plain RObject; value types and
 // Structs keep their own #inspect.
-func (vm *VM) defaultObjectInspect(o *RObject) string {
+func (vm *VM) defaultObjectInspect(o *RObject, only map[string]bool) string {
 	var b strings.Builder
 	b.WriteString("#<")
 	b.WriteString(o.class.name)
@@ -6682,19 +6715,82 @@ func (vm *VM) defaultObjectInspect(o *RObject) string {
 		return b.String()
 	}
 	defer object.ReprLeave(o)
-	for i, nv := range ivarNamesInOrder(o) {
-		if i == 0 {
+	shown := 0
+	for _, nv := range ivarNamesInOrder(o) {
+		name := nv.ToS()
+		if only != nil && !only[name] {
+			continue
+		}
+		if shown == 0 {
 			b.WriteByte(' ')
 		} else {
 			b.WriteString(", ")
 		}
-		name := nv.ToS()
+		shown++
 		b.WriteString(name)
 		b.WriteByte('=')
 		b.WriteString(vm.inspectStr(getIvar(o, name)))
 	}
 	b.WriteByte('>')
 	return b.String()
+}
+
+// inspectIvarFilter asks o for Ruby 4.0's #instance_variables_to_inspect and
+// returns the set of names #inspect may show, or nil for "all of them".
+//
+// object.c's rb_obj_inspect at v4.0.9:
+//
+//	VALUE ivars = rb_check_funcall(obj, id_instance_variables_to_inspect, 0, 0);
+//	if (UNDEF_P(ivars) || NIL_P(ivars)) { n = rb_ivar_count(obj); ivars = Qnil; }
+//	else if (RB_TYPE_P(ivars, T_ARRAY)) { n = RARRAY_LEN(ivars); }
+//	else rb_raise(rb_eTypeError, "Expected #instance_variables_to_inspect to "
+//	              "return an Array or nil, but it returned %"PRIsVALUE, ...);
+//
+// Three details are not guesses; each was measured against MRI 4.0.7:
+//
+//   - The elements are compared as SYMBOLS, by identity. `["@host", "@user"]`
+//     matches nothing and inspects as `#<Object:0x…>` — a String that spells
+//     the same name is not the name.
+//   - The ORDER is the object's, not the list's. `%i[@user @host]` still
+//     prints `@host=…, @user=…`, because inspect_i walks the object's ivars
+//     and tests each for membership.
+//   - rb_check_funcall ignores visibility, so a hook defined public works
+//     exactly as the private one the documentation shows.
+func (vm *VM) inspectIvarFilter(o *RObject) map[string]bool {
+	const hook = "instance_variables_to_inspect"
+	m := vm.findMethod(o, hook)
+	if m == nil {
+		// Not defined at all — a BasicObject reached through
+		// Kernel.instance_method(:inspect).bind(obj). MRI's Qundef, same answer
+		// as nil: show everything.
+		return nil
+	}
+	// ⛔ #inspect is on the path of every `p` and every error message, and this
+	// hook made it dispatch a method it will almost never need: the default
+	// returns nil for every object nobody has overridden it on. Resolving the
+	// name twice and comparing the records costs two cache-backed lookups where
+	// the send costs a frame. Pointer equality is the right test — an override
+	// anywhere in the chain produces a different record, and the default one is
+	// shared by every object that has not overridden it.
+	if m == lookupMethod(vm.cObject, hook) {
+		return nil
+	}
+	v := vm.send(o, hook, nil, nil)
+	if object.IsNil(v) {
+		return nil
+	}
+	arr, ok := v.(*object.Array)
+	if !ok {
+		raise("TypeError", "Expected #instance_variables_to_inspect to return an Array or nil, but it returned %s",
+			vm.classOf(v).name)
+	}
+	only := make(map[string]bool, len(arr.Elems))
+	for _, e := range arr.Elems {
+		if s, ok := e.(object.Symbol); ok {
+			only[string(s)] = true
+		}
+	}
+	return only
 }
 
 // nativeNew allocates an instance of the receiver class and runs initialize,
@@ -11991,47 +12087,95 @@ func (vm *VM) rangeFirstN(r *object.Range, n int) []object.Value {
 
 // rangeInts extracts integer endpoints. ok is false when either endpoint is not
 // an Integer (string/float ranges are not iterable in this phase).
-// integerRangeMaxN answers Range#max(n) for a bounded Integer range without
-// building the range, and reports false for anything else (a String range, a
-// Float end, a Bignum endpoint) so the caller keeps its existing path.
+// integerRangeMaxN answers Range#max(n) for an Integer range without building
+// the range, and reports false for anything else (a String range, a Float end)
+// so the caller keeps its existing path.
 //
 // ⛔ THE COUNT IS CLAMPED WITHOUT COMPUTING THE SIZE. `top - lo + 1` overflows
 // int64 for a range like (-2**62..2**62), and an overflowed size clamps n to a
 // negative number — a wrong answer on exactly the inputs this function exists
-// to make cheap. The span is taken in uint64, where it is exact for every
-// int64 pair with top >= lo, and compared against n instead.
+// to make cheap. The arithmetic is done in big.Int, where no pair of endpoints
+// overflows, and only the clamped count comes back to int64.
+//
+// Beginless ranges answer here too, since Ruby 4.0: range.c's range_max reaches
+// its n-argument branch with `c = NIL_P(b) ? -1 : …`, so a nil begin is simply
+// "below the end" rather than a refusal, and reverse_each walks
+// `(NIL_P(beg) || RB_INTEGER_TYPE_P(beg)) && RB_INTEGER_TYPE_P(end)` downward
+// from the end with nothing to stop it but n. Measured against MRI 4.0.7:
+// `(..1).max(3)` is `[1, 0, -1]`.
 func integerRangeMaxN(r *object.Range, n int64) (object.Value, bool) {
-	lo, hi, ok := rangeInts(r)
+	lo, hi, ok := rangeBigEnds(r)
 	if !ok {
 		return nil, false
 	}
 	if n < 0 {
-		raise("ArgumentError", "negative array size")
+		raise("ArgumentError", "negative array size (or size too big)")
 	}
-	top := hi
+	top := new(big.Int).Set(hi)
 	if r.Exclusive {
-		// An exclusive Integer end excludes by yielding its predecessor. If hi
-		// is the smallest int64 there is no predecessor, and the range is empty
-		// anyway for any lo.
-		if hi == math.MinInt64 {
+		// An exclusive Integer end excludes by yielding its predecessor. In
+		// big.Int that is unconditional: the int64 floor needed a special case,
+		// `(...-2**63).max` is -9223372036854775809 in MRI, and it is a Bignum.
+		top.Sub(top, big.NewInt(1))
+	}
+	count := n
+	if lo != nil {
+		if top.Cmp(lo) < 0 {
 			return object.NewArrayFromSlice(nil), true
 		}
-		top--
+		// span is the number of steps from lo to top: exact, and only consulted
+		// when it is small enough to shorten the answer.
+		if span := new(big.Int).Sub(top, lo); span.IsInt64() && span.Int64() < n {
+			count = span.Int64() + 1
+		}
 	}
-	if top < lo {
-		return object.NewArrayFromSlice(nil), true
-	}
-	span := uint64(top) - uint64(lo) // exact: the number of steps from lo to top
-	count := n
-	if uint64(n) > span {
-		// n is int64 and n > span, so span+1 cannot overflow int64 here.
-		count = int64(span) + 1
+	// ⛔ A beginless range has nothing to clamp against, so n alone decides the
+	// allocation and `(..1).max(2**40)` is a request for 8 TiB of slice. MRI
+	// bounds it in rb_ary_new2, which refuses a length over ARY_MAX_SIZE with
+	// ArgumentError; refuse here for the same reason, with the same class, so
+	// an untrusted n is a Ruby exception and not an OOM kill.
+	if count > maxRangeMaxN {
+		raise("ArgumentError", "negative array size (or size too big)")
 	}
 	out := make([]object.Value, count)
+	cur := new(big.Int).Set(top)
+	one := big.NewInt(1)
 	for i := int64(0); i < count; i++ {
-		out[i] = object.IntValue(top - i)
+		out[i] = object.NormInt(new(big.Int).Set(cur))
+		cur.Sub(cur, one)
 	}
 	return object.NewArrayFromSlice(out), true
+}
+
+// maxRangeMaxN caps how many elements Range#max(n) will materialise. MRI's own
+// ceiling is ARY_MAX_SIZE (LONG_MAX/sizeof(VALUE)), which no machine can
+// allocate either; this is the point at which rbgo stops trying and raises the
+// class MRI raises.
+const maxRangeMaxN = 1 << 27
+
+// rangeBigEnds returns r's Integer endpoints as big.Ints, with lo nil for a
+// beginless range. ok is false if either present endpoint is not an Integer.
+func rangeBigEnds(r *object.Range) (lo, hi *big.Int, ok bool) {
+	if hi, ok = toBigInt(r.Hi); !ok {
+		return nil, nil, false
+	}
+	if object.IsNil(r.Lo) {
+		return nil, hi, true
+	}
+	if lo, ok = toBigInt(r.Lo); !ok {
+		return nil, nil, false
+	}
+	return lo, hi, true
+}
+
+func toBigInt(v object.Value) (*big.Int, bool) {
+	switch n := v.(type) {
+	case object.Integer:
+		return big.NewInt(int64(n)), true
+	case *object.Bignum:
+		return new(big.Int).Set(n.I), true
+	}
+	return nil, false
 }
 
 func rangeInts(r *object.Range) (lo, hi int64, ok bool) {
