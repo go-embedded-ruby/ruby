@@ -1420,7 +1420,21 @@ func (c *Compiler) compileCall(v *ast.Call) {
 	// send. The parser emits a Call (not a VarRef) for an identifier whose
 	// assignment it never saw — which is exactly how an eval'd string references
 	// the binding locals seeded into this scope.
-	if v.Recv == nil && v.Block == nil && len(v.Args) == 0 {
+	//
+	// ⛔ !v.Paren, because PARENTHESES SETTLE IT. `foobar()` is `fcall paren_args`
+	// (parse.y-ruby_4_0:3572-3577, 5242-5248), which builds NEW_FCALL and never
+	// consults the local table: a local named foobar does not shadow a method
+	// foobar at a call written with parentheses. Without this conjunct
+	//
+	//	foobar = 100
+	//	def foobar; 200; end
+	//	foobar    # => 100, the local
+	//	foobar()  # => 100 as well, and MRI says 200
+	//
+	// and the read silently wins over the method for every name a scope happens
+	// to have assigned. The same bit already gates the vcall flag thirty lines
+	// below, quoting the same productions — it was read there and not here.
+	if v.Recv == nil && v.Block == nil && len(v.Args) == 0 && !v.Paren {
 		if depth, slot, ok := b.resolve(v.Name); ok {
 			b.emit(bytecode.OpGetLocal, slot, depth)
 			return

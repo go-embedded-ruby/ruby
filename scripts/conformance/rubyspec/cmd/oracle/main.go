@@ -120,6 +120,21 @@ func main1(args []string, out, errOut io.Writer) int {
 	}
 	fmt.Fprintf(out, "=== the engines DISAGREED ===\n")
 	for _, r := range runs[1:] {
+		// ⛔ An engine that AGREES with the reference is named as agreeing, not
+		// handed to differences() to describe nothing. The shape this tool is
+		// built for is three engines — reference, control, treatment — where the
+		// whole question is WHICH of the two matches the reference, and a line
+		// reading "nothing" under a DISAGREED heading answers it backwards.
+		//
+		// differences() has carried a sentinel for this case since it was
+		// written ("a defect in this tool, not an agreement"). It was right, and
+		// a sentence that names a defect is not a fix for it: the sentinel went
+		// on printing for two years of use. It stays below as an assertion that
+		// this branch is the only way here.
+		if sameAnswer(runs[0], r) {
+			fmt.Fprintf(out, "  %s vs %s: AGREES, byte for byte\n", runs[0].engine, r.engine)
+			continue
+		}
 		fmt.Fprintf(out, "  %s vs %s: %s\n", runs[0].engine, r.engine, differences(runs[0], r))
 	}
 	return 1
@@ -180,11 +195,19 @@ func report(w io.Writer, r run) {
 	}
 }
 
+// sameAnswer is the whole notion of agreement: the same exit status and the
+// same bytes on both streams. It is ONE definition because a pairwise check
+// that drifted from the all-engines check could report "the engines DISAGREED"
+// and then name every pair as agreeing.
+func sameAnswer(a, b run) bool {
+	return a.status == b.status &&
+		bytes.Equal(a.stdout, b.stdout) &&
+		bytes.Equal(a.stderr, b.stderr)
+}
+
 func agreed(runs []run) bool {
 	for _, r := range runs[1:] {
-		if r.status != runs[0].status ||
-			!bytes.Equal(r.stdout, runs[0].stdout) ||
-			!bytes.Equal(r.stderr, runs[0].stderr) {
+		if !sameAnswer(runs[0], r) {
 			return false
 		}
 	}

@@ -85,6 +85,19 @@ func TestOracleComparesEngines(t *testing.T) {
 		{"stderr diverges", []string{quiet, noisy}, 1, "stderr 0 vs 19 bytes"},
 		{"status diverges", []string{quiet, failing}, 1, "exit status 0 vs 1"},
 		{"one engine only", []string{quiet}, 0, "exit status: 0"},
+
+		// ⛔ THE SHAPE THIS TOOL IS FOR: reference, control, treatment — where the
+		// whole question is WHICH of the two agrees with the reference. The
+		// agreeing pair must be NAMED as agreeing. It used to be handed to
+		// differences(), which had nothing to describe and said so:
+		//
+		//     ruby vs rbgo-fixed: nothing — which is a defect in this tool
+		//
+		// under a heading reading "the engines DISAGREED" — the answer backwards,
+		// on the line that carries the result. Found 2026-11-05 while measuring a
+		// compiler fix, where the treatment was the engine that agreed.
+		{"the engine that agrees is named as agreeing",
+			[]string{quiet, noisy, alsoQuiet}, 1, "AGREES, byte for byte"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var out, errOut bytes.Buffer
