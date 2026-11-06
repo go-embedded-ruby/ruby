@@ -1747,6 +1747,31 @@ func (p *Proc) arityVal() int {
 
 // toBlock coerces a &block-pass value into a *Proc: nil for nil, the Proc
 // itself, else whatever its to_proc returns (which must be a Proc).
+//
+// ⛔ EVERY FAILURE HERE IS A TypeError, NEVER A NoMethodError, and MRI has two
+// different messages for the two ways it can fail. vm_to_proc (vm_args.c at
+// v4.0.9) looks the method up FIRST and branches on whether it found one:
+//
+//	me = rb_callable_method_entry_with_refinements(CLASS_OF(proc), idTo_proc, NULL);
+//	if (me) { b = rb_vm_call0(…); }        // call it, then check the result
+//	else    { /* NOTE: calling method_missing */
+//	          b = rb_check_convert_type_with_id(proc, T_DATA, "Proc", idTo_proc); }
+//
+//	rb_raise(rb_eTypeError, "can't convert %"PRIsVALUE" to Proc "
+//	                        "(%"PRIsVALUE"#to_proc gives %"PRIsVALUE")", …)
+//	rb_raise(rb_eTypeError, "no implicit conversion of %s into Proc", …)
+//
+// This used to reach `to_proc` through vm.send unconditionally, so an object
+// with no to_proc at all raised NoMethodError — a class MRI has never used
+// here: 2.6.10 already answered TypeError ("wrong argument type Object
+// (expected Proc)"). What 4.0 changed is the WORDING, not the class.
+//
+// ⛔ The predicate is a method-entry lookup and NOT respond_to?. A to_proc
+// reachable only through a custom method_missing works in MRI, with or without
+// respond_to_missing? — measured on 4.0.7, and it already worked here, so
+// gating on respondsToDynamic would have broken a case that was right.
+// rb_check_funcall calls method_missing when it is overridden and gives up
+// when it is still BasicObject's, which is what the owner check below asks.
 func (vm *VM) toBlock(v object.Value) *Proc {
 	switch p := v.(type) {
 	case object.Nil:
@@ -1754,10 +1779,16 @@ func (vm *VM) toBlock(v object.Value) *Proc {
 	case *Proc:
 		return p
 	default:
+		if vm.findMethod(v, "to_proc") == nil {
+			if mm := vm.findMethod(v, "method_missing"); mm == nil || mm.owner == vm.cBasicObject {
+				raise("TypeError", "no implicit conversion of %s into Proc", vm.classOf(v).name)
+			}
+		}
 		conv := vm.send(v, "to_proc", nil, nil)
 		cp, ok := conv.(*Proc)
 		if !ok {
-			raise("TypeError", "no implicit conversion of %s into Proc", vm.classOf(v).name)
+			raise("TypeError", "can't convert %s to Proc (%s#to_proc gives %s)",
+				vm.classOf(v).name, vm.classOf(v).name, vm.classOf(conv).name)
 		}
 		return cp
 	}
