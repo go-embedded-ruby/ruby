@@ -195,6 +195,39 @@ func (vm *VM) exceptionObject(e RubyError) object.Value {
 		cls = vm.consts["StandardError"].(*RClass)
 	}
 	obj := &RObject{class: cls, ivars: map[string]object.Value{"@message": object.NewString(e.Message)}}
+	// ⛔ The cause of an OBJECTLESS internal raise — `raise("TypeError", ...)`,
+	// the Go helper at vm.go:55, which panics with a RubyError STRUCT and so has
+	// nothing to stamp until here. An internal raise that carries data builds its
+	// object up front and is stamped at the raise instead (raiseWithIvars).
+	//
+	// MRI's exc_setup_message (eval.c at v4.0.9) takes the cause from
+	// get_ec_errinfo(ec) when none was given, and exc_setup_cause skips a
+	// self-cause; autoCause already encodes both, plus "an explicit cause wins".
+	//
+	// ⛔ THE CALLER'S ORDER IS WHAT MAKES THIS $! AND NOT THIS EXCEPTION. The
+	// rescue path reads
+	//
+	//	exc := vm.exceptionObject(rerr)
+	//	vm.curExc = exc
+	//
+	// so curExc here is still the exception whose rescue body raised this one.
+	// Moving the assignment above the call would make every such exception its
+	// own cause, which autoCause would then correctly refuse — and the chain
+	// would silently be nil again.
+	//
+	// ⛔ Known limit, stated rather than hidden: on THIS path the object is built
+	// when the exception is RESCUED, not when it is raised, so the cause is $! as
+	// of the rescue. The two differ only for an exception that unwinds past a
+	// frame restoring $! before any handler builds the object; for every case a
+	// program can observe #cause on, it has been rescued and the two agree.
+	//
+	// ⛔ BOTH STAMPS ARE LOAD-BEARING AND THE PARTITION IS EXACT, which is the
+	// check a two-site fix needs — a second stamp that changed nothing would be
+	// a rule nobody authorised. Measured by disabling each in turn against
+	// TestAnInternalRaiseCarriesTheHandledExceptionAsItsCause: without
+	// raiseWithIvars' stamp the four object-carrying rows fail and the two
+	// objectless ones pass; without this one, exactly the other two fail.
+	vm.autoCause(obj)
 	return vm.captureBacktrace(obj)
 }
 

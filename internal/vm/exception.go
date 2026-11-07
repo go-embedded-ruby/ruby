@@ -375,6 +375,15 @@ func (vm *VM) raiseWithIvars(class, msg string, ivars map[string]object.Value) {
 		}
 	}
 	obj := &RObject{class: cls, ivars: iv, ivarOrder: order}
+	// ⛔ The cause is stamped HERE, at the raise, which is where MRI takes it
+	// (exc_setup_message reads get_ec_errinfo(ec) when no cause was given,
+	// eval.c at v4.0.9). Kernel#raise reaches applyRaiseCause with the object it
+	// was handed; this is the other door — every internal raise that carries
+	// data, so NoMethodError and NameError from the dispatcher included, and
+	// language/send_spec.rb asserts $! as the cause of both.
+	//
+	// autoCause already refuses a self-cause and leaves an explicit cause alone.
+	vm.autoCause(obj)
 	panic(vm.excError(vm.captureBacktrace(obj)))
 }
 
