@@ -476,7 +476,19 @@ func (vm *VM) registerDirInstance(cDir *RClass) {
 
 // osUserHomeDir is a seam over os.UserHomeDir so the no-HOME error path is
 // testable without manipulating the process environment.
-var osUserHomeDir = os.UserHomeDir
+// ⛔ os.UserHomeDir CANNOT EXPRESS THE RULE, which is why this is LookupEnv.
+// MRI's rb_default_home_dir branches on `if (!dir)` — getenv returning NULL —
+// so an empty HOME is a VALUE and only an ABSENT one reaches the passwd
+// database. os.UserHomeDir reports an error for both, so it folded the two
+// together and `HOME=""` took the fallback. Measured on 4.0.7:
+//
+//	HOME=""                Dir.home -> ""                 expand_path("~") -> ArgumentError: non-absolute home
+//	HOME="relative/home"   Dir.home -> "relative/home"    expand_path("~") -> ArgumentError: non-absolute home
+//	HOME unset             Dir.home -> the passwd home    expand_path("~") -> the passwd home
+//
+// So Dir.home answers getenv verbatim — empty or relative, unchecked — and
+// expand_path is the one that additionally demands an absolute path.
+var osLookupHome = func() (string, bool) { return os.LookupEnv("HOME") }
 
 // osCurrentUserHome is a seam over the passwd-database lookup of the current
 // user's home directory (getpwuid), used as Dir.home's fallback when $HOME is
@@ -494,7 +506,9 @@ var osCurrentUserHome = func() (string, error) {
 // and falling back to the passwd database when it is unset (MRI's
 // rb_default_home_dir), raising ArgumentError only when neither yields a home.
 func dirHomeStr() string {
-	if h, err := osUserHomeDir(); err == nil && h != "" {
+	// Set — even to "" or to a relative path — is answered verbatim: the
+	// absoluteness test belongs to expand_path, not here (see osLookupHome).
+	if h, ok := osLookupHome(); ok {
 		return h
 	}
 	if h, err := osCurrentUserHome(); err == nil && h != "" {
