@@ -122,7 +122,26 @@ func TestArrayInitialize(t *testing.T) {
 		{`begin; Array.new(1,2,3); rescue ArgumentError=>e; puts e.message; end`,
 			"wrong number of arguments (given 3, expected 0..2)\n"},
 		{`begin; Array.new(-1); rescue ArgumentError=>e; puts e.message; end`, "negative array size\n"},
-		{`begin; Array.new(10**40); rescue ArgumentError=>e; puts e.message; end`, "array size too big\n"},
+
+		// ⛔ MOVED, not relaxed. This row read
+		//
+		//	Array.new(10**40)  rescue ArgumentError  ->  "array size too big"
+		//
+		// which is rbgo's own divergence written down as an expectation, under a
+		// comment saying "Verified against MRI Ruby 4.0". MRI raises RangeError
+		// there: rb_ary_new2 takes a long, so NUM2LONG runs BEFORE any size test,
+		// and ary_new's ArgumentError is only for a value that converted and is
+		// still out of range (#901). `rescue RangeError` could not catch it.
+		//
+		// The boundary is exactly LONG_MAX, measured on 4.0.7 — both sides are
+		// asserted here so the row says WHERE the line is, not just that there
+		// is one:
+		{`begin; Array.new(10**40); rescue RangeError=>e; puts e.message; end`,
+			"bignum too big to convert into 'long'\n"},
+		{`begin; Array.new(2**63); rescue RangeError=>e; puts e.message; end`,
+			"bignum too big to convert into 'long'\n"},
+		{`begin; Array.new(2**63-1); rescue ArgumentError=>e; puts e.message; end`,
+			"array size too big\n"},
 		{`p(Array.private_instance_methods.include?(:initialize))`, "true\n"},
 	})
 }

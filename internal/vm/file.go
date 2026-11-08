@@ -1004,11 +1004,24 @@ func expandTildePath(p string) string {
 	} else {
 		name, tail = rest[:slash], rest[slash:]
 	}
-	if name == "" { // "~" or "~/..." -> $HOME
-		home := os.Getenv("HOME")
-		if home == "" {
-			raise("ArgumentError", "couldn't find HOME environment -- expanding '~'")
-		}
+	if name == "" { // "~" or "~/..." -> $HOME, else the passwd database
+		// ⛔ $HOME ALONE IS NOT THE RULE. MRI's rb_default_home_dir falls back to
+		// the current user's passwd entry when HOME is unset, so expand_path("~")
+		// answers rather than raising — measured on 4.0.7:
+		//
+		//	ENV["HOME"] = "/tmp/zz"  ->  "/tmp/zz"            (read LIVE, not at startup)
+		//	ENV.delete("HOME")       ->  "/Users/…"           == Etc.getpwuid(Process.uid).dir
+		//
+		// The second line is why this used to raise (#901). The first is the
+		// control that makes the fallback attributable: HOME is consulted every
+		// call, so answering after a delete is the passwd lookup and not a value
+		// captured when the process started.
+		//
+		// ⛔ dirHomeStr (dir.go) already encoded all of this for Dir.home — $HOME,
+		// then getpwuid, raise only when neither yields one. This function kept
+		// its own HOME-only copy, so Dir.home was right and expand_path was
+		// wrong for the same input. One definition, two callers.
+		home := dirHomeStr()
 		if !isAbsPath(toSlash(home)) {
 			raise("ArgumentError", "non-absolute home")
 		}
