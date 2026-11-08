@@ -3114,8 +3114,25 @@ func (vm *VM) bootstrap() {
 				}
 			}
 		}
+		// ⛔ A size that does not fit a C long fails the CONVERSION, not the size
+		// test, and the two are different classes. MRI's rb_ary_new2 takes a long,
+		// so NUM2LONG runs first and raises RangeError; ary_new's ArgumentError
+		// ("array size too big") is only for a value that converted and is still
+		// out of range. This said ArgumentError, so `rescue RangeError` could not
+		// catch it (#901).
+		//
+		// Measured on 4.0.7, and the boundary is exactly LONG_MAX:
+		//
+		//	2**62     ArgumentError: array size too big
+		//	2**63-1   ArgumentError: array size too big
+		//	2**63     RangeError: bignum too big to convert into 'long'
+		//	10**40    RangeError
+		//
+		// Array#first already had this right 200 lines below (builtins.go:3331)
+		// with the identical *object.Bignum check — one idiom, applied in one of
+		// the two places that needed it.
 		if _, isBig := args[0].(*object.Bignum); isBig {
-			raise("ArgumentError", "array size too big")
+			raise("RangeError", "bignum too big to convert into 'long'")
 		}
 		n := vm.toIntCoerce(args[0])
 		if n < 0 {
