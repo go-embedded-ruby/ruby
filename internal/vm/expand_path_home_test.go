@@ -6,6 +6,7 @@ package vm
 
 import (
 	"os"
+	"runtime"
 	"testing"
 )
 
@@ -48,54 +49,94 @@ rescue => e
   puts "#{e.class}: #{e.message}"
 end
 `
-	for _, tc := range []struct{ name, src, want string }{
-		{"an empty HOME is a non-absolute home, not an absent one",
-			pre + `ENV["HOME"] = ""
-show`, `ArgumentError: non-absolute home`},
-
-		{"a relative HOME is rejected the same way",
-			pre + `ENV["HOME"] = "relative/home"
-show`, `ArgumentError: non-absolute home`},
-
-		{"an absolute HOME is used",
-			pre + `ENV["HOME"] = "/an/absolute/home"
-show`, `"/an/absolute/home"`},
-
-		// ⛔ The #901 row: this raised before.
-		{"an unset HOME falls back to the passwd home rather than raising",
-			`require "etc"
+	// ⛔ posix marks the rows that name the FALLBACK'S DESTINATION. The passwd
+	// database is a POSIX concept and Process.uid is -1 on Windows, where
+	// Etc.getpwuid(-1) raises "can't find user for -1" — which is how CI failed
+	// this test, not how the fix failed. MRI's chain differs there too (HOME,
+	// then HOMEDRIVE+HOMEPATH, then USERPROFILE), so what an absent HOME
+	// resolves TO is not assertable cross-platform; that an absent HOME does not
+	// RAISE is, and that row is not marked. file_path_internal_test.go marks its
+	// ~user row the same way, for the same reason.
+	for _, tc := range []struct {
+		name, src, want string
+		posix           bool
+	}{
+		{
+			name: "an empty HOME is a non-absolute home, not an absent one",
+			src: pre + `ENV["HOME"] = ""
+show`,
+			want: `ArgumentError: non-absolute home`,
+		},
+		{
+			name: "a relative HOME is rejected the same way",
+			src: pre + `ENV["HOME"] = "relative/home"
+show`,
+			want: `ArgumentError: non-absolute home`,
+		},
+		{
+			name: "an absolute HOME is used",
+			src: pre + `ENV["HOME"] = "/an/absolute/home"
+show`,
+			want: `"/an/absolute/home"`,
+		},
+		// ⛔ The #901 row, in the form that holds on every platform: an absent
+		// HOME must not RAISE. Where it resolves to is the posix row below.
+		{
+			name: "an unset HOME does not raise",
+			src: `ENV.delete("HOME")
+p File.expand_path("~").is_a?(String)`,
+			want: `true`,
+		},
+		{
+			name: "an unset HOME resolves to the passwd home",
+			src: `require "etc"
 ENV.delete("HOME")
-p File.expand_path("~") == Etc.getpwuid(Process.uid).dir`, `true`},
-
-		{"the tail is kept across the fallback",
-			`ENV.delete("HOME")
-p File.expand_path("~/x").end_with?("/x")`, `true`},
-
+p File.expand_path("~") == Etc.getpwuid(Process.uid).dir`,
+			want:  `true`,
+			posix: true,
+		},
+		{
+			name: "the tail is kept across the fallback",
+			src: `ENV.delete("HOME")
+p File.expand_path("~/x").end_with?("/x")`,
+			want:  `true`,
+			posix: true,
+		},
 		// ⛔ HOME is read on EVERY call, not captured at startup. Without this
-		// control the row above cannot be attributed to the passwd lookup: a
+		// control the fallback row cannot be attributed to the passwd lookup: a
 		// value remembered from process start would answer identically.
-		{"HOME is consulted live, so the fallback is attributable",
-			pre + `ENV["HOME"] = "/first/home"
+		{
+			name: "HOME is consulted live, so the fallback is attributable",
+			src: pre + `ENV["HOME"] = "/first/home"
 show
 ENV["HOME"] = "/second/home"
-show`, "\"/first/home\"\n\"/second/home\""},
-
+show`,
+			want: "\"/first/home\"\n\"/second/home\"",
+		},
 		// Dir.home answers getenv verbatim — it does NOT apply expand_path's
 		// absoluteness test. Same helper, different contract.
-		{"Dir.home answers a set HOME verbatim, empty included",
-			`ENV["HOME"] = ""
+		{
+			name: "Dir.home answers a set HOME verbatim, empty included",
+			src: `ENV["HOME"] = ""
 p Dir.home
 ENV["HOME"] = "relative/home"
-p Dir.home`, "\"\"\n\"relative/home\""},
-
-		{"~user is unaffected",
-			`begin
+p Dir.home`,
+			want: "\"\"\n\"relative/home\"",
+		},
+		{
+			name: "~user is unaffected",
+			src: `begin
   File.expand_path("~no_such_user_rbgo_xyz_123")
 rescue ArgumentError => e
   puts e.message
-end`, `user no_such_user_rbgo_xyz_123 doesn't exist`},
+end`,
+			want: `user no_such_user_rbgo_xyz_123 doesn't exist`,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.posix && runtime.GOOS == "windows" {
+				t.Skip("the passwd database (Process.uid, Etc.getpwuid) is POSIX-only")
+			}
 			if got := runSrc(t, tc.src); got != tc.want {
 				t.Errorf("%s\n got %q\nwant %q", tc.src, got, tc.want)
 			}

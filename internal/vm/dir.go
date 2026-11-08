@@ -488,7 +488,25 @@ func (vm *VM) registerDirInstance(cDir *RClass) {
 //
 // So Dir.home answers getenv verbatim — empty or relative, unchecked — and
 // expand_path is the one that additionally demands an absolute path.
-var osLookupHome = func() (string, bool) { return os.LookupEnv("HOME") }
+// ⛔ AND IT STILL HAS TO BE os.UserHomeDir WHEN HOME IS ABSENT, because on
+// Windows HOME is usually not the variable: MRI consults HOME, then
+// HOMEDRIVE+HOMEPATH, then USERPROFILE (file.c rb_default_home_dir), and
+// os.UserHomeDir is exactly that chain per platform. A first version of this
+// read HOME alone and so would have sent a Windows user with no HOME to the
+// passwd lookup instead of USERPROFILE — a regression invisible on darwin,
+// where the two agree.
+//
+// The distinction LookupEnv adds is only about HOME being SET-BUT-EMPTY, which
+// is the one case os.UserHomeDir cannot report separately from absent.
+var osLookupHome = func() (string, bool) {
+	if h, ok := os.LookupEnv("HOME"); ok {
+		return h, true
+	}
+	if h, err := os.UserHomeDir(); err == nil && h != "" {
+		return h, true
+	}
+	return "", false
+}
 
 // osCurrentUserHome is a seam over the passwd-database lookup of the current
 // user's home directory (getpwuid), used as Dir.home's fallback when $HOME is
