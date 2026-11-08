@@ -511,12 +511,41 @@ and exit 0.
 
 ## Caveats
 
-The shim is not full MSpec: a few matchers (`complain`, `output`,
-`be_computed_by`, `ruby_exe`, some `argf`/IO helpers) are stubbed, so those
-examples count as skipped rather than passing. The measured totals are therefore
-a conservative lower bound on rbgo's true conformance — which is exactly what a
-ratchet should be.
+The shim is not full MSpec. What is genuinely stubbed raises `SpecSkip`, so
+those examples count as **skipped** rather than passing, and the measured totals
+are a conservative lower bound on rbgo's true conformance — which is exactly
+what a ratchet should be:
+
+| stubbed (raises `SpecSkip`) | where |
+|---|---|
+| `ruby_exe` — no subprocess | `spec_helper.rb:882` |
+| `output_to_fd` — no real fd redirection | `spec_helper.rb:280` |
+| some `argf`/IO helpers | — |
+
+⛔ **`complain`, `output` and `be_computed_by` are NOT stubbed**, and this
+paragraph said they were until 2026-11-08. They are implemented:
+`ComplainMatcher` at `spec_helper.rb:204-249` with a real `$stderr` capture
+(`complain` wired at `:249`), `OutputMatcher` at `:254-279`, and
+`be_computed_by` at `:199`.
+
+**The error ran in the direction that matters.** An example using a stubbed
+matcher skips and makes the total too LOW; one using `complain` **runs**, and
+when the behaviour is missing it **fails** and counts against the ratchet. A
+reader trusting the old sentence would have looked for such examples among the
+skips, where they are not. Found through
+`core/enumerable/to_set_spec.rb`, which asserts a 4.0 deprecation warning rbgo
+does not emit (issue #909) and reports
+
+```text
+Enumerable#to_set | instantiates an object of provided as the first argument set class
+    expected a warning matching /Enumerable#to_set/, got ""
+```
+
+A skipped example cannot report that, which is how the claim was caught: the
+output contradicted it rather than anyone re-reading the shim.
 
 `cmd/phantom` is the other half of that honesty: the stubbed matchers make the
-total too LOW, and a pass bought by an absence would make it too high. Neither is
-visible in the number itself.
+total too LOW, and a pass bought by an absence would make it too high. Neither
+is visible in the number itself — and note that its rationale quotes the
+sentence corrected above, so "too LOW" holds for `ruby_exe` and `output_to_fd`
+and not for the three matchers that do run.
