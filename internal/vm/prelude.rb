@@ -1560,8 +1560,25 @@ class Set
   end
 
   # to_set returns self (a Set is already a Set).
-  def to_set
-    self
+  # Set#to_set returns SELF only for a plain Set asked with no arguments; a
+  # subclass, an explicit klass, extra arguments or a block all build a new one
+  # (MRI's set.rb: `return self if instance_of?(Set) && klass == Set &&
+  # block.nil? && args.empty?`).
+  #
+  # ⛔ This was `def to_set; self; end`, which was INVISIBLE while every Set
+  # reported Set: returning self then answered Set whatever the receiver was, so
+  # it matched MRI by accident. Giving a subclass its own class (#903) made that
+  # accident a divergence — `Sub[1,2].to_set` answers Sub where MRI answers Set — so
+  # the guard is part of that change, not a separate cleanup. Measured on 4.0.7:
+  #
+  #	Set[1,2].to_set.equal?(s)   true     Sub[1,2].to_set.class        Set
+  #	Set[1,2].to_set(Sub).class  Sub      Sub[1,2].to_set.equal?(sub)  false
+  #
+  # It also closes an arity gap the no-argument form had: `to_set(Sub)` raised
+  # ArgumentError (given 1, expected 0).
+  def to_set(klass = Set, *args, &block)
+    return self if instance_of?(Set) && klass == Set && block.nil? && args.empty?
+    klass.new(self, *args, &block)
   end
 end
 
