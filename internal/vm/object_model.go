@@ -1255,6 +1255,13 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		// Logger::Formatter, whose #call renders one line through the library.
 		return vm.cLoggerFormatter
 	case *Set:
+		// A Set subclass instance carries its own class; nil is Set itself.
+		// Disabling this line fails 8 of the 12 rows of
+		// TestASetSubclassReportsItsOwnClass — see that test for which 4 do not,
+		// and why.
+		if x.cls != nil {
+			return x.cls
+		}
 		return vm.cSet
 	case *PrettyPrint:
 		return vm.cPrettyPrint

@@ -25,6 +25,16 @@ import (
 type Set struct {
 	h         *object.Hash // member -> true, keyed by the member's #hash/#eql?
 	iterating int          // >0 while an #each is in progress (structural-mod guard)
+	// cls is the class this Set reports, so an instance of a Set SUBCLASS can
+	// answer its own class. nil means Set itself, which keeps every existing
+	// allocation correct without touching it.
+	//
+	// ⛔ WITHOUT THIS FIELD THE CLASS IS UNREPRESENTABLE, not merely discarded.
+	// #903 blamed Set.new and Set.[] for ignoring their receiver; they do, and
+	// that was not the cause — classOf had nowhere to read a class from and
+	// answered vm.cSet for every *Set, so honouring the receiver in those two
+	// constructors would have changed nothing observable.
+	cls *RClass
 }
 
 // checkIter raises the RuntimeError MRI raises when a Set is structurally
@@ -63,6 +73,17 @@ func (s *Set) repr() string {
 // newSet builds an empty Ruby Set wrapper over a fresh content-keyed Hash. It is
 // also the constructor other bindings (e.g. redis) use to surface a Ruby Set.
 func newSet() *Set { return &Set{h: object.NewHash()} }
+
+// setSubclassOf is the class a Set allocated on behalf of recv must report:
+// nil when recv is Set itself (or is not a class at all), so every existing
+// allocation keeps answering Set without carrying a pointer for it.
+func setSubclassOf(vm *VM, recv object.Value) *RClass {
+	cls, ok := recv.(*RClass)
+	if !ok || cls == vm.cSet {
+		return nil
+	}
+	return cls
+}
 
 // each calls fn for every member (a Ruby value) in insertion order, in a single
 // pass over the backing Hash's key slice.
@@ -141,16 +162,22 @@ func (vm *VM) registerSet() {
 	// Set.new(enumerable=nil, &block): allocate an empty Set, then run the
 	// (prelude, private) #initialize which seeds it via the each_entry/each
 	// protocol and applies the block, exactly like MRI's Class#new.
+	// ⛔ Both constructors read their RECEIVER, because they are inherited: a
+	// subclass calling Set.new or Sub[…] arrives here with the subclass as the
+	// receiver, and MRI allocates with rb_obj_class(self). setClassOf keeps the
+	// nil-means-Set convention so `Set.new` itself allocates exactly as before.
 	vm.cSet.smethods["new"] = &Method{name: "new", owner: vm.cSet,
-		native: func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
+		native: func(vm *VM, recv object.Value, args []object.Value, blk *Proc) object.Value {
 			s := newSet()
+			s.cls = setSubclassOf(vm, recv)
 			vm.send(s, "initialize", args, blk)
 			return s
 		}}
 	// Set[a, b, …] builds a Set from its arguments (MRI's Set.[]).
 	vm.cSet.smethods["[]"] = &Method{name: "[]", owner: vm.cSet,
-		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		native: func(vm *VM, recv object.Value, args []object.Value, _ *Proc) object.Value {
 			s := newSet()
+			s.cls = setSubclassOf(vm, recv)
 			for _, a := range args {
 				s.add(a)
 			}
@@ -222,8 +249,12 @@ func (vm *VM) registerSet() {
 
 	// dup / clone: a shallow copy with the same members, insertion order and
 	// compare_by_identity flag (ReplaceWith carries the flag across).
+	// dup/clone keep the receiver's class, as MRI's rb_obj_dup does — and that
+	// is also what carries it through `|`, which the prelude writes as
+	// `n = dup; …` (prelude.rb:1247).
 	dupFn := func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		n := newSet()
+		n.cls = self(v).cls
 		n.h.ReplaceWith(self(v).h)
 		return n
 	}
