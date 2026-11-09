@@ -519,8 +519,17 @@ what a ratchet should be:
 | stubbed (raises `SpecSkip`) | where |
 |---|---|
 | `ruby_exe` — no subprocess | `spec_helper.rb:882` |
+| `ruby_cmd` — no subprocess command line | `spec_helper.rb:883` |
 | `output_to_fd` — no real fd redirection | `spec_helper.rb:280` |
-| some `argf`/IO helpers | — |
+
+⛔ **That table is the whole list, and it is now derived rather than retyped.**
+It had a fourth row, "some `argf`/IO helpers", with no `where` — and nothing in
+the shim raises `SpecSkip` for them; the empty cell was the tell. It also
+omitted `ruby_cmd`, one line below the `ruby_exe` it names. A census that is
+maintained by hand is a census that drifts in both directions at once, so
+`TestReadmeStubbedHelpersMatchTheShim` (repository root) reads every
+`SpecSkip` raise out of `spec_helper.rb` and fails unless this table and the
+top-level README name exactly that set.
 
 ⛔ **`complain`, `output` and `be_computed_by` are NOT stubbed**, and this
 paragraph said they were until 2026-11-08. They are implemented:

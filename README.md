@@ -173,19 +173,26 @@ counters — agreed on every one of the 2,206 per-file records except
 `core/kernel/exit_spec.rb`, `core/mutex/lock_spec.rb`,
 `core/process/exit_spec.rb`, `core/string/unpack/carret_spec.rb`.
 
-**What this number is *not*.** It is *not* "rbgo implements 93 % of Ruby", and
+**What this number is *not*.** It is *not* "rbgo implements 95 % of Ruby", and
 there is no honest way to turn it into a percentage of the language:
 
-- **Only `language/` and `core/` are swept.** ruby/spec's `library/`, `optional/`
-  and `security/` trees are **not run at all**. Most of what people mean by "the
-  standard library" is outside this measurement. (rbgo does bind a large set of
-  stdlib and gem replacements — see *Supported today* — but their conformance is
-  not what this figure reports.)
-- **The shim is not MSpec.** A few matchers (`be_computed_by`, `ruby_exe`, some
-  `argf`/IO helpers) are stubbed, so the examples that need them are counted as
-  **skipped**, not passed. That makes the total a conservative lower bound.
-- **Skips are outside the ratio.** The 93.3 % divides passes by the examples that
-  ran; the 477 skips and the 10 unreadable files are in neither column.
+- **Only `language/` and `core/` are swept.** `run.sh` walks exactly those two
+  trees and no others (`scripts/conformance/rubyspec/run.sh:106`); ruby/spec's
+  `library/`, `optional/`, `command_line/` and `security/` trees are **not run
+  at all**. Most of what people mean by "the standard library" is outside this
+  measurement. (rbgo does bind a large set of stdlib and gem replacements — see
+  *Supported today* — but their conformance is not what this figure reports.)
+- **The shim is not MSpec.** Exactly three helpers are stubbed — `ruby_exe` and
+  `ruby_cmd` (`spec_helper.rb:882-883`) and `output_to_fd` (`:280`) — so the
+  examples that need them are counted as **skipped**, not passed. That makes the
+  total a conservative lower bound. `complain`, `output` and `be_computed_by`
+  are **implemented**; this list claimed otherwise until
+  [#911](https://github.com/go-embedded-ruby/ruby/pull/911) read the shim, so
+  `TestReadmeStubbedHelpersMatchTheShim` now derives it from `spec_helper.rb`
+  instead of trusting it.
+- **Skips are outside the ratio.** The 95.0 % divides passes by the examples that
+  ran; the 491 skips and the 4 files that produced no result are in neither
+  column.
 - **An "example" is not a feature.** Examples are not weighted, so a heavily
   specified method contributes far more than a rarely used one.
 
