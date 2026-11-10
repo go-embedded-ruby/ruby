@@ -151,10 +151,39 @@ from the shared digest engine *and* Xoshiro256++/dSFMT from the shared
 bit-generator library — digest is on the critical path of a property that looks
 like it belongs entirely to random.
 
-That is also where the first condition above stops being a Ruby concern: the
-measured 42-example gap in `library/digest` sits underneath julia's `rand`
-reproducibility, not beside it. Extract digest with its baseline stated, or
-julia inherits a deficit it has no way to see.
+**What stands:** extract digest with its baseline stated, **before or with**
+random, since julia's seeding depends on it.
+
+⛔ **What does not, and the measurement that settles it.** An earlier revision of
+this file said the 42-example `library/digest` gap "sits underneath julia's
+`rand` reproducibility". That was an overreach, caught by the go-embedded-julia
+session: julia's `Random` needs only SHA-256's **output bytes**, while the gap is
+measured through **Ruby's `Digest` API**, which stays in `go-ruby-digest`.
+Whether the two meet is a question about *which layer* the failing examples
+exercise — so it was measured rather than argued:
+
+| where the 42 missing examples are | count |
+|---|---:|
+| Ruby API with no algorithm at all (`hexencode` 5, `Digest::Instance` 4, `bubblebabble` 1) | 10 |
+| the *same assertion* failing identically for md5, sha1, sha256, sha384, sha512 (`#digest`, `#hexdigest`, `#equal?`, `#size`, `#update`, `.file`) | 32 |
+| an algorithm-specific divergence — one hash disagreeing where the others agree | **0** |
+
+The failing descriptions are the tell: `Digest::MD5#size | is an alias of
+Digest::MD5#length` and `Digest::SHA512#size | is an alias of
+Digest::SHA512#length` are the same Ruby aliasing fact asserted five times, not
+five wrong hashes. **Nothing in this gap implicates the hash bytes**, so it does
+not reach julia's `rand`.
+
+It would also not have been invisible if it did: go-embedded-julia holds `rand`
+to julia 1.12.6 as an oracle, so wrong SHA-256 bytes would show up as
+`rand` after `Random.seed!` diverging from julia, and its `SHA` stdlib is held
+to julia's SHA outputs the same way.
+
+**The lesson for every other extraction in this file:** a module-level
+conformance number is measured at the *module's* API, and an extraction moves
+only part of that module. State the baseline **broken down by algorithm and by
+layer — engine bytes versus the language's API** — or the number will be read as
+applying to the half that moved.
 
 ### R (go-embedded-r/r v0.14.1, R 4.6.2 as the oracle)
 
