@@ -509,6 +509,75 @@ unreadable result line, two result lines in one run, a missing or malformed
 population** — a mistyped `-dir` would otherwise print `0 files, no regressions`
 and exit 0.
 
+### ⛔ A hang is not an absence, and the report says which
+
+A row whose engine was stopped by `-timeout` reads
+
+```console
+library/net-ftp/put_spec.rb         39       0    -39  KILLED on timeout, the treatment
+```
+
+and the kill is reported **before** `DID NOT RUN`. The order is the whole point:
+a killed engine prints no `RBGO_RESULT` line either, so `ran` is false and the
+`DID NOT RUN` arms would otherwise claim every killed row — publishing a file
+the **clock** stopped as a file the engine could not **load**. Those call for
+opposite work: *the timeout is too short, or it hangs* against *this is
+unimplemented*.
+
+It did exactly that until 2026-11-10 (#915): `run()` returned a freshly parsed
+result, so `killed` was false on every row ever printed and this note was dead
+code. The documented way to judge a whole report — *grep it for `KILLED`; trust
+the table when the count is 0* — could only ever answer 0. The first sweep after
+the fix turned **75 files** from "unimplemented" into "hangs" (`Net::FTP` 39,
+`Net::HTTP` 27, `Socket` 8, `Timeout` 1 — issue #916).
+
+⛔ **Reports written before that commit cannot tell the two apart.**
+
+**Pick the timeout for the question.** For *did this regress*, give a file
+roughly 60× its usual work. For *does it hang or is it missing*, a SHORT budget
+is the better instrument: 20 s is already ~100× a normal spec file, anything
+past it is a hang by any definition, and the answer arrives in minutes. The
+first re-measurement of `net-ftp` at 300 s was still running after 77 minutes
+with nothing printed; at 20 s it answered in 13.
+
+### Control bytes never reach the report
+
+ruby/spec prints raw binary on purpose — zlib round-trips, `Net::HTTP` bodies,
+`String#unpack` — and the shim quotes an example's description verbatim into
+`RBGO_DETAIL`. Those bytes used to land in the report, and `file` then called it
+*"RAGE Package Format (RPF)"*: **grep skips a file it decides is binary**, so
+every search over it returned no output and exit 1, which reads exactly like
+"no matches". Three checks of one `library/` report were passed on that silence.
+`printable()` strips control bytes before parsing, keeping tab and newline
+because the format is built on them — the same guard `run.sh` has always had one
+layer out (`tr -d '\000'`).
+
+## Rolling a report up to the module — `cmd/specroll`
+
+specdelta answers per **file**. *"What is left to reach parity with MRI?"* is a
+question about **modules**, and one run of `library/` is 497 rows with 189
+moved — a shape no one reads by eye, and summarising it by eye is a count done
+by eye.
+
+```console
+$ go run ./scripts/conformance/rubyspec/cmd/specroll -depth 2 -top 5 parity-*.txt
+module                              files      MRI    rbgo     gap  unloadable (examples)
+library/net-ftp                        47      448       6     442  39 (388)
+library/net-http                      124      354      14     340  30 (75)
+library/matrix                         80      334     101     233
+library/bigdecimal                     41      298     118     180  2 (8)
+library/stringscanner                  33      215      61     154  3 (27)
+TOTAL                                 970     3676    1335    2341  152 (620)
+```
+
+It **checks its arithmetic against each report's own footer** and refuses when
+they disagree — a rollup is exactly where a dropped row is invisible, since the
+table still looks tidy and the only symptom is a total nobody re-derives. The
+invariant differs by report shape: a full report must match on all three
+numbers, a `-quiet` one only on the **delta**, since a file it omits contributes
+0 to it. It also keeps *behind* and *absent* in separate columns, and says so
+when a `-quiet` input makes the two count columns cover only the moved files.
+
 ## Caveats
 
 The shim is not full MSpec. What is genuinely stubbed raises `SpecSkip`, so
