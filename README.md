@@ -196,6 +196,37 @@ there is no honest way to turn it into a percentage of the language:
 - **An "example" is not a feature.** Examples are not weighted, so a heavily
   specified method contributes far more than a rarely used one.
 
+**What the unswept 42 % holds — measured once, 2026-11-10.** The trees above are
+not gated, but they have now been measured a single time, against MRI 4.0.7
+through the same shim, so the gap is a number rather than a guess
+(`cmd/specdelta` + `cmd/specroll`, corpus at the pinned `SPEC_SHA`, `c604cce1`):
+
+| | |
+| --- | --- |
+| spec files in the corpus | 3,814 — of which 2,206 are swept and 1,608 are not |
+| files where the two engines differ | 970 |
+| examples MRI passes in them / rbgo passes | 3,676 / 1,335 |
+| the gap | 2,341 |
+| files rbgo produces no result for | 152 — **75 of them hang**, the rest are genuine absences |
+
+Three readings matter more than the total:
+
+- **78 of the unswept files cannot be measured at all under this shim.** All 32
+  `command_line/` files are built on `ruby_exe`, and the 46 `optional/capi/`
+  files need a compiled C extension: **MRI itself scores 0** in them. That part
+  of the corpus needs harness work, not interpreter work.
+- **The largest single debt is a hang, not a missing feature.** `Net::FTP` alone
+  is 442 examples behind, and 39 of its 56 spec files have to be killed by the
+  clock on rbgo and none on MRI ([#916](https://github.com/go-embedded-ruby/ruby/issues/916)).
+- **The rest is concentrated:** `matrix` 233, `bigdecimal` 180, `stringscanner`
+  154, `date`+`datetime` 179, `zlib` 130, `stringio` 94, `openssl` 93. The
+  outright absences are small by comparison — `Coverage` 53, `StringScanner`'s
+  newer byte methods 27, four `CGI` escape files 19, `WeakRef` 9.
+
+⛔ This is **one dated run, and not a gate**: nothing re-measures it, so treat it
+as a map of where the work is rather than as a figure to quote. The swept
+`language/` + `core/` number above is the one CI enforces.
+
 **What CI guarantees is per file, not a total.** `BASELINE` records the passing
 count of each of the 2,206 spec files, and the run fails if any file passes
 fewer than its record or stops loading. There is no margin and no single number
