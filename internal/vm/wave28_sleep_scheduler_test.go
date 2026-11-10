@@ -71,8 +71,23 @@ Fiber.set_scheduler(S.new)
 		{sched + `Fiber.set_scheduler(nil); p [0, 1].include?(Fiber.new(blocking: false) { sleep(0.001) }.resume)`, "true\n"},
 
 		// rb_time_interval, numeric cases.
-		{`p sleep(0)`, "0\n"},
-		{`p sleep(0.001)`, "0\n"},
+		//
+		// ⛔ THE RESULT IS CLOCK-PHASE-DEPENDENT, SO IT IS ASSERTED AS A SET.
+		// rb_f_sleep brackets the wait with time(0), a clock of WHOLE seconds, so
+		// a sub-second sleep returns 0 or 1 depending on where in the current
+		// second it started — never on how long it actually slept. #723 measured
+		// that at ~0.1% and #724 converted the Rational case (line 130) and the
+		// scheduler case (line 71) to `[0, 1].include?`, but left these two
+		// asserting the literal. The 386 lane went red on `p sleep(0.001)` on
+		// 2026-11-10 (run 42855137957, `got="1" want="0"`) — the same defect
+		// reached through a sibling the fix did not visit.
+		//
+		// `sleep(0)` has the same mechanism with a much narrower window (no wait,
+		// only the gap between the two time(0) calls). It is written the same way
+		// anyway: a test whose correctness depends on the window being small is
+		// the kind that comes back.
+		{`p [0, 1].include?(sleep(0))`, "true\n"},
+		{`p [0, 1].include?(sleep(0.001))`, "true\n"},
 		{`begin; sleep(-1); rescue => e; p [e.class, e.message]; end`, "[ArgumentError, \"time interval must not be negative\"]\n"},
 		{`begin; sleep(-0.1); rescue => e; p [e.class, e.message]; end`, "[ArgumentError, \"time interval must not be negative\"]\n"},
 		{`begin; sleep(-Float::INFINITY); rescue => e; p [e.class, e.message]; end`, "[ArgumentError, \"time interval must not be negative\"]\n"},
