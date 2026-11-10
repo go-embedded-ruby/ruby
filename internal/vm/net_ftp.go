@@ -78,14 +78,14 @@ func (vm *VM) registerFTPErrors(netMod, std *RClass) {
 // the ensured-close block form.
 func (vm *VM) registerFTPClassMethods(ftp *RClass) {
 	newFn := func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		f := &ftpObj{cls: ftp, binary: true, passive: true}
+		f := newFTPObj(ftp)
 		vm.ftpInit(f, args)
 		return f
 	}
 	ftp.smethods["new"] = &Method{name: "new", owner: ftp, native: newFn}
 
 	ftp.smethods["open"] = &Method{name: "open", owner: ftp, native: func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
-		f := &ftpObj{cls: ftp, binary: true, passive: true}
+		f := newFTPObj(ftp)
 		vm.ftpInit(f, args)
 		if blk == nil {
 			return f
@@ -142,6 +142,15 @@ func (vm *VM) ftpApplyOpts(f *ftpObj, h *object.Hash, port int) (int, string, bo
 	if v, ok := ftpOptHash(h, "passive"); ok {
 		f.passive = v.Truthy()
 	}
+	// open_timeout and read_timeout are set from the options Hash exactly as
+	// given, nil included: `read_timeout: nil` is a request for no bound and
+	// must not fall back to the 60 s default.
+	if v, ok := ftpOptHash(h, "open_timeout"); ok {
+		f.openTimeout = v
+	}
+	if v, ok := ftpOptHash(h, "read_timeout"); ok {
+		f.readTimeout = v
+	}
 	if v, ok := ftpOptHash(h, "use_pasv_ip"); ok {
 		f.usePasvIP = v.Truthy()
 	}
@@ -175,8 +184,13 @@ func ftpOptHash(h *object.Hash, names ...string) (object.Value, bool) {
 // as welcome), and selects EPSV/EPRT when the connection is IPv6
 // (Net::FTP#connect).
 func (vm *VM) ftpConnect(f *ftpObj, host string, port int) {
-	conn, err := net.Dial("tcp", net.JoinHostPort(host, strconv.Itoa(port)))
+	// open_timeout bounds the dial. MRI's default is nil — an unbounded connect
+	// — and DialTimeout(0) is Go's spelling of the same thing, so the default
+	// path is unchanged and only an explicit setting bounds it.
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(host, strconv.Itoa(port)),
+		ftpTimeoutSeconds(f.openTimeout))
 	if err != nil {
+		ftpTimeoutErr(err, "open")
 		ftpConnErr(err)
 	}
 	f.conn = conn
@@ -251,6 +265,29 @@ func (vm *VM) registerFTPMethods(ftp *RClass) {
 	})
 
 	// --- mode accessors ---
+	// Net::FTP#open_timeout / #read_timeout and their writers. They are plain
+	// attributes on the Ruby side: the value is handed back exactly as it was
+	// set, so `ftp.read_timeout = nil` reads back nil rather than 0.
+	d("open_timeout", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return self(v).openTimeout
+	})
+	d("open_timeout=", func(_ *VM, v object.Value, a []object.Value, _ *Proc) object.Value {
+		self(v).openTimeout = a[0]
+		return a[0]
+	})
+	d("read_timeout", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return self(v).readTimeout
+	})
+	d("read_timeout=", func(_ *VM, v object.Value, a []object.Value, _ *Proc) object.Value {
+		self(v).readTimeout = a[0]
+		// Apply it at once rather than at the next read: Net::FTP#close lowers
+		// read_timeout before the QUIT exchange precisely so a wedged server
+		// cannot hold the close, and a setter that only took effect later would
+		// not honour that.
+		self(v).armRead()
+		return a[0]
+	})
+
 	d("passive", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(self(v).passive)
 	})

@@ -12,6 +12,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"time"
 
 	netftp "github.com/go-ruby-net-ftp/net-ftp"
 
@@ -68,6 +69,90 @@ type ftpObj struct {
 	welcome string
 	// closed reports whether the control connection has been closed.
 	closed bool
+	// openTimeout and readTimeout are Net::FTP#open_timeout and #read_timeout in
+	// SECONDS, held as Ruby values because nil is a meaningful setting ("no
+	// bound") and distinct from 0.
+	//
+	// ⛔ THE DEFAULTS ARE NOT SYMMETRIC, AND THAT ASYMMETRY IS THE WHOLE POINT.
+	// ruby/spec pins them (library/net-ftp/initialize_spec.rb): open_timeout
+	// defaults to nil ("sets open_timeout to nil", :272) and read_timeout to 60
+	// ("sets read_timeout to the default value", :291 — `should == 60`). So MRI
+	// leaves the connect unbounded and bounds every read.
+	//
+	// Without them this binding dialled with net.Dial and set no read deadline
+	// anywhere, so a peer that accepted the connection and then said nothing
+	// held the interpreter for ever: 39 of 56 library/net-ftp spec files had to
+	// be killed by the clock under rbgo and none under MRI (#916). That is a
+	// denial of service needing no exploit, only silence — which is why the
+	// default is a bound and not "whatever the caller remembers to set".
+	openTimeout object.Value
+	readTimeout object.Value
+}
+
+// ftpDefaultReadTimeout is Net::FTP's documented default, asserted by
+// library/net-ftp/initialize_spec.rb.
+const ftpDefaultReadTimeout = 60
+
+// newFTPObj builds a Net::FTP with MRI's timeout defaults in place. Every
+// construction site goes through it so a new one cannot be born unbounded.
+func newFTPObj(cls *RClass) *ftpObj {
+	return &ftpObj{
+		cls:         cls,
+		binary:      true,
+		passive:     true,
+		openTimeout: object.NilV,
+		readTimeout: object.IntValue(ftpDefaultReadTimeout),
+	}
+}
+
+// timeoutSeconds reads a timeout value as a Duration; nil (or a non-number)
+// means no bound, which is what MRI's nil open_timeout asks for.
+func ftpTimeoutSeconds(v object.Value) time.Duration {
+	switch n := v.(type) {
+	case object.Integer:
+		if n <= 0 {
+			return 0
+		}
+		return time.Duration(float64(n) * float64(time.Second))
+	case object.Float:
+		if n <= 0 {
+			return 0
+		}
+		return time.Duration(float64(n) * float64(time.Second))
+	}
+	return 0
+}
+
+// armRead puts the read_timeout deadline on the control socket before a read.
+// It is called before EVERY read rather than once at connect, because a
+// deadline is absolute: set once, it would expire mid-session and turn every
+// later read into a timeout.
+func (f *ftpObj) armRead() {
+	if f.conn == nil {
+		return
+	}
+	d := ftpTimeoutSeconds(f.readTimeout)
+	if d <= 0 {
+		// nil read_timeout: MRI waits indefinitely, and so do we. Clear any
+		// deadline a previous setting left behind.
+		_ = f.conn.SetReadDeadline(time.Time{})
+		return
+	}
+	_ = f.conn.SetReadDeadline(time.Now().Add(d))
+}
+
+// ftpTimeoutErr re-raises a net timeout as the MRI exception for the phase,
+// following the shape nethttp_bind.go's raiseTransportErr already uses — the
+// HTTP binding has bounded its reads all along, and this one simply never got
+// the same treatment.
+func ftpTimeoutErr(err error, phase string) {
+	var ne net.Error
+	if errors.As(err, &ne) && ne.Timeout() {
+		if phase == "open" {
+			raise("Net::OpenTimeout", "execution expired")
+		}
+		raise("Net::ReadTimeout", "execution expired")
+	}
 }
 
 func (f *ftpObj) ToS() string     { return "#<Net::FTP>" }
@@ -120,6 +205,10 @@ func ftpConnErr(err error) {
 // yields whole reply lines (terminator included — the codec strips it).
 func (f *ftpObj) reader() netftp.LineReader {
 	return func() (string, error) {
+		// The deadline is armed per line, not per reply: GetMultiline calls this
+		// repeatedly for a multi-line reply, and read_timeout bounds each read
+		// rather than the whole exchange.
+		f.armRead()
 		line, err := f.r.ReadString('\n')
 		if err != nil && line == "" {
 			return "", err
@@ -146,6 +235,10 @@ func (f *ftpObj) writeLine(line string) {
 func (f *ftpObj) getResp() string {
 	resp, err := netftp.GetMultiline(f.reader())
 	if err != nil {
+		// A deadline expiry is Net::ReadTimeout, not a connection error: the
+		// socket is fine, the peer simply said nothing in time, and the two are
+		// rescued by different classes.
+		ftpTimeoutErr(err, "read")
 		ftpConnErr(err)
 	}
 	f.lastResponse = resp
