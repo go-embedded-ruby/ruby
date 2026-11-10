@@ -130,6 +130,32 @@ LAPACK-style API of point 2 serves julia's `Matrix` directly, with no copy.
 `unicode-normalize`, `digest`, `securerandom`, and Onigmo moved to `go-regexp`.
 None of the four is mid-change in this repository.
 
+**The host/sandbox layer has three modes, not two.** Stated by the
+go-embedded-julia session, with go-embedded-r's correction folded in:
+
+| mode | who uses it |
+|---|---|
+| (a) **sandbox, no host** | go-embedded-r's default — a private in-memory writable tree per session, empty `Env`. go-embedded-julia's is an embedded **read-only** tree of julia's own sources. A shared sandbox can offer both at once: the language's tree read-only, plus a per-session in-memory scratch. |
+| (b) **host confined to a root** | `os.OpenRoot`, go-embedded-r's `FileRoot`, opt-in |
+| (c) **full host** | julia needs it, because the maintainer decided go-embedded-julia must also run as a standalone program. go-embedded-r deliberately has none. |
+
+julia's first draft is go-embedded-julia/julia#32.
+
+**⛔ `random` depends on `digest`, so the two cannot be extracted independently.**
+julia 1.12's `Random` hashes a seed with **SHA-256** before seeding
+Xoshiro256++: `hash_seed` feeds the seed — an `Integer`, a `UInt32`/`UInt64`
+array, or a `String` — through `SHA.SHA2_256_CTX`
+(julia 1.12.6, `stdlib/Random/src/RNGs.jl:296-340`; `Random.jl:16` imports
+`SHA`). So julia's bit parity for `rand` after `Random.seed!` needs SHA-256
+from the shared digest engine *and* Xoshiro256++/dSFMT from the shared
+bit-generator library — digest is on the critical path of a property that looks
+like it belongs entirely to random.
+
+That is also where the first condition above stops being a Ruby concern: the
+measured 42-example gap in `library/digest` sits underneath julia's `rand`
+reproducibility, not beside it. Extract digest with its baseline stated, or
+julia inherits a deficit it has no way to see.
+
 ### R (go-embedded-r/r v0.14.1, R 4.6.2 as the oracle)
 
 | engine | R use | status in go-embedded-r today | ask |
