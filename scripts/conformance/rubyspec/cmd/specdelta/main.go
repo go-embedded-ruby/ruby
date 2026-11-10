@@ -105,6 +105,40 @@ type result struct {
 // with one `skip` detail, entirely well-formed. Reading the shim rather than
 // assuming its shape is what produced the table above; the line
 // `hookerror` has no counter is a defect in the harness, filed separately.
+// outcomeNote is the note printed beside a row when one of the two engines did
+// not produce an ordinary result: it was stopped by the clock, or it produced
+// nothing at all.
+//
+// ⛔ THE KILL IS TESTED FIRST, AND THE ORDER IS THE WHOLE POINT. A killed engine
+// almost never prints a RESULT line, so `ran` is false and the DID-NOT-RUN arms
+// would claim every killed row -- reporting a file the CLOCK stopped as a file
+// the engine could not LOAD. Those are opposite findings: one says the timeout
+// was too short or the engine hangs, the other says the feature is
+// unimplemented, and they call for opposite work.
+//
+// It was worse than an ordering bug before this: run() returned `parse(...)`,
+// a fresh result, so `killed` was false on every row ever printed and this
+// branch was unreachable. The documented control for a whole report -- "grep
+// for KILLED; if it is 0 the table is sound" -- could only ever answer 0, and
+// every sweep looked clean by construction.
+func outcomeNote(a, b result) string {
+	switch {
+	case a.killed && b.killed:
+		return "  KILLED on timeout, both engines"
+	case a.killed:
+		return "  KILLED on timeout, the control"
+	case b.killed:
+		return "  KILLED on timeout, the treatment"
+	case !a.ran && !b.ran:
+		return "  DID NOT RUN on either"
+	case !a.ran:
+		return "  DID NOT RUN on the control"
+	case !b.ran:
+		return "  DID NOT RUN on the treatment"
+	}
+	return ""
+}
+
 func (r result) tallyDisagrees() bool {
 	return r.ran && r.details < r.fail+r.errs
 }
@@ -259,17 +293,7 @@ func main1(args []string, out, errOut io.Writer) int {
 		}
 		totalA += r.a.pass
 		totalB += r.b.pass
-		note := ""
-		switch {
-		case !r.a.ran && !r.b.ran:
-			note = "  DID NOT RUN on either"
-		case !r.a.ran:
-			note = "  DID NOT RUN on the control"
-		case !r.b.ran:
-			note = "  DID NOT RUN on the treatment"
-		case r.a.killed || r.b.killed:
-			note = "  KILLED on timeout"
-		}
+		note := outcomeNote(r.a, r.b)
 		if r.unstable {
 			note += "  ⛔ UNSTABLE: an engine disagreed with itself, delta excluded"
 		}
@@ -807,7 +831,20 @@ func run(engine, root, file string, timeout time.Duration) (result, error) {
 		<-done
 		r.killed = true
 	}
-	return parse(out.String())
+	// ⛔ CARRY THE KILL ACROSS THE PARSE. This used to `return parse(...)`, which
+	// builds a FRESH result and threw `killed` away on the floor -- so `killed`
+	// was false on every row ever printed and the "KILLED on timeout" note was
+	// dead code. A killed engine usually prints no RESULT line either, so it fell
+	// through to `ran == false` and the report said "DID NOT RUN on the
+	// treatment": a HANG was published as an ABSENCE, which is a statement about
+	// conformance rather than about the clock, and the two call for opposite work.
+	//
+	// It also broke the control for the report as a whole. "grep KILLED; if 0 the
+	// table is sound" is the documented way to tell whether the machine's load
+	// decided a cell -- and that grep could only ever answer 0.
+	parsed, err := parse(out.String())
+	parsed.killed = r.killed
+	return parsed, err
 }
 
 // parse reads the shim's report. It REFUSES a RESULT line it cannot read rather

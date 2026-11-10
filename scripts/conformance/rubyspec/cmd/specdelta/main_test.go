@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 // parse is where a silent wrong answer would live, so it is tested first and
@@ -843,4 +844,72 @@ func fakeEngine(t *testing.T, dir, name, body string) string {
 		t.Fatal(err)
 	}
 	return p
+}
+
+// ⛔ THE CONTROL THAT COULD NOT FIRE. run() used to `return parse(...)`, which
+// builds a fresh result, so the `killed` it had just set was discarded. Every
+// row printed carried killed == false, the "KILLED on timeout" note was
+// unreachable, and the documented way to check a whole report -- grep it for
+// KILLED, and trust the table when the count is 0 -- answered 0 by
+// construction. Measured 2026-11-09: three sweeps of the ruby/spec corpus were
+// declared sound on that grep.
+func TestATimeoutIsCarriedOutOfRun(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses /bin/sleep as a deliberately slow engine")
+	}
+	// specdelta runs `engine <file>`, so /bin/sleep with "30" as the "spec file"
+	// is an engine that is guaranteed to outlive any timeout this test sets.
+	r, err := run("/bin/sleep", t.TempDir(), "30", 150*time.Millisecond)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if !r.killed {
+		t.Error("an engine stopped by the timeout came back with killed == false; " +
+			"the report cannot then tell a hang from a file the engine could not load")
+	}
+	if r.ran {
+		t.Error("a killed engine printed no RESULT line, so ran must be false")
+	}
+}
+
+// An engine that finishes inside the timeout must NOT be marked killed, or the
+// note would fire on every row and the control would be useless the other way.
+func TestAnEngineThatFinishesIsNotMarkedKilled(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses /bin/sleep as a deliberately quick engine")
+	}
+	r, err := run("/bin/sleep", t.TempDir(), "0", 10*time.Second)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if r.killed {
+		t.Error("an engine that exited on its own was reported as killed")
+	}
+}
+
+// ⛔ The ORDER of the note, which is what turned a hang into an absence. A
+// killed engine prints no RESULT line, so ran is false too; if DID NOT RUN is
+// tested first it claims every killed row.
+func TestAKillIsReportedBeforeAnAbsence(t *testing.T) {
+	ranOK := result{ran: true, pass: 3}
+	killedSilent := result{killed: true} // what a real timeout looks like
+	for _, tc := range []struct {
+		name string
+		a, b result
+		want string
+	}{
+		{"the treatment was stopped by the clock", ranOK, killedSilent, "  KILLED on timeout, the treatment"},
+		{"the control was stopped by the clock", killedSilent, ranOK, "  KILLED on timeout, the control"},
+		{"both were", killedSilent, killedSilent, "  KILLED on timeout, both engines"},
+		{"the treatment genuinely produced nothing", ranOK, result{}, "  DID NOT RUN on the treatment"},
+		{"the control genuinely produced nothing", result{}, ranOK, "  DID NOT RUN on the control"},
+		{"neither produced anything", result{}, result{}, "  DID NOT RUN on either"},
+		{"both ran", ranOK, ranOK, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := outcomeNote(tc.a, tc.b); got != tc.want {
+				t.Errorf("outcomeNote = %q, want %q", got, tc.want)
+			}
+		})
+	}
 }
