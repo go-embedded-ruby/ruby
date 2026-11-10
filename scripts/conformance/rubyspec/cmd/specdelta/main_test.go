@@ -913,3 +913,45 @@ func TestAKillIsReportedBeforeAnAbsence(t *testing.T) {
 		})
 	}
 }
+
+// ⛔ A REPORT NO TOOL WILL READ. ruby/spec prints raw binary on purpose (zlib
+// round-trips, net-http bodies, String#unpack), and the shim quotes an
+// example's description verbatim into RBGO_DETAIL. Measured 2026-11-10: one
+// library/ report came out holding NUL bytes, `file` called it "RAGE Package
+// Format (RPF)", and every grep over it returned NOTHING -- no output, exit 1,
+// because grep skips what it decides is binary. Three checks of that report
+// were read as clean when the search had never looked inside it.
+func TestControlBytesFromASpecDoNotReachTheReport(t *testing.T) {
+	const dirty = "RBGO_DETAIL\tfail\tZlib\tround\x00trips \x01binary\x7f\tmsg\n" +
+		"RBGO_RESULT pass=1 fail=1 error=0 skip=0\n"
+	r, err := parse(printable(dirty))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if !r.ran || r.pass != 1 {
+		t.Fatalf("the surrounding report must still parse: ran=%v pass=%d", r.ran, r.pass)
+	}
+	for label := range r.labels {
+		if strings.ContainsAny(label, "\x00\x01\x7f") {
+			t.Errorf("a control byte reached a label: %q", label)
+		}
+	}
+	// The text either side of the stripped byte must survive: dropping the whole
+	// description would lose the finding instead of the byte.
+	found := false
+	for label := range r.labels {
+		if strings.Contains(label, "roundtrips binary") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("the description did not survive the strip: %v", r.labels)
+	}
+}
+
+// Tab and newline ARE the format and must not be stripped with the rest.
+func TestPrintableKeepsTheFormatsOwnSeparators(t *testing.T) {
+	if got := printable("a\tb\nc"); got != "a\tb\nc" {
+		t.Errorf("printable mangled the separators: %q", got)
+	}
+}

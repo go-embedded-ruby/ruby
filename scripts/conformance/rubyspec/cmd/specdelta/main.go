@@ -842,9 +842,37 @@ func run(engine, root, file string, timeout time.Duration) (result, error) {
 	// It also broke the control for the report as a whole. "grep KILLED; if 0 the
 	// table is sound" is the documented way to tell whether the machine's load
 	// decided a cell -- and that grep could only ever answer 0.
-	parsed, err := parse(out.String())
+	parsed, err := parse(printable(out.String()))
 	parsed.killed = r.killed
 	return parsed, err
+}
+
+// printable strips the control bytes a spec's own output can carry into this
+// report. ruby/spec files print raw binary on purpose -- zlib round-trips,
+// net-http bodies, String#unpack -- and the shim's RBGO_DETAIL line quotes the
+// example's description and message verbatim.
+//
+// ⛔ MEASURED 2026-11-10. One library/ report came out holding NUL bytes, and
+// `file` called it "RAGE Package Format (RPF)". Every grep over it then
+// returned NOTHING AT ALL -- not zero matches, no output and exit 1, because
+// grep skips a file it decides is binary. Three separate checks of that report
+// ("is there a KILLED row?", "which files did not load?") were read as clean
+// when the search had never looked inside. A report that ordinary tools refuse
+// to read is a report whose silence cannot be told from a clean one.
+//
+// run.sh has stripped NULs since it was written, for the same reason and one
+// layer further out (`tr -d '\000'`); this is that guard where the Go half can
+// also rely on it. Tab and newline are kept, since the format is built on them.
+func printable(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '\t' || r == '\n' {
+			return r
+		}
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, s)
 }
 
 // parse reads the shim's report. It REFUSES a RESULT line it cannot read rather
