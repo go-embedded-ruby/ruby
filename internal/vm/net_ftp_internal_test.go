@@ -8,6 +8,7 @@ package vm
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -19,6 +20,8 @@ import (
 	stdtime "time"
 
 	netftp "github.com/go-ruby-net-ftp/net-ftp"
+
+	"github.com/go-embedded-ruby/ruby/internal/object"
 )
 
 // The Net::FTP binding is exercised against an in-process FTP server (below) so
@@ -1622,4 +1625,73 @@ ftp.close`)
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
+}
+
+// The timeout helpers' own branches. Each is a behaviour MRI specifies or a
+// refusal this binding makes, so they are asserted directly rather than left
+// to be reached by accident through a socket test.
+func TestFTPTimeoutSecondsReadsEveryShape(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		v    object.Value
+		want stdtime.Duration
+	}{
+		// nil is MRI's "no bound" (open_timeout's default), and 0 is Go's
+		// spelling of the same thing for DialTimeout/SetReadDeadline.
+		{"nil means unbounded", object.NilV, 0},
+		{"an Integer is seconds", object.IntValue(60), 60 * stdtime.Second},
+		{"a Float is fractional seconds", object.Float(0.25), 250 * stdtime.Millisecond},
+		// ⛔ Non-positive is NOT "expire immediately": MRI treats 0 as no
+		// timeout, and a deadline of now would make every read fail at once.
+		{"zero is unbounded", object.IntValue(0), 0},
+		{"a negative Integer is unbounded", object.IntValue(-1), 0},
+		{"a negative Float is unbounded", object.Float(-0.5), 0},
+		// Anything that is not a number cannot be a duration; it is ignored
+		// rather than guessed at.
+		{"a String is not a duration", object.NewString("30"), 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ftpTimeoutSeconds(tc.v); got != tc.want {
+				t.Errorf("ftpTimeoutSeconds(%v) = %v, want %v", tc.v, got, tc.want)
+			}
+		})
+	}
+}
+
+// armRead's two early paths, which no socket test reaches: an object with no
+// connection yet, and a nil read_timeout that must CLEAR a deadline a previous
+// setting left behind rather than leave it in place.
+func TestFTPArmReadHandlesNoConnectionAndNoBound(t *testing.T) {
+	// No connection: must not panic, must not touch anything.
+	(&ftpObj{readTimeout: object.IntValue(5)}).armRead()
+
+	srv, cli := net.Pipe()
+	defer srv.Close()
+	defer cli.Close()
+	f := &ftpObj{conn: cli, readTimeout: object.IntValue(5)}
+	f.armRead() // sets a deadline
+	f.readTimeout = object.NilV
+	f.armRead() // must clear it, not keep the old one
+
+	// With the deadline cleared the pipe read blocks rather than failing, so a
+	// short wait that times out on OUR side proves no deadline is in force.
+	done := make(chan error, 1)
+	go func() {
+		b := make([]byte, 1)
+		_, err := cli.Read(b)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		t.Errorf("the read returned %v; a cleared deadline should leave it blocking", err)
+	case <-stdtime.After(100 * stdtime.Millisecond):
+	}
+}
+
+// ftpTimeoutErr must RETURN for an error that is not a timeout, so the caller
+// can go on to classify it. A version that raised unconditionally would turn
+// every connection error into Net::ReadTimeout.
+func TestFTPTimeoutErrIgnoresANonTimeout(t *testing.T) {
+	ftpTimeoutErr(errors.New("connection refused"), "read")
+	ftpTimeoutErr(nil, "open")
 }
