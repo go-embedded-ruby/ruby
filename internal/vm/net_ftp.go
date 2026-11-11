@@ -78,14 +78,14 @@ func (vm *VM) registerFTPErrors(netMod, std *RClass) {
 // the ensured-close block form.
 func (vm *VM) registerFTPClassMethods(ftp *RClass) {
 	newFn := func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		f := newFTPObj(ftp)
+		f := newFTPObj(vm, ftp)
 		vm.ftpInit(f, args)
 		return f
 	}
 	ftp.smethods["new"] = &Method{name: "new", owner: ftp, native: newFn}
 
 	ftp.smethods["open"] = &Method{name: "open", owner: ftp, native: func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
-		f := newFTPObj(ftp)
+		f := newFTPObj(vm, ftp)
 		vm.ftpInit(f, args)
 		if blk == nil {
 			return f
@@ -187,8 +187,12 @@ func (vm *VM) ftpConnect(f *ftpObj, host string, port int) {
 	// open_timeout bounds the dial. MRI's default is nil — an unbounded connect
 	// — and DialTimeout(0) is Go's spelling of the same thing, so the default
 	// path is unchanged and only an explicit setting bounds it.
-	conn, err := net.DialTimeout("tcp", net.JoinHostPort(host, strconv.Itoa(port)),
-		ftpTimeoutSeconds(f.openTimeout))
+	var conn net.Conn
+	var err error
+	f.ftpIO(func() {
+		conn, err = net.DialTimeout("tcp", net.JoinHostPort(host, strconv.Itoa(port)),
+			ftpTimeoutSeconds(f.openTimeout))
+	})
 	if err != nil {
 		ftpTimeoutErr(err, "open")
 		ftpConnErr(err)

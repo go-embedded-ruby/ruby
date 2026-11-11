@@ -87,6 +87,9 @@ type ftpObj struct {
 	// default is a bound and not "whatever the caller remembers to set".
 	openTimeout object.Value
 	readTimeout object.Value
+	// vm is held so every blocking socket call can release the GVL around
+	// itself. See ftpIO below for why that is not optional.
+	vm *VM
 }
 
 // ftpDefaultReadTimeout is Net::FTP's documented default, asserted by
@@ -95,14 +98,46 @@ const ftpDefaultReadTimeout = 60
 
 // newFTPObj builds a Net::FTP with MRI's timeout defaults in place. Every
 // construction site goes through it so a new one cannot be born unbounded.
-func newFTPObj(cls *RClass) *ftpObj {
+func newFTPObj(vm *VM, cls *RClass) *ftpObj {
 	return &ftpObj{
 		cls:         cls,
 		binary:      true,
 		passive:     true,
 		openTimeout: object.NilV,
 		readTimeout: object.IntValue(ftpDefaultReadTimeout),
+		vm:          vm,
 	}
+}
+
+// ftpIO runs a blocking socket call with the GVL RELEASED, which is what every
+// other binding here does through ioBlock and this one did not.
+//
+// ⛔ WITHOUT IT, A RUBY PROGRAM THAT SERVES ITSELF DEADLOCKS. rbgo emulates a
+// GVL: one Ruby thread runs VM code at a time, and a thread that blocks in a
+// native call is expected to drop it (vm.go:772, threadRelease). TCPServer#accept
+// already does -- socket.go:174 wraps it in ioBlock -- but it must RE-ACQUIRE
+// the GVL to return into Ruby, and these reads held it for the whole of a
+// blocking read(2). So the server thread's Accept returned and then parked
+// forever waiting for a lock the client was sitting on.
+//
+// Measured: every library/net-ftp spec stands up its server in the same
+// process, so client and server are two threads of one VM. 39 of 56 files had
+// to be killed by the clock, none under MRI (#916). With a read deadline in
+// place the shape is visible in a timestamp: accept returned 1 ms after the
+// client's read_timeout fired, and moving that timeout to 5 s moved the accept
+// with it.
+//
+// Net::HTTP has used ioBlock all along (nethttp_bind.go:574). This binding
+// simply never got it -- the same rule reached through one caller and not its
+// neighbour.
+func (f *ftpObj) ftpIO(fn func()) {
+	if f.vm == nil {
+		// A direct-constructed ftpObj in a unit test has no VM; running fn
+		// inline is correct there and keeps those tests working.
+		fn()
+		return
+	}
+	ioBlock(f.vm, fn)
 }
 
 // timeoutSeconds reads a timeout value as a Duration; nil (or a non-number)
@@ -209,7 +244,9 @@ func (f *ftpObj) reader() netftp.LineReader {
 		// repeatedly for a multi-line reply, and read_timeout bounds each read
 		// rather than the whole exchange.
 		f.armRead()
-		line, err := f.r.ReadString('\n')
+		var line string
+		var err error
+		f.ftpIO(func() { line, err = f.r.ReadString('\n') })
 		if err != nil && line == "" {
 			return "", err
 		}
@@ -224,7 +261,9 @@ func (f *ftpObj) writeLine(line string) {
 	if err != nil {
 		raise("ArgumentError", "%s", err.Error())
 	}
-	if _, werr := f.conn.Write([]byte(bytes)); werr != nil {
+	var werr error
+	f.ftpIO(func() { _, werr = f.conn.Write([]byte(bytes)) })
+	if werr != nil {
 		ftpConnErr(werr)
 	}
 }
