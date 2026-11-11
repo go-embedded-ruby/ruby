@@ -195,6 +195,16 @@ s.close`, "0\n1\n0"},
 			"false\ntrue"},
 		// Symbol / String domain and type names are accepted.
 		{`s=Socket.new(:INET, :STREAM); p s.closed?; s.close`, "false"},
+		// ⛔ A CONSTANT MRI DEFINES AND THIS TABLE DID NOT. ruby/spec's FTP
+		// fixture sets SO_OOBINLINE inside the Thread that serves the
+		// connection, so an undefined name raises NameError there and kills
+		// that thread with nothing to show for it at the other end of the
+		// socket. A missing constant is a NameError wherever it is read; it is
+		// only SILENT when it is read in a thread nobody joins.
+		{`s=Socket.new(Socket::AF_INET, Socket::SOCK_STREAM)
+p s.setsockopt(Socket::SOL_SOCKET, Socket::SO_OOBINLINE, 1)
+p s.getsockopt(Socket::SOL_SOCKET, Socket::SO_OOBINLINE)
+s.close`, "0\n1"},
 	}
 	for _, c := range cases {
 		if got := runSrc(t, "require \"socket\"\n"+c.src); got != c.want {
