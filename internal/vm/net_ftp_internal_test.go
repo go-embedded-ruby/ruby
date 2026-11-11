@@ -1539,3 +1539,87 @@ func freePort(t *testing.T) int {
 	ln.Close()
 	return p
 }
+
+// ⛔ THE DEFECT THIS GUARDS. Net::FTP dialled with net.Dial and set no read
+// deadline anywhere, so a peer that accepted the connection and then said
+// NOTHING held the interpreter for ever. Measured 2026-11-10: 39 of 56
+// library/net-ftp ruby/spec files had to be killed by the clock under rbgo and
+// none under MRI (#916), and a SIGQUIT dump put the process in
+// net.(*conn).Read beneath GetMultiline, waiting for the 220 greeting.
+//
+// An unbounded read on a socket the peer controls is a denial of service that
+// needs no exploit, only silence — so the test is a silent server, which is
+// exactly the production shape.
+func TestFTPReadTimeoutBoundsASilentServer(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+
+	// Accept and hold the connection open without writing a greeting. The
+	// connection must stay OPEN: a server that closed it would give the reader
+	// an EOF, which is a different path (Net::FTPConnectionError) and would let
+	// this test pass without any deadline at all.
+	accepted := make(chan net.Conn, 1)
+	go func() {
+		c, aerr := ln.Accept()
+		if aerr != nil {
+			return
+		}
+		accepted <- c
+	}()
+	defer func() {
+		select {
+		case c := <-accepted:
+			c.Close()
+		default:
+		}
+	}()
+
+	port := ln.Addr().(*net.TCPAddr).Port
+	src := "require \"net/ftp\"\nPORT = " + strconv.Itoa(port) + "\n" + `
+begin
+  Net::FTP.new("127.0.0.1", port: PORT, read_timeout: 0.2)
+  puts "RETURNED WITHOUT RAISING"
+rescue => e
+  puts [e.class, e.message].inspect
+end`
+
+	start := stdtime.Now()
+	got := runSrc(t, src)
+	elapsed := stdtime.Since(start)
+
+	if want := `[Net::ReadTimeout, "execution expired"]`; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+	// ⛔ THE TIME IS PART OF THE ASSERTION. Without it this test would also pass
+	// if the greeting read failed instantly for some unrelated reason, which is
+	// the one outcome that would NOT prove a deadline fired.
+	if elapsed < 150*stdtime.Millisecond {
+		t.Errorf("came back in %v, too fast to have waited out a 0.2s read_timeout: "+
+			"the raise did not come from the deadline", elapsed)
+	}
+}
+
+// The defaults are MRI's, and ruby/spec pins both: open_timeout nil and
+// read_timeout 60 (library/net-ftp/initialize_spec.rb). They are asserted
+// together because the asymmetry is the whole point — MRI leaves the connect
+// unbounded and bounds every read, and a "tidier" symmetric default would
+// change behaviour MRI specifies.
+func TestFTPTimeoutDefaultsAndAccessors(t *testing.T) {
+	s := newFTPServer(t)
+	got := s.run(t, `
+ftp = Net::FTP.new("127.0.0.1", port: PORT)
+p ftp.open_timeout
+p ftp.read_timeout
+ftp.open_timeout = 5
+ftp.read_timeout = nil
+p ftp.open_timeout
+p ftp.read_timeout
+ftp.close`)
+	want := "nil\n60\n5\nnil"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
