@@ -1695,3 +1695,100 @@ func TestFTPTimeoutErrIgnoresANonTimeout(t *testing.T) {
 	ftpTimeoutErr(errors.New("connection refused"), "read")
 	ftpTimeoutErr(nil, "open")
 }
+
+// ⛔ THE DEFECT SHAPE THIS REPOSITORY KEEPS REPEATING: a mechanism wired at only
+// SOME of its doors. open_timeout and read_timeout each have three doors -- the
+// constructor's options Hash, the attr writer, and the default -- and the Hash
+// door is the one no socket test goes through, because every one of them passes
+// read_timeout ALONE. The coverage ratchet named ftpApplyOpts at 95% for exactly
+// that: the open_timeout assignment sitting beside a line that ran had never run
+// itself. Covering it by hand is the point, not the percentage.
+func TestFTPApplyOptsCarriesBothTimeoutsFromTheOptionsHash(t *testing.T) {
+	// ftpApplyOpts never touches its VM receiver, so a nil one keeps this test
+	// about the Hash and nothing else.
+	var vm *VM
+
+	t.Run("both are read, not just read_timeout", func(t *testing.T) {
+		h := object.NewHash()
+		h.Set(object.Symbol("open_timeout"), object.IntValue(7))
+		h.Set(object.Symbol("read_timeout"), object.Float(0.5))
+		f := &ftpObj{}
+		port, _, _, _, _, _ := vm.ftpApplyOpts(f, h, 21)
+		if port != 21 {
+			t.Errorf("port = %d, want 21 left alone when the Hash carries none", port)
+		}
+		if got := ftpTimeoutSeconds(f.openTimeout); got != 7*stdtime.Second {
+			t.Errorf("open_timeout = %v, want 7s -- this door is not wired", got)
+		}
+		if got := ftpTimeoutSeconds(f.readTimeout); got != 500*stdtime.Millisecond {
+			t.Errorf("read_timeout = %v, want 500ms", got)
+		}
+	})
+
+	// ⛔ nil is a REQUEST, not an absence. `read_timeout: nil` asks for NO bound
+	// and must not fall back to MRI's 60 s default, which is the whole reason
+	// ftpApplyOpts tests the key's PRESENCE rather than its value. A key absent
+	// from the Hash is the other case, and must leave the field untouched.
+	t.Run("an explicit nil is carried, an absent key is not", func(t *testing.T) {
+		h := object.NewHash()
+		h.Set(object.Symbol("read_timeout"), object.NilV)
+		f := &ftpObj{readTimeout: object.IntValue(60)}
+		vm.ftpApplyOpts(f, h, 21)
+		if !object.IsNil(f.readTimeout) {
+			t.Errorf("read_timeout = %v, want nil: an explicit nil asks for no bound", f.readTimeout)
+		}
+		if f.openTimeout != nil {
+			t.Errorf("open_timeout = %v, want untouched: it was absent from the Hash", f.openTimeout)
+		}
+	})
+}
+
+// ftpTimeoutErr's two raises, which the non-timeout test above cannot reach
+// because it returns before them. MRI distinguishes Net::OpenTimeout from
+// Net::ReadTimeout and ruby/spec asserts the CLASS, so a version that collapsed
+// them would still satisfy any check that only asked "did it raise?".
+func TestFTPTimeoutErrNamesThePhase(t *testing.T) {
+	for _, tc := range []struct{ phase, want string }{
+		{"open", "Net::OpenTimeout"},
+		{"read", "Net::ReadTimeout"},
+		// There is no third class: anything that is not the open phase is a read.
+		{"", "Net::ReadTimeout"},
+	} {
+		t.Run(tc.phase+"=>"+tc.want, func(t *testing.T) {
+			// WRAPPED, because that is what the callers hand it: the standard
+			// library returns a *net.OpError around the timeout, and only
+			// errors.As sees through it. A type assertion would miss this.
+			err := fmt.Errorf("dial tcp 127.0.0.1:21: %w", ftpStubTimeout{})
+
+			got, raised := func() (re RubyError, ok bool) {
+				defer func() {
+					if r := recover(); r != nil {
+						re, ok = r.(RubyError)
+					}
+				}()
+				ftpTimeoutErr(err, tc.phase)
+				return RubyError{}, false
+			}()
+
+			if !raised {
+				t.Fatalf("ftpTimeoutErr returned for a timeout in phase %q; it must raise", tc.phase)
+			}
+			if got.Class != tc.want {
+				t.Errorf("raised %s, want %s", got.Class, tc.want)
+			}
+			// MRI's message for both, which ruby/spec's Timeout specs match on.
+			if got.Message != "execution expired" {
+				t.Errorf("message = %q, want %q", got.Message, "execution expired")
+			}
+		})
+	}
+}
+
+// ftpStubTimeout is a net.Error that reports a timeout. A real socket can
+// produce one only by waiting out a deadline, which is a second of test time per
+// case; the classification under test is the same either way.
+type ftpStubTimeout struct{}
+
+func (ftpStubTimeout) Error() string   { return "i/o timeout" }
+func (ftpStubTimeout) Timeout() bool   { return true }
+func (ftpStubTimeout) Temporary() bool { return true }
