@@ -1,0 +1,37 @@
+# Blocking socket calls that already held the GVL when
+# TestEveryBlockingSocketCallReleasesTheGVL was written (2026-11-12).
+#
+# ⛔ THIS LIST MAY ONLY SHRINK. A new site not listed here fails the gate, and
+# an entry that stops reporting fails it too — a stale allowance is a place the
+# next regression hides.
+#
+# Why they matter: rbgo emulates a GVL, so a native call that blocks while
+# holding it stops every other Ruby thread. A program that serves itself — a
+# spec fixture, a test that binds a socket and connects to it, an embedder
+# running a listener beside its own client — DEADLOCKS: the server thread
+# returns from Accept and then parks on the lock the client is sitting on.
+# Measured in ruby/spec as 39 of 56 library/net-ftp files killed by the clock
+# and none under MRI (#916).
+#
+# Each line is file:line. Fix one by wrapping the call in ioBlock(vm, …) and
+# deleting its line here. If the callers already release the GVL, mark the
+# function //gvl:released-by-caller <reason> instead and delete the line.
+
+# Net::FTP's DATA connection. The control connection was fixed in #921/#916;
+# these three were missed by that change and found by this gate.
+net_ftp_bind.go:409
+net_ftp_bind.go:419
+net_ftp_bind.go:485
+
+# Net::IMAP: readLine/readLiteral are handed to imap.NewReader as callbacks and
+# the binding has no ioBlock at all — the same shape Net::FTP had.
+net_imap_bind.go:82
+net_imap_bind.go:89
+
+# Net::SMTP: the response reader.
+net_smtp_bind.go:140
+
+# Servers that accept connections from Ruby: an embedder running one of these
+# beside its own client is the exact deadlock above.
+httprb.go:148
+hanami_bind.go:514

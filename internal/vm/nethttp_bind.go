@@ -757,6 +757,8 @@ func basicAuthHeader(user, pass string) string {
 
 // nethttpRawDial opens a raw TCP connection with an optional dial timeout
 // (open_timeout); 0 means no bound.
+//
+//gvl:released-by-caller every call site is inside the ioBlock at nethttpDial, so the GVL is already dropped when this runs
 func nethttpRawDial(host, port string, openTO time.Duration) (net.Conn, error) {
 	addr := net.JoinHostPort(host, port)
 	if openTO > 0 {
@@ -807,6 +809,8 @@ func nethttpTLSWrap(conn net.Conn, host string, verifyMode int64) (streamIO, err
 // to nethttp.ParseResponse. keepAlive reports whether the connection may be reused
 // (false when the server sent Connection: close or the body was read to EOF).
 // noBody (HEAD and other body-forbidden responses) stops after the header block.
+//
+//gvl:released-by-caller its only non-test caller is inside the ioBlock in nethttpExchangeFramed
 func nethttpReadResponse(r *bufio.Reader, noBody bool) (raw []byte, keepAlive bool, err error) {
 	var buf bytes.Buffer
 	status, err := r.ReadString('\n')
@@ -866,6 +870,8 @@ func nethttpReadResponse(r *bufio.Reader, noBody bool) (raw []byte, keepAlive bo
 // nethttpCopyChunked copies a chunked body (raw, including the chunk framing) from
 // r into buf until the zero-size chunk, then consumes the trailer up to a blank
 // line — the same framing nethttp.ParseResponse later decodes.
+//
+//gvl:released-by-caller reached only from nethttpReadResponse, itself inside the ioBlock in nethttpExchangeFramed
 func nethttpCopyChunked(r *bufio.Reader, buf *bytes.Buffer) error {
 	for {
 		line, err := r.ReadString('\n')
