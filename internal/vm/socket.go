@@ -226,6 +226,30 @@ func (vm *VM) registerSocketClass(basic *RClass) {
 		"IPPROTO_TCP": 6, "IPPROTO_UDP": 17, "IPPROTO_IP": 0,
 		"SOL_SOCKET": 0xffff, "SO_REUSEADDR": 4, "SO_KEEPALIVE": 8, "SO_BROADCAST": 32,
 		"SO_RCVBUF": 0x1002, "SO_SNDBUF": 0x1001, "TCP_NODELAY": 1,
+		// SO_OOBINLINE, which MRI defines and this table did not. ruby/spec's FTP
+		// fixture server calls
+		//
+		//	@socket.setsockopt(Socket::SOL_SOCKET, Socket::SO_OOBINLINE, 1)
+		//
+		// (library/net-ftp/fixtures/server.rb:25) inside the Thread that serves
+		// the connection, so an undefined constant raises NameError there and
+		// kills that thread silently.
+		//
+		// ⛔ IT IS NOT, HOWEVER, THE CAUSE OF #916, and this comment said it was
+		// until the measurement refuted it. Adding the constant left the sweep
+		// byte-identical -- 39 files still killed by the clock, 459/17, -442 --
+		// because the fixture's thread never reaches this line: it is still
+		// parked in TCPServer#accept while a client is connected and waiting.
+		// A fix that does not move the measurement is not a fix, whatever its
+		// author expected.
+		//
+		// The value is BSD/darwin's, like its neighbours above, and is never
+		// passed to the kernel: BasicSocket#setsockopt is a no-op on a connected
+		// stream and Socket#setsockopt stores the (level, optname) pair in a map
+		// for #getsockopt to read back. The numbers here are symbolic, which is
+		// why a darwin value is not a portability bug today -- and why that
+		// whole table deserves an audit it has not had.
+		"SO_OOBINLINE": 0x0100,
 		// getnameinfo flags (BSD numbering; the values only matter relative to the
 		// bitmask tests in Socket.getnameinfo).
 		"NI_NUMERICHOST": 2, "NI_NUMERICSERV": 8, "NI_NOFQDN": 1, "NI_NAMEREQD": 4, "NI_DGRAM": 16,
