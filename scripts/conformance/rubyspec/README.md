@@ -295,6 +295,54 @@ Those 50 files are the surface any claim about the move has to cover.
 It remains the right instrument for the other half too: a `UPDATE_BASELINE=1`
 that absorbs a loss silently.
 
+## Making the reference interpreter able to answer — `cmd/mriref`
+
+⛔ **An MRI that cannot load its bundled gems scores a clean ZERO on every file,
+and a sweep reports that as a result.**
+
+A pkgx-installed MRI 4.0.6 on a developer machine starts with RubyGems absent
+from its load path:
+
+```text
+`RubyGems' were not loaded.
+cannot load such file -- rubygems (LoadError)
+```
+
+`net/ftp`, `net/http`, `stringio`, `bigdecimal` and most of the rest have been
+**bundled gems** since Ruby 3.1, so on such an interpreter every spec file that
+needs one raises `LoadError` before a single example runs. It does not error
+out of the sweep — it contributes 0, 56 times, and `cmd/specdelta` prints:
+
+```text
+56 file(s): control 0 passing, treatment 331 passing, +331
+```
+
+which reads exactly like rbgo beating the reference. The whole of
+`library/net-ftp` was compared that way once before anyone read the
+interpreter's stderr: **a per-file score cannot tell "failed every example"
+from "never started".**
+
+`cmd/mriref` puts every gem's `lib` on the load path — what RubyGems would have
+resolved anyway — and refuses to run if the gem root yields none, since an
+empty `-I` list reproduces the exact failure it exists to prevent:
+
+```sh
+MRIREF_RUBY=~/.pkgx/ruby-lang.org/v4.0.6/bin/ruby \
+MRIREF_GEMS=~/.pkgx/ruby-lang.org/v4.0.6/lib/ruby/gems/4.0.0/gems \
+go run ./scripts/conformance/rubyspec/cmd/specdelta \
+  -root ~/ruby-spec-corpus -dir library/net-ftp -move 4.0.6:4.0.9 \
+  $(go env GOPATH)/bin/mriref ./rbgo
+```
+
+It takes one script, so it drops into `cmd/specdelta` and `run.sh` wherever an
+interpreter is named.
+
+**The check that it is working:** with the gems on the path that interpreter
+scores **459** on `library/net-ftp`'s 56 files — the same figure this
+repository's own dated sweep recorded for MRI. An oracle that reproduces a
+number measured elsewhere is one you can lean on; one that scores zero is not
+an oracle at all.
+
 ## Asking the reference interpreter — `cmd/oracle`
 
 Every parity fix starts with *"what does MRI actually do here?"*, and the obvious
