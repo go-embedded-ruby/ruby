@@ -77,6 +77,29 @@ func (vm *VM) registerFTPErrors(netMod, std *RClass) {
 // options) connects (and logs in when a username is supplied); open is new plus
 // the ensured-close block form.
 func (vm *VM) registerFTPClassMethods(ftp *RClass) {
+	// Net::FTP.default_passive, held in the CLASS VARIABLE the reference
+	// implementation uses (net-ftp 0.3.9 lib/net/ftp.rb:96 `@@default_passive =
+	// true`, accessors at :159-167). Storing it there rather than in a Go field
+	// is not decoration: a Ruby program can reach it through
+	// Net::FTP.class_variable_get(:@@default_passive), as it can under MRI, and
+	// there is one place holding the value instead of two that can disagree.
+	//
+	// ⛔ ruby/spec's library/net-ftp/spec_helper.rb sets this to FALSE for the
+	// whole suite, and its fixture server implements PORT/EPRT and has no `pasv`
+	// method at all. Without the accessor the helper's `if
+	// defined?(Net::FTP.default_passive)` guard was skipped in SILENCE and every
+	// spec ran against a mode the fixture cannot speak (#916).
+	ftp.cvars["@@default_passive"] = object.Bool(true)
+	ftp.smethods["default_passive"] = &Method{name: "default_passive", owner: ftp,
+		native: func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+			return object.Bool(ftpDefaultPassive(ftp))
+		}}
+	ftp.smethods["default_passive="] = &Method{name: "default_passive=", owner: ftp,
+		native: func(_ *VM, _ object.Value, a []object.Value, _ *Proc) object.Value {
+			ftp.cvars["@@default_passive"] = object.Bool(a[0].Truthy())
+			return a[0]
+		}}
+
 	newFn := func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		f := newFTPObj(vm, ftp)
 		vm.ftpInit(f, args)
@@ -109,19 +132,32 @@ func (vm *VM) ftpWithClose(f *ftpObj, blk *Proc) (res object.Value) {
 // the legacy positional user / passwd / acct, and a login when a username is
 // present.
 func (vm *VM) ftpInit(f *ftpObj, args []object.Value) {
-	if len(args) == 0 || object.IsNil(args[0]) {
-		return
-	}
-	host := strArg(args[0])
 	port := 21
 	user, passwd, acct := "", "", ""
 	userGiven, passwdGiven := false, false
 
+	// ⛔ THE OPTIONS ARE APPLIED WHETHER OR NOT A HOST WAS GIVEN. This used to
+	// return before reading them when args[0] was nil, so
+	// `Net::FTP.new(nil, passive: true)` silently ignored EVERY option -- found
+	// by running the settings against the reference rather than against itself:
+	// rbgo answered `false` where net-ftp 0.3.9 answers `true`.
+	//
+	// MRI's initialize sets @binary / @passive / @debug_mode / the timeouts
+	// first and only then, separately, connects when a host is present
+	// (lib/net/ftp.rb:285-300). ruby/spec drives exactly that shape:
+	// `@ftp.send(:initialize, nil, options)` then asserts `passive`
+	// (library/net-ftp/initialize_spec.rb:201-226).
 	if len(args) >= 2 {
 		if h, ok := args[1].(*object.Hash); ok {
 			port, user, userGiven, passwd, passwdGiven, acct = vm.ftpApplyOpts(f, h, port)
 		}
 	}
+
+	// No host: configured, not connected.
+	if len(args) == 0 || object.IsNil(args[0]) {
+		return
+	}
+	host := strArg(args[0])
 
 	vm.ftpConnect(f, host, port)
 	if userGiven {
@@ -139,7 +175,13 @@ func (vm *VM) ftpApplyOpts(f *ftpObj, h *object.Hash, port int) (int, string, bo
 			port = clampInt(n)
 		}
 	}
-	if v, ok := ftpOptHash(h, "passive"); ok {
+	// ⛔ MRI tests the VALUE, not the key: `if options[:passive].nil?` falls back
+	// to @@default_passive (ftp.rb:286-290). So `passive: nil` is NOT a request
+	// for active mode — it is "no opinion". Reading the key's presence instead
+	// would make an explicit nil mean false, which is the opposite. This differs
+	// from read_timeout in the same Hash, where nil IS a request (for no bound),
+	// and the two are easy to conflate because they sit three lines apart.
+	if v, ok := ftpOptHash(h, "passive"); ok && !object.IsNil(v) {
 		f.passive = v.Truthy()
 	}
 	// open_timeout and read_timeout are set from the options Hash exactly as

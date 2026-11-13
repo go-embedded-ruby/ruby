@@ -98,11 +98,28 @@ const ftpDefaultReadTimeout = 60
 
 // newFTPObj builds a Net::FTP with MRI's timeout defaults in place. Every
 // construction site goes through it so a new one cannot be born unbounded.
+// ftpDefaultPassive reads Net::FTP's @@default_passive. An absent or non-boolean
+// value reads as MRI's documented default, true: this is consulted on every
+// construction, and a class variable someone deleted must not silently flip the
+// transfer mode of the next connection.
+func ftpDefaultPassive(cls *RClass) bool {
+	if cls == nil {
+		return true
+	}
+	v, ok := cls.cvars["@@default_passive"]
+	if !ok || object.IsNil(v) {
+		return true
+	}
+	return v.Truthy()
+}
+
 func newFTPObj(vm *VM, cls *RClass) *ftpObj {
 	return &ftpObj{
-		cls:         cls,
-		binary:      true,
-		passive:     true,
+		cls:    cls,
+		binary: true,
+		// Read at CONSTRUCTION, as MRI does: Net::FTP.default_passive = false
+		// affects connections made after it, never one already open.
+		passive:     ftpDefaultPassive(cls),
 		openTimeout: object.NilV,
 		readTimeout: object.IntValue(ftpDefaultReadTimeout),
 		vm:          vm,

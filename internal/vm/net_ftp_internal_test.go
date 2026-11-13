@@ -1696,6 +1696,83 @@ func TestFTPTimeoutErrIgnoresANonTimeout(t *testing.T) {
 	ftpTimeoutErr(nil, "open")
 }
 
+// Net::FTP.default_passive, and the two things that made it worth running
+// against the reference rather than against our own expectations.
+//
+// ⛔ WHY IT MATTERS BEYOND THE ACCESSOR: ruby/spec's library/net-ftp/spec_helper.rb
+// is `if defined?(Net::FTP.default_passive) then Net::FTP.default_passive = false`,
+// and its fixture server implements PORT/EPRT with NO `pasv` method at all.
+// While the accessor was missing, that guard was skipped in SILENCE and all 56
+// files ran in a mode the fixture cannot speak (#916).
+//
+// ⛔ AND THE DEFECT THE COMPARISON FOUND: `Net::FTP.new(nil, passive: true)`
+// answered false. ftpInit returned before reading the options Hash whenever the
+// host was nil, so EVERY option was dropped on that path -- the shape of a
+// mechanism wired at only some of its doors, again. MRI applies the options
+// first and connects separately (net-ftp 0.3.9 lib/net/ftp.rb:285-300), which is
+// exactly what library/net-ftp/initialize_spec.rb:201-226 drives with
+// `@ftp.send(:initialize, nil, options)`.
+func TestFTPDefaultPassiveMatchesTheReference(t *testing.T) {
+	got := runSrc(t, `require "net/ftp"
+p Net::FTP.default_passive
+p Net::FTP.new.passive
+before = Net::FTP.new
+Net::FTP.default_passive = false
+p Net::FTP.default_passive
+p before.passive
+p Net::FTP.new.passive
+p Net::FTP.new(nil, passive: nil).passive
+p Net::FTP.new(nil, passive: true).passive
+p Net::FTP.new(nil, passive: false).passive
+Net::FTP.default_passive = true
+p Net::FTP.new(nil, passive: nil).passive
+p Net::FTP.new(nil, passive: false).passive
+p(Net::FTP.default_passive = false)
+p Net::FTP.class_variable_get(:@@default_passive)
+`)
+	// Each line is net-ftp 0.3.9's answer, read off lib/net/ftp.rb:96 (the
+	// default), :159-167 (the accessors) and :286-290 (nil means "no opinion",
+	// so it falls back to the default while false and true are requests).
+	want := "true\n" + // default_passive starts true
+		"true\n" + // so does a fresh connection
+		"false\n" + // the setter takes
+		"true\n" + // ⛔ a connection built BEFORE the change keeps its mode
+		"false\n" + // one built after follows it
+		"false\n" + // passive: nil is no opinion -> the default
+		"true\n" + // passive: true is a request, even with a nil host
+		"false\n" + // and so is passive: false
+		"true\n" + // default back to true: nil follows it
+		"false\n" + // while an explicit false still wins
+		"false\n" + // the writer returns its argument
+		"false" // and the value lives in the class variable MRI uses (runSrc trims the last newline)
+	if got != want {
+		t.Errorf("default_passive table:\ngot  %q\nwant %q", got, want)
+	}
+}
+
+// ftpDefaultPassive's fallbacks, which no Ruby program can reach: it is
+// consulted on EVERY construction, so a missing or nil class variable must read
+// as MRI's documented default rather than silently flipping the transfer mode of
+// the next connection. Asserted directly because "it cannot happen" is how a
+// default nobody chose gets shipped.
+func TestFTPDefaultPassiveFallsBackToMRIsDefault(t *testing.T) {
+	if !ftpDefaultPassive(nil) {
+		t.Error("a nil class must read as true, MRI's default")
+	}
+	cls := &RClass{cvars: map[string]object.Value{}}
+	if !ftpDefaultPassive(cls) {
+		t.Error("an absent @@default_passive must read as true")
+	}
+	cls.cvars["@@default_passive"] = object.NilV
+	if !ftpDefaultPassive(cls) {
+		t.Error("a nil @@default_passive must read as true, not as false")
+	}
+	cls.cvars["@@default_passive"] = object.Bool(false)
+	if ftpDefaultPassive(cls) {
+		t.Error("an explicit false must be honoured")
+	}
+}
+
 // ⛔ THE DEFECT SHAPE THIS REPOSITORY KEEPS REPEATING: a mechanism wired at only
 // SOME of its doors. open_timeout and read_timeout each have three doors -- the
 // constructor's options Hash, the attr writer, and the default -- and the Hash
