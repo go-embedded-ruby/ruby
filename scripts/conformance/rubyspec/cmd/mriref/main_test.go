@@ -91,10 +91,17 @@ func TestBuildArgsPutsEveryGemLibBeforeTheScript(t *testing.T) {
 	}
 	// ⛔ Sorted, because a load path that changes order between runs can change
 	// which gem wins a name collision, and an oracle has to be reproducible.
-	if !strings.HasSuffix(got[1], "net-ftp-0.3.9/lib") ||
-		!strings.HasSuffix(got[3], "net-protocol-0.2.2/lib") ||
-		!strings.HasSuffix(got[5], "timeout-0.6.0/lib") {
-		t.Errorf("the -I list is not in sorted order: %v", got[:6])
+	//
+	// Compared by the GEM DIRECTORY'S NAME, not by a "<gem>/lib" suffix: the
+	// first version of this test used the suffix and passed on macOS and Linux
+	// while failing on Windows, where the separator is `\`. The order was right
+	// all along; the assertion was not portable. Naming the directory is also
+	// what the check actually means.
+	want := []string{"net-ftp-0.3.9", "net-protocol-0.2.2", "timeout-0.6.0"}
+	for i, w := range want {
+		if gem := filepath.Base(filepath.Dir(got[2*i+1])); gem != w {
+			t.Errorf("-I entry %d is %q, want the gem %q (list: %v)", i, gem, w, got[:6])
+		}
 	}
 	if got[6] != "library/net-ftp/acct_spec.rb" || got[7] != "--extra" {
 		t.Errorf("the caller's arguments must come last, got %v", got[6:])
