@@ -29,6 +29,60 @@ func judge(t *testing.T, profile string, extra ...string) (string, error) {
 	return out.String(), err
 }
 
+// ⛔ -require's whole point is the THIRD case below. A check built on the
+// sub-100 set alone cannot tell "this function is fully covered" from "this
+// profile has never heard of that name" -- both are absence -- so a typo, a
+// rename or a profile taken over the wrong package would read as success. That
+// is the `go test -run` failure mode: exit 0 on a selection that matched
+// nothing.
+func TestRequireTellsCoveredFromAbsent(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		require string
+		wantBad bool
+		wantStr string
+	}{
+		{"a function at 100% passes", "baz", false, "all required functions at 100%"},
+		{"a function below 100% fails", "foo", true, "BELOW 100%"},
+		// The control this tool exists for.
+		{"a name that matches nothing FAILS", "nosuchfunc", true, "matched nothing"},
+		// One good name must not cover for one bad one: the verdict is per name.
+		{"a real name beside an absent one still fails", "baz,nosuchfunc", true, "matched nothing"},
+		{"file:name narrows to one file", "internal/vm/c.go:baz", false, "all required functions at 100%"},
+		// Right name, wrong file: this is an absence, not a pass.
+		{"file:name that points at the wrong file fails", "internal/vm/a.go:baz", true, "matched nothing"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var out strings.Builder
+			err := run([]string{"-require", tc.require}, strings.NewReader(profile2), &out)
+			if bad := errors.Is(err, errRegression); bad != tc.wantBad {
+				t.Errorf("regression=%v, want %v (err=%v)\n%s", bad, tc.wantBad, err, out.String())
+			}
+			if !strings.Contains(out.String(), tc.wantStr) {
+				t.Errorf("output does not mention %q:\n%s", tc.wantStr, out.String())
+			}
+			// ⛔ The denominator is printed beside every verdict, so a run that
+			// read nothing cannot be mistaken for a clean one.
+			if !strings.Contains(out.String(), "in a profile of 3") {
+				t.Errorf("the verdict does not report what it read:\n%s", out.String())
+			}
+		})
+	}
+}
+
+// -require needs no record: it answers from the profile alone, which is what
+// makes it runnable before a push rather than only in the lane that keeps one.
+func TestRequireNeedsNoRecordButStillRefusesAnEmptyList(t *testing.T) {
+	var out strings.Builder
+	if err := run([]string{"-require", " , "}, strings.NewReader(profile2), &out); err == nil || errors.Is(err, errRegression) {
+		t.Errorf("an empty -require must be a usage refusal, got %v", err)
+	}
+	out.Reset()
+	if err := run(nil, strings.NewReader(profile2), &out); err == nil {
+		t.Error("without -record and without -require it must refuse")
+	}
+}
+
 // TestCovRatchetVerdicts: the answer must depend on the input, and in
 // particular a function newly below 100% must fail EVEN WHEN the rounded total
 // still reads 100.0% -- which is the whole defect this replaces. On main both
@@ -158,7 +212,7 @@ func TestSameFunctionTwiceIsLegalNotMalformed(t *testing.T) {
 	const prof = "github.com/go-embedded-ruby/ruby/a.go:1:\tf\t50.0%\n" +
 		"github.com/go-embedded-ruby/ruby/a.go:9:\tf\t60.0%\n" +
 		"total:\t(statements)\t100.0%\n"
-	got, err := parse(strings.NewReader(prof), "profile", "github.com/go-embedded-ruby/ruby/")
+	got, _, err := parse(strings.NewReader(prof), "profile", "github.com/go-embedded-ruby/ruby/")
 	if err != nil {
 		t.Fatalf("two same-named functions must parse, got %v", err)
 	}
@@ -261,7 +315,7 @@ github.com/x/y/internal/vm/csv.go:280:	ToS	100.0%
 github.com/x/y/internal/vm/io.go:10:	displayStr	90.0%
 total:	(statements)	99.9%
 `
-	got, err := parse(strings.NewReader(prof), "profile", "github.com/x/y")
+	got, _, err := parse(strings.NewReader(prof), "profile", "github.com/x/y")
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -324,11 +378,11 @@ total:	(statements)	99.9%
 github.com/x/y/a.go:120:	ToS	50.0%
 total:	(statements)	99.9%
 `
-	b, err := parse(strings.NewReader(before), "before", "github.com/x/y")
+	b, _, err := parse(strings.NewReader(before), "before", "github.com/x/y")
 	if err != nil {
 		t.Fatalf("before: %v", err)
 	}
-	a, err := parse(strings.NewReader(after), "after", "github.com/x/y")
+	a, _, err := parse(strings.NewReader(after), "after", "github.com/x/y")
 	if err != nil {
 		t.Fatalf("after: %v", err)
 	}

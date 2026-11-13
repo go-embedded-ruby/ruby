@@ -88,11 +88,16 @@ type entry struct {
 }
 
 // parse reads `go tool cover -func` output and returns every function below
-// 100%, keyed by identity. The total line is recognised and skipped rather than
-// silently mis-parsed: a parser that swallows what it does not understand turns
-// a format change into a clean result.
-func parse(r io.Reader, what, mod string) (map[fn]entry, error) {
+// 100%, keyed by identity, plus EVERY function it read. The total line is
+// recognised and skipped rather than silently mis-parsed: a parser that swallows
+// what it does not understand turns a format change into a clean result.
+//
+// The second map exists for -require, which has to tell "this function is at
+// 100%" apart from "this profile has never heard of that function". The first
+// map cannot: both are simply absent from it.
+func parse(r io.Reader, what, mod string) (map[fn]entry, map[fn]entry, error) {
 	out := make(map[fn]entry)
+	all := make(map[fn]entry)
 	seen := make(map[string]int) // (file, name) -> how many seen so far, in file order
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
@@ -104,18 +109,18 @@ func parse(r io.Reader, what, mod string) (map[fn]entry, error) {
 		}
 		f := strings.Fields(line)
 		if len(f) < 2 || !strings.HasSuffix(f[len(f)-1], "%") {
-			return nil, fmt.Errorf("%s line %d: not a cover -func record: %q", what, n, line)
+			return nil, nil, fmt.Errorf("%s line %d: not a cover -func record: %q", what, n, line)
 		}
 		pct, err := strconv.ParseFloat(strings.TrimSuffix(f[len(f)-1], "%"), 64)
 		if err != nil {
-			return nil, fmt.Errorf("%s line %d: %q is not a percentage", what, n, f[len(f)-1])
+			return nil, nil, fmt.Errorf("%s line %d: %q is not a percentage", what, n, f[len(f)-1])
 		}
 		if f[0] == "total:" {
 			seenTotal = true
 			continue
 		}
 		if len(f) < 3 {
-			return nil, fmt.Errorf("%s line %d: expected file:line: name pct, got %q", what, n, line)
+			return nil, nil, fmt.Errorf("%s line %d: expected file:line: name pct, got %q", what, n, line)
 		}
 		file, ln := splitPos(f[0], mod)
 		// The ordinal is assigned BEFORE the 100% filter, so it does not shift
@@ -123,22 +128,23 @@ func parse(r io.Reader, what, mod string) (map[fn]entry, error) {
 		nameKey := file + "\x00" + f[1]
 		ord := seen[nameKey]
 		seen[nameKey] = ord + 1
+		k := fn{file: file, name: f[1], ord: ord}
+		all[k] = entry{fn: k, pct: pct, line: ln}
 		if pct >= 100 {
 			continue
 		}
-		k := fn{file: file, name: f[1], ord: ord}
 		if prev, dup := out[k]; dup {
-			return nil, fmt.Errorf("%s line %d: %s appears twice (was %.1f%%)", what, n, k, prev.pct)
+			return nil, nil, fmt.Errorf("%s line %d: %s appears twice (was %.1f%%)", what, n, k, prev.pct)
 		}
 		out[k] = entry{fn: k, pct: pct, line: ln}
 	}
 	if err := sc.Err(); err != nil {
-		return nil, fmt.Errorf("reading %s: %w", what, err)
+		return nil, nil, fmt.Errorf("reading %s: %w", what, err)
 	}
 	if !seenTotal {
-		return nil, fmt.Errorf("%s has no total: line -- a profile this tool could not read must not be reported as clean", what)
+		return nil, nil, fmt.Errorf("%s has no total: line -- a profile this tool could not read must not be reported as clean", what)
 	}
-	return out, nil
+	return out, all, nil
 }
 
 // splitPos splits "<module>/internal/vm/vm.go:1473:" into its repo-relative path
@@ -235,10 +241,11 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 	lane := fs.String("lane", "", "lane name, for the record's header")
 	mod := fs.String("module", "github.com/go-embedded-ruby/ruby/", "module path prefix to strip from each file path")
 	update := fs.Bool("update", false, "rewrite the record from this run and exit 0")
+	require := fs.String("require", "", "comma-separated functions (`name` or `file:name`) that must be at 100% in this profile")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *record == "" {
+	if *record == "" && *require == "" {
 		return fmt.Errorf("-record is required")
 	}
 
@@ -251,9 +258,13 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 		defer f.Close()
 		src = f
 	}
-	got, err := parse(src, "profile", *mod)
+	got, all, err := parse(src, "profile", *mod)
 	if err != nil {
 		return err
+	}
+
+	if *require != "" {
+		return requireFull(stdout, all, *require)
 	}
 
 	if *update {
@@ -315,6 +326,90 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 		fmt.Fprintf(stdout, "\n%d function(s) reached 100%% -- rerun with UPDATE_COVERAGE=1 to lock it in.\n", len(fixed))
 	}
 	fmt.Fprintln(stdout, "\ncoverage ratchet OK -- no function newly below 100%")
+	return nil
+}
+
+// requireFull answers one question, before the push rather than after the CI
+// run: are the functions this commit CLAIMS to have covered actually at 100% in
+// a profile taken from this working tree?
+//
+// ⛔ WHY IT EXISTS. The ratchet already catches this, but it catches it in CI,
+// 47 minutes later, on a lane that has to run the whole suite. Twice in one day
+// a commit written to answer the ratchet did not move the measurement at all
+// and came back red on the SAME two functions. A gate that refuses after the
+// spend teaches the lesson; a gate that refuses before it prevents the mistake.
+//
+// ⛔ A SPEC THAT MATCHES NOTHING IS A FAILURE, NOT A PASS. This is the whole
+// reason the tool takes the full profile and not just the sub-100 set: with the
+// sub-100 set alone, "ftpTimeoutErr is at 100%" and "there is no function here
+// by that name" are the same observation -- absence. A typo, a renamed
+// function, a profile taken over the wrong package would all read as success,
+// and the check would be worse than nothing because it would be believed. The
+// same shape as `go test -run` exiting 0 on a pattern that selected nothing.
+func requireFull(w io.Writer, all map[fn]entry, spec string) error {
+	type want struct{ file, name string }
+	var wants []want
+	for _, s := range strings.Split(spec, ",") {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		if i := strings.LastIndexByte(s, ':'); i >= 0 {
+			wants = append(wants, want{file: s[:i], name: s[i+1:]})
+			continue
+		}
+		wants = append(wants, want{name: s})
+	}
+	if len(wants) == 0 {
+		return fmt.Errorf("-require named no function")
+	}
+
+	var missing, below []string
+	matched := 0
+	for _, w2 := range wants {
+		var hits []entry
+		for k, e := range all {
+			if k.name != w2.name {
+				continue
+			}
+			// A bare name matches in any file; file:name matches that path or
+			// any suffix of it, so a repo-relative path and a bare basename
+			// both work.
+			if w2.file != "" && k.file != w2.file && !strings.HasSuffix(k.file, "/"+w2.file) {
+				continue
+			}
+			hits = append(hits, e)
+		}
+		if len(hits) == 0 {
+			missing = append(missing, w2.name)
+			continue
+		}
+		matched += len(hits)
+		for _, e := range hits {
+			if e.pct < 100 {
+				below = append(below, fmt.Sprintf("%s  %.1f%%", e.fn, e.pct))
+			}
+		}
+	}
+	sort.Strings(missing)
+	sort.Strings(below)
+
+	// Report the denominator beside the verdict: a check that says only "OK"
+	// cannot be told from one that looked at nothing.
+	fmt.Fprintf(w, "required %d function(s), matched %d record(s) in a profile of %d\n",
+		len(wants), matched, len(all))
+	section(w, "NOT IN THIS PROFILE -- the name matched nothing", missing)
+	section(w, "BELOW 100%", below)
+
+	if len(missing) > 0 {
+		fmt.Fprintf(w, "\n::error::%d name(s) matched nothing; this profile cannot answer for them\n", len(missing))
+		return errRegression
+	}
+	if len(below) > 0 {
+		fmt.Fprintf(w, "\n::error::%d required function(s) below 100%% -- named above\n", len(below))
+		return errRegression
+	}
+	fmt.Fprintln(w, "\nall required functions at 100%")
 	return nil
 }
 
