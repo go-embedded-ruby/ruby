@@ -455,6 +455,33 @@ srv.close
 	}
 }
 
+// ⛔ A VACUOUS PASS MADE VISIBLE. core/io/nonblock_spec.rb asks
+// `TCPServer.open(0) { |s| s.nonblock?.should == true }`, and while `open`
+// ignored its block that body never ran: the example passed with nothing
+// asserted, and the conformance ratchet counted it. Honouring the block turned
+// it into a NoMethodError and the ratchet reported 4 → 3 on that file — a
+// regression in the count, not in the behaviour. This is the method the example
+// had been asking for all along.
+//
+// `require "io/nonblock"` first, because that is the gate MRI puts it behind and
+// the same hook installs it on IO and on the sockets.
+func TestSocketNonblockIsInstalledByTheIONonblockFeature(t *testing.T) {
+	got := runSrc(t, `require "socket"
+srv = TCPServer.new("127.0.0.1", 0)
+p srv.respond_to?(:nonblock?)
+require "io/nonblock"
+p srv.nonblock?
+p TCPSocket.instance_methods.include?(:nonblock?)
+srv.close
+`)
+	// Before the require it is absent, as in MRI; after it, a socket reports
+	// true — Go puts every socket descriptor in non-blocking mode and polls it.
+	want := "false\ntrue\ntrue"
+	if got != want {
+		t.Errorf("io/nonblock on sockets:\ngot  %q\nwant %q", got, want)
+	}
+}
+
 func TestSocketFeatureRequire(t *testing.T) {
 	if got := runSrc(t, `p require "socket"; p require "socket"`); got != "true\nfalse" {
 		t.Fatalf("require socket = %q", got)

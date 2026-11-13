@@ -109,6 +109,43 @@ func (vm *VM) registerSocket() {
 // registerTCPSocket installs TCPSocket.new plus the connected-socket instance
 // surface (read/gets/readpartial/write/print/puts/<</flush/close/closed?/eof?/
 // setsockopt/peeraddr/local_address), all over the live net.Conn.
+// installSocketNonblock adds `nonblock?` to the socket classes when
+// `io/nonblock` is required. IO#nonblock? is installed on IO alone and reads an
+// *IOObj field, which a socket is not, so without this `TCPServer#nonblock?`
+// does not exist.
+//
+// ⛔ HOW THIS GAP CAME TO LIGHT, which is the interesting part: the one spec
+// that asks for it is
+//
+//	TCPServer.open(0) { |socket| socket.nonblock?.should == true }
+//
+// and while `open` ignored its block (see socketOpenWithBlock) that body NEVER
+// RAN. The example passed with no assertion evaluated — a vacuous pass — and
+// the conformance ratchet counted it. Making `open` honour its block turned
+// that into a NoMethodError, so the ratchet reported core/io/nonblock_spec.rb
+// as a regression, 4 → 3. Nothing regressed: a test that had never run started
+// running.
+//
+// The answer is `true` because it is simply true here: Go's net package puts
+// every socket descriptor in non-blocking mode and multiplexes it through the
+// runtime poller, which is also why MRI reports true for a socket by default.
+//
+// ⛔ `nonblock=` is deliberately NOT defined. The blocking mode of these
+// descriptors belongs to the Go runtime, and a writer that accepted `false` and
+// changed nothing would be a more expensive lie than a missing method. MRI does
+// allow it; that divergence is stated rather than papered over.
+func (vm *VM) installSocketNonblock() {
+	for _, name := range []string{"TCPSocket", "TCPServer", "Socket", "UNIXSocket", "UNIXServer", "UDPSocket"} {
+		cls, ok := vm.consts[name].(*RClass)
+		if !ok {
+			continue
+		}
+		cls.define("nonblock?", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+			return object.Bool(true)
+		})
+	}
+}
+
 // socketOpenWithBlock gives a socket constructor MRI's `open` semantics: with a
 // block it yields the socket, CLOSES it however the block leaves — a normal
 // return, an exception, a break — and answers with the BLOCK's value.
