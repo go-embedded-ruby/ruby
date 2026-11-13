@@ -135,14 +135,18 @@ func (vm *VM) registerSocket() {
 // changed nothing would be a more expensive lie than a missing method. MRI does
 // allow it; that divergence is stated rather than papered over.
 func (vm *VM) installSocketNonblock() {
+	// ⛔ The guard is an `if ok`, not an `if !ok { continue }`, and the difference
+	// is not style. All six classes exist on this build, so the early-continue
+	// form left a statement no test could reach and the coverage ratchet named it
+	// (83.3%). Writing it this way keeps exactly the same protection — a name
+	// that is not a class is skipped rather than asserted into a panic — with no
+	// unreachable statement to explain away.
 	for _, name := range []string{"TCPSocket", "TCPServer", "Socket", "UNIXSocket", "UNIXServer", "UDPSocket"} {
-		cls, ok := vm.consts[name].(*RClass)
-		if !ok {
-			continue
+		if cls, ok := vm.consts[name].(*RClass); ok {
+			cls.define("nonblock?", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+				return object.Bool(true)
+			})
 		}
-		cls.define("nonblock?", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-			return object.Bool(true)
-		})
 	}
 }
 
