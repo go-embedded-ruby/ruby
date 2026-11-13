@@ -406,7 +406,11 @@ func (f *ftpObj) transfercmd(cmd string) net.Conn {
 // dialData dials a passive data address, raising Net::FTPConnectionError when the
 // connection cannot be made.
 func (f *ftpObj) dialData(host string, port int) net.Conn {
-	conn, err := net.Dial("tcp", net.JoinHostPort(host, strconv.Itoa(port)))
+	var conn net.Conn
+	var err error
+	// Only the dial goes inside: ftpConnErr raises, and a panic crossing a
+	// released GVL would unwind without re-acquiring it.
+	f.ftpIO(func() { conn, err = net.Dial("tcp", net.JoinHostPort(host, strconv.Itoa(port))) })
 	if err != nil {
 		ftpConnErr(err)
 	}
@@ -415,8 +419,16 @@ func (f *ftpObj) dialData(host string, port int) net.Conn {
 
 // acceptData accepts the server's active-mode data callback, raising
 // Net::FTPConnectionError when the accept fails.
+// ⛔ THIS IS THE ONE #916 IS ABOUT. In ACTIVE mode the client listens and the
+// server dials back, so a Ruby program that serves itself has both ends in one
+// process. Holding the GVL here parks every other Ruby thread -- including the
+// one that would make the call this Accept is waiting for. ruby/spec's net-ftp
+// fixtures run exactly that shape, and their spec_helper puts Net::FTP into
+// active mode.
 func (f *ftpObj) acceptData(ln net.Listener) net.Conn {
-	conn, err := ln.Accept()
+	var conn net.Conn
+	var err error
+	f.ftpIO(func() { conn, err = ln.Accept() })
 	if err != nil {
 		ftpConnErr(err)
 	}
@@ -428,7 +440,11 @@ func (f *ftpObj) acceptData(ln net.Listener) net.Conn {
 func (f *ftpObj) sendData(conn net.Conn, data []byte, blocksize int) {
 	for off := 0; off < len(data); off += blocksize {
 		end := min(off+blocksize, len(data))
-		if _, err := conn.Write(data[off:end]); err != nil {
+		// A write blocks once the peer stops reading and the window fills, so it
+		// releases the GVL like every other call on this connection.
+		var err error
+		f.ftpIO(func() { _, err = conn.Write(data[off:end]) })
+		if err != nil {
 			conn.Close()
 			ftpConnErr(err)
 		}
@@ -482,7 +498,9 @@ func (f *ftpObj) retrlines(cmd string, fn func(string)) {
 	conn := f.transfercmd(cmd)
 	br := bufio.NewReader(conn)
 	for {
-		line, err := br.ReadString('\n')
+		var line string
+		var err error
+		f.ftpIO(func() { line, err = br.ReadString('\n') })
 		if line != "" {
 			fn(ftpChomp(line))
 		}
@@ -501,7 +519,9 @@ func (f *ftpObj) retrbinary(cmd string, blocksize int, fn func([]byte)) {
 	conn := f.transfercmd(cmd)
 	buf := make([]byte, blocksize)
 	for {
-		n, err := conn.Read(buf)
+		var n int
+		var err error
+		f.ftpIO(func() { n, err = conn.Read(buf) })
 		if n > 0 {
 			chunk := make([]byte, n)
 			copy(chunk, buf[:n])
