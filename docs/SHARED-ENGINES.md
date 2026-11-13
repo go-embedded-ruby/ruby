@@ -67,8 +67,37 @@ an engine four languages share is a shared denial of service**, needing no
 exploit, only silence. When `net-*` is extracted, the neutral engine takes a
 deadline in its own API rather than trusting every caller to impose one.
 
-⛔ `net-ftp` is **mid-change in this repository** and is not available for
-extraction until #916 settles.
+#### Where the consumer's half now stands (2026-11-13)
+
+The binding side has since been done, which changes what a reader should expect
+from the code without changing the conclusion above:
+
+- **Bounded** — `Net::FTP` takes MRI's `open_timeout` (default `nil`, an
+  unbounded connect) and `read_timeout` (default `60`), from the constructor's
+  options Hash and from the attr writers, and arms a deadline **per read**
+  rather than per exchange ([#921](https://github.com/go-embedded-ruby/ruby/pull/921),
+  merged). A non-positive value means *no bound*, as in MRI — not "expire at
+  once".
+- **The GVL is released** around the control connection's blocking calls, and
+  an AST gate refuses a new blocking socket call that holds it
+  ([#924](https://github.com/go-embedded-ruby/ruby/pull/924)). rbgo emulates a
+  GVL, so a native call that blocks while holding it stops every other Ruby
+  thread: a spec that serves itself had its server thread return from `Accept`
+  and then park on a lock the client was sitting on. Dose-response: a 2 s client
+  deadline made the accept complete at 2.308 s, a 5 s one at 5.307 s, and
+  `ioBlock` at 0.305 s.
+
+⛔ **And yet #916 is not closed, because the measurement did not move.** The
+`library/net-ftp` specs are byte-identical after both changes: still 39 killed,
+still 459/17, still −442. Both fixes are necessary and proved on a minimal
+reproduction; at least one further cause remains, and it is in the
+spec-harness path. Three candidates have been eliminated by reading rather than
+by timing — `setsockopt`/`SO_OOBINLINE` exist, every read in `socket.go`
+already releases the GVL, and the fixture's `ruby_version_is ""..."4.1"` guard
+does open at rbgo's `RUBY_VERSION`.
+
+⛔ `net-ftp` is therefore still **mid-change in this repository** and is not
+available for extraction until #916 settles.
 
 ## First inventory of the 178 `go-ruby-*` modules rbgo binds
 
