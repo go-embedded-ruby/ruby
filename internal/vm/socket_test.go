@@ -406,6 +406,55 @@ func TestSSLVerifyModeResolution(t *testing.T) {
 
 // TestSocketFeatureRequire confirms require "socket" is a provided feature (true
 // once, false after) and does not hit the filesystem.
+// ⛔ `open` WITH A BLOCK CLOSES, AND ANSWERS WITH THE BLOCK'S VALUE. It used to
+// be a bare alias for `new`, so the block form closed nothing and the socket
+// outlived the block — and a peer then waits for an EOF that never comes.
+// ruby/spec's net-http fixture stops its server by writing an unterminated
+// "CLOSE" inside `TCPSocket.open { … }` and joining the server thread; with the
+// socket still open the server's `gets` never returned and all 27
+// library/net-http files hung on that join (#931, #916).
+//
+// Asserted on the socket the block was handed, rather than through a peer, so a
+// regression fails this test instead of hanging it.
+func TestSocketOpenWithABlockClosesAndReturnsTheBlocksValue(t *testing.T) {
+	got := runSrc(t, `require "socket"
+srv = TCPServer.new("127.0.0.1", 0)
+port = srv.addr[1]
+
+# A normal return: the BLOCK's value comes back, not the socket, and the
+# socket is closed.
+sock = nil
+p(TCPSocket.open("127.0.0.1", port) { |s| sock = s; :block_value })
+p sock.closed?
+
+# An exception leaves it closed too -- this is an ensure, not a tidy-up on the
+# happy path.
+boom = nil
+begin
+  TCPSocket.open("127.0.0.1", port) { |s| boom = s; raise "boom" }
+rescue RuntimeError
+  p :raised
+end
+p boom.closed?
+
+# Without a block it still hands back an OPEN socket, exactly as .new does.
+bare = TCPSocket.open("127.0.0.1", port)
+p bare.closed?
+bare.close
+
+# The same contract on TCPServer.open.
+listener = nil
+p(TCPServer.open("127.0.0.1", 0) { |s| listener = s; :served })
+p listener.closed?
+
+srv.close
+`)
+	want := ":block_value\ntrue\n:raised\ntrue\nfalse\n:served\ntrue"
+	if got != want {
+		t.Errorf("open-with-a-block contract:\ngot  %q\nwant %q", got, want)
+	}
+}
+
 func TestSocketFeatureRequire(t *testing.T) {
 	if got := runSrc(t, `p require "socket"; p require "socket"`); got != "true\nfalse" {
 		t.Fatalf("require socket = %q", got)

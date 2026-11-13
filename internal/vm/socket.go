@@ -109,6 +109,37 @@ func (vm *VM) registerSocket() {
 // registerTCPSocket installs TCPSocket.new plus the connected-socket instance
 // surface (read/gets/readpartial/write/print/puts/<</flush/close/closed?/eof?/
 // setsockopt/peeraddr/local_address), all over the live net.Conn.
+// socketOpenWithBlock gives a socket constructor MRI's `open` semantics: with a
+// block it yields the socket, CLOSES it however the block leaves — a normal
+// return, an exception, a break — and answers with the BLOCK's value.
+//
+// ⛔ WHY IT EXISTS. `open` used to be a bare alias for `new`, so the block form
+// closed nothing and the socket outlived the block. The peer then waits for an
+// EOF that never arrives. ruby/spec's net-http fixture shuts its server down by
+// writing an unterminated "CLOSE" inside `TCPSocket.open { … }` and joining the
+// server thread; with the socket still open the server's `gets` never returns,
+// the accept loop never comes back round, and all 27 library/net-http files
+// hung on that join — 27 of the 36 files #916 counts (#931).
+//
+// It closes by sending the CLASS'S OWN `close` rather than reaching into the
+// connection, so there is one close per class instead of a second spelling of
+// it; each of those is already idempotent, so a block that closed the socket
+// itself does not get it closed twice.
+func socketOpenWithBlock(cls *RClass, newFn NativeFn) NativeFn {
+	return func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		v := newFn(vm, self, args, nil)
+		if blk == nil {
+			return v
+		}
+		defer func() {
+			if m := cls.methods["close"]; m != nil && m.native != nil {
+				m.native(vm, v, nil, nil)
+			}
+		}()
+		return vm.callBlock(blk, []object.Value{v})
+	}
+}
+
 func (vm *VM) registerTCPSocket(tcp *RClass) {
 	// TCPSocket.new(host, port) / TCPSocket.open(...) dials a TCP connection.
 	// port accepts an Integer or a String (numeric or service name), as MRI does.
@@ -127,7 +158,7 @@ func (vm *VM) registerTCPSocket(tcp *RClass) {
 		return newTCPSocket(tcp, conn)
 	}
 	tcp.smethods["new"] = &Method{name: "new", owner: tcp, native: newFn}
-	tcp.smethods["open"] = &Method{name: "open", owner: tcp, native: newFn}
+	tcp.smethods["open"] = &Method{name: "open", owner: tcp, native: socketOpenWithBlock(tcp, newFn)}
 
 	defineSocketIO(tcp, func(v object.Value) *tcpSocket { return asTCPSocket(v) })
 
@@ -165,7 +196,7 @@ func (vm *VM) registerTCPServer(srv *RClass) {
 		return &tcpServer{cls: srv, ln: ln}
 	}
 	srv.smethods["new"] = &Method{name: "new", owner: srv, native: newFn}
-	srv.smethods["open"] = &Method{name: "open", owner: srv, native: newFn}
+	srv.smethods["open"] = &Method{name: "open", owner: srv, native: socketOpenWithBlock(srv, newFn)}
 
 	srv.define("accept", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		s := asTCPServer(self)
