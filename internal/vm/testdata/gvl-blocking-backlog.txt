@@ -17,18 +17,14 @@
 # deleting its line here. If the callers already release the GVL, mark the
 # function //gvl:released-by-caller <reason> instead and delete the line.
 
-# Net::FTP's DATA connection. The control connection was fixed in #921/#916;
-# these were missed by that change and found by this gate.
+# Net::FTP's DATA connection — FIXED and removed from this list, which is the
+# only direction it may move. dialData, acceptData, sendData, retrlines and
+# retrbinary all run their blocking call inside ftpIO now.
 #
-# ⛔ :504 is retrbinary, NINETEEN LINES below the retrlines at :485. Same data
-# connection, same defect — invisible to the first version of this gate because
-# it reads through conn.Read and its neighbour reads through bufio's
-# ReadString, and only the second name was in the list. The gate had the defect
-# it exists to catch.
-net_ftp_bind.go:409
-net_ftp_bind.go:419
-net_ftp_bind.go:485
-net_ftp_bind.go:504
+# acceptData was the one #916 is about: in ACTIVE mode the client listens and
+# the server dials back, so a program that serves itself has both ends in one
+# process and the Accept was parking every other Ruby thread — including the one
+# that would have made the call it was waiting for.
 
 # Net::IMAP: readLine/readLiteral are handed to imap.NewReader as callbacks and
 # the binding has no ioBlock at all — the same shape Net::FTP had.
@@ -48,10 +44,10 @@ hanami_bind.go:514
 # these are invisible to the current rule. Written here so the gap is on the
 # page rather than in somebody's memory.
 #
-#   socket_raw.go:206      s.conn.Write(msg)
-#   net_ftp_bind.go:431    conn.Write(data[off:end])   (the data connection)
-#   nethttp_bind.go        conn.Write in nethttpProxyConnect  (now covered by
-#                          its caller's ioBlock, so this one is already fine)
+#   socket_raw.go:206      s.conn.Write(msg)                  (still unwrapped)
+#   net_ftp_bind.go        conn.Write in sendData             (FIXED: ftpIO)
+#   nethttp_bind.go        conn.Write in nethttpProxyConnect  (covered by its
+#                          caller's ioBlock)
 #
 # Why not gate on Write: adding it reported ELEVEN sites, eight of them not
 # network writes at all — seven *bufio.Writer.Write (buffered; the socket write
