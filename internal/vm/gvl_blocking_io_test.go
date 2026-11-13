@@ -48,6 +48,32 @@ func TestEveryBlockingSocketCallReleasesTheGVL(t *testing.T) {
 		"Accept": true, "Dial": true, "DialTimeout": true,
 		"ReadString": true, "ReadFrom": true, "ReadFromUDP": true, "ReadFull": true,
 	}
+	// ⛔ Read is the commonest blocking socket call of all, and the first version
+	// of this gate did not look for it -- which made it blind to retrbinary,
+	// nineteen lines below the retrlines it DID catch, reading the same data
+	// connection through conn.Read instead of bufio's ReadString. The gate had
+	// the very defect it was written to catch: wired at some of its doors.
+	//
+	// It is not in the list above because `Read` on a bytes.Reader, a file or a
+	// protocol decoder is not a socket call, and a gate that cried wolf on those
+	// would be switched off within a week. The discriminator is the FILE: one
+	// that does not import "net" cannot hold a net.Conn. Measured on this tree
+	// that is enough for Read -- the six non-socket Read sites (crypto/rand,
+	// mail, images, openbao, grpc, sftp) are all in files importing no net, and
+	// restricting to net-importing files leaves exactly two, both real.
+	//
+	// ⛔ WRITE IS DELIBERATELY ABSENT, and the measurement is why. Adding it
+	// reported eleven sites, of which eight are NOT network writes: seven
+	// `s.writer().Write(...)` on a *bufio.Writer, which only buffers (the socket
+	// write happens at Flush), and one `buf.Write(chunk)` on a bytes.Buffer in a
+	// file that does import net. So the file-level rule does NOT hold for Write;
+	// telling those apart needs the receiver's TYPE, not its file. Three real
+	// unwrapped conn writes do exist (socket_raw.go:206, net_ftp_bind.go:431,
+	// nethttp_bind.go's CONNECT). They are written down as a COMMENT at the foot
+	// of the backlog -- not as entries, since an entry that never reports fails
+	// this gate by design -- so the known gap is on the page instead of in
+	// somebody's memory.
+	connOnly := map[string]bool{"Read": true}
 	// The wrappers that release it. A call inside one of these closures is fine;
 	// ftpIO forwards to ioBlock, and a binding may add its own as long as it is
 	// named here, which keeps this list the single place the exemption lives.
@@ -78,6 +104,7 @@ func TestEveryBlockingSocketCallReleasesTheGVL(t *testing.T) {
 		}
 		scanned++
 		exempt := exemptLines(fset, f)
+		netFile := importsNet(f)
 
 		// Walk with a stack so a call can be asked which closures enclose it.
 		var stack []ast.Node
@@ -93,7 +120,10 @@ func TestEveryBlockingSocketCallReleasesTheGVL(t *testing.T) {
 				return true
 			}
 			sel, ok := call.Fun.(*ast.SelectorExpr)
-			if !ok || !blocking[sel.Sel.Name] {
+			if !ok {
+				return true
+			}
+			if !blocking[sel.Sel.Name] && !(netFile && connOnly[sel.Sel.Name]) {
 				return true
 			}
 			calls++
@@ -180,6 +210,19 @@ func readBacklog(t *testing.T) (map[string]bool, []string) {
 		order = append(order, line)
 	}
 	return out, order
+}
+
+// importsNet reports whether the file imports the standard "net" package, which
+// is the cheap, exact discriminator for "could a `Read` here be a socket read?".
+// It is deliberately the plain import path and not a prefix match: net/http and
+// net/url carry no net.Conn of their own.
+func importsNet(f *ast.File) bool {
+	for _, imp := range f.Imports {
+		if imp.Path != nil && imp.Path.Value == `"net"` {
+			return true
+		}
+	}
+	return false
 }
 
 // enclosedByReleaser reports whether any FuncLit on the stack is an argument to

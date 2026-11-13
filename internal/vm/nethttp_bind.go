@@ -476,7 +476,16 @@ func (vm *VM) nethttpRawExchange(cfg *nethttpXfer, method, path string, body []b
 		}
 	}
 	if !reused {
-		stream, derr := vm.nethttpDialXfer(cfg)
+		// ⛔ THE WHOLE DIAL RELEASES THE GVL, not just the exchange below it.
+		// nethttpDialXfer blocks on the network three times over -- the TCP dial,
+		// a proxy CONNECT (write, then read the reply a byte at a time), and the
+		// TLS handshake -- and every one of them was holding the emulated GVL,
+		// which stops every other Ruby thread for the duration of a connect to an
+		// unreachable host. Only the exchange at nethttpExchangeFramed was
+		// wrapped, so the slowest part of a request was the unwrapped part.
+		var stream streamIO
+		var derr error
+		ioBlock(vm, func() { stream, derr = vm.nethttpDialXfer(cfg) })
 		if derr != nil {
 			vm.raiseTransportErr(derr, "open")
 		}
@@ -617,6 +626,8 @@ func (vm *VM) nethttpDialXfer(cfg *nethttpXfer) (streamIO, error) {
 // the proxy's response, erroring unless it is a 2xx. It reads only up to the
 // response's header terminator (byte at a time) so no tunnelled TLS bytes are
 // consumed.
+//
+//gvl:released-by-caller its only non-test caller is nethttpDialXfer, which nethttpRawExchange runs inside an ioBlock
 func nethttpProxyConnect(conn net.Conn, target, proxyAuth string) error {
 	var b strings.Builder
 	b.WriteString("CONNECT " + target + " HTTP/1.1\r\n")
@@ -758,7 +769,12 @@ func basicAuthHeader(user, pass string) string {
 // nethttpRawDial opens a raw TCP connection with an optional dial timeout
 // (open_timeout); 0 means no bound.
 //
-//gvl:released-by-caller every call site is inside the ioBlock at nethttpDial, so the GVL is already dropped when this runs
+// ⛔ The reason below used to name "the ioBlock at nethttpDial". There is no
+// such function, and there was no ioBlock on this path at all: the waiver read
+// as verified and was not. A waiver whose reason cannot be followed to a real
+// release point is worse than a bare one, because nobody re-checks it.
+//
+//gvl:released-by-caller reached only through nethttpDialXfer, which nethttpRawExchange now calls inside an ioBlock
 func nethttpRawDial(host, port string, openTO time.Duration) (net.Conn, error) {
 	addr := net.JoinHostPort(host, port)
 	if openTO > 0 {

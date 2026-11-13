@@ -18,10 +18,17 @@
 # function //gvl:released-by-caller <reason> instead and delete the line.
 
 # Net::FTP's DATA connection. The control connection was fixed in #921/#916;
-# these three were missed by that change and found by this gate.
+# these were missed by that change and found by this gate.
+#
+# ⛔ :504 is retrbinary, NINETEEN LINES below the retrlines at :485. Same data
+# connection, same defect — invisible to the first version of this gate because
+# it reads through conn.Read and its neighbour reads through bufio's
+# ReadString, and only the second name was in the list. The gate had the defect
+# it exists to catch.
 net_ftp_bind.go:409
 net_ftp_bind.go:419
 net_ftp_bind.go:485
+net_ftp_bind.go:504
 
 # Net::IMAP: readLine/readLiteral are handed to imap.NewReader as callbacks and
 # the binding has no ioBlock at all — the same shape Net::FTP had.
@@ -35,3 +42,20 @@ net_smtp_bind.go:140
 # beside its own client is the exact deadlock above.
 httprb.go:148
 hanami_bind.go:514
+
+# ⛔ KNOWN GAP — three unwrapped conn WRITES this gate cannot see yet. They are
+# COMMENTS, not entries: an entry that never reports is a failure by design, and
+# these are invisible to the current rule. Written here so the gap is on the
+# page rather than in somebody's memory.
+#
+#   socket_raw.go:206      s.conn.Write(msg)
+#   net_ftp_bind.go:431    conn.Write(data[off:end])   (the data connection)
+#   nethttp_bind.go        conn.Write in nethttpProxyConnect  (now covered by
+#                          its caller's ioBlock, so this one is already fine)
+#
+# Why not gate on Write: adding it reported ELEVEN sites, eight of them not
+# network writes at all — seven *bufio.Writer.Write (buffered; the socket write
+# happens at Flush) and one bytes.Buffer in a file that does import net. The
+# file-level rule that makes Read exact does NOT hold for Write; separating
+# them needs the receiver's TYPE. Eight false alarms is how a gate gets
+# switched off, so the rule stays narrow and the gap stays written down.
