@@ -879,6 +879,28 @@ def with_block_device(&b)
 end
 def with_feature(*a, &b); _guard_run(true, &b); end
 def without_feature(*a, &b); _guard_run(false, &b); end
+
+# ⛔ MSpec.enable_feature IS THE ONLY MSpec METHOD ruby/spec CALLS — measured by
+# grepping library/, core/ and language/ for `MSpec.<method>`, which returns
+# that one name and nothing else. Without the constant,
+# library/socket/spec_helper.rb raises NameError at LOAD, and every file under
+# library/socket scores 0.
+#
+# That is worse than it sounds when the engine being scored is the REFERENCE:
+# MRI then contributes 0 to all 56 of those files, a sweep prints
+# `control 0 passing, treatment 224 passing, +217`, and the result reads as the
+# implementation under test beating MRI. An oracle that cannot load is not a
+# low score, it is no measurement at all (#930 is the same lesson, one layer
+# down).
+#
+# It is a no-op because `with_feature` above already runs every feature block
+# unconditionally, which is also what the corpus asks for in that file's own
+# comment: "we want a constant number of spec examples across Ruby
+# implementations, even if they don't define these constants".
+module MSpec
+  def self.enable_feature(*) end
+  def self.disable_feature(*) end
+end
 def ruby_exe(*a, **k); ::Kernel.raise(SpecSkip, "ruby_exe subprocess unsupported"); end
 def ruby_cmd(*a, **k); ::Kernel.raise(SpecSkip, "ruby_cmd unsupported"); end
 
