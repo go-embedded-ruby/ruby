@@ -120,7 +120,7 @@ func (vm *VM) registerRawSocket(sock *RClass) {
 		return &rawSocket{cls: sock, domain: domain, typ: typ, proto: proto, opts: map[[2]int64]object.Value{}}
 	}
 	sock.smethods["new"] = &Method{name: "new", owner: sock, native: newFn}
-	sock.smethods["open"] = &Method{name: "open", owner: sock, native: newFn}
+	sock.smethods["open"] = &Method{name: "open", owner: sock, native: socketOpenWithBlock(sock, newFn)}
 
 	// #bind(sockaddr) binds the socket to the local address packed in sockaddr. A
 	// stream binds+listens (net.Listen assigns an ephemeral port immediately, as

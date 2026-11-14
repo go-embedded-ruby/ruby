@@ -299,7 +299,14 @@ func (vm *VM) registerIO() {
 	// before its require. The featureHooks map is already created by registerPrime,
 	// which runs first.
 	vm.featureHooks["fcntl"] = vm.installFcntl
-	vm.featureHooks["io/nonblock"] = func() { installIONonblock(cIO) }
+	// ⛔ The sockets are installed from the SAME hook, not from their own
+	// registration: one place decides what `require "io/nonblock"` adds, so the
+	// two cannot drift apart. The socket classes exist from startup, so they are
+	// already there when this fires.
+	vm.featureHooks["io/nonblock"] = func() {
+		installIONonblock(cIO)
+		vm.installSocketNonblock()
+	}
 	// IO::WaitReadable / IO::WaitWritable (io.c Init_IO) are the marker modules a
 	// non-blocking read or write raises with: IO::EAGAINWaitReadable is an
 	// Errno::EAGAIN subclass that includes IO::WaitReadable, so `rescue
