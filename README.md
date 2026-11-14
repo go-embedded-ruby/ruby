@@ -215,9 +215,30 @@ Three readings matter more than the total:
   `command_line/` files are built on `ruby_exe`, and the 46 `optional/capi/`
   files need a compiled C extension: **MRI itself scores 0** in them. That part
   of the corpus needs harness work, not interpreter work.
-- **The largest single debt is a hang, not a missing feature.** `Net::FTP` alone
-  is 442 examples behind, and 39 of its 56 spec files have to be killed by the
-  clock on rbgo and none on MRI ([#916](https://github.com/go-embedded-ruby/ruby/issues/916)).
+- **The hangs were the largest single debt, and most of them are gone**
+  ([#916](https://github.com/go-embedded-ruby/ruby/issues/916)). The run above
+  recorded `Net::FTP` 442 examples behind with 39 of its 56 files killed by the
+  clock. Re-measured on 2026-11-13 against MRI 4.0.6, same corpus, 30 s per
+  file: **`Net::FTP` is 128 behind (459 → 331) with no file killed at all.**
+
+  One symptom, two unrelated causes, which is why the first fix looked like it
+  had done nothing when it was measured against the other half's specs:
+
+  | | then | now | what it was |
+  | --- | --- | --- | --- |
+  | `library/net-ftp` | 39 killed | **0** | a blocking socket call held the emulated GVL |
+  | `library/net-http` | 27 killed | **0** | `TCPSocket.open { … }` never closed the socket, so the peer waited for an EOF that never came |
+  | `library/socket` | 8 killed | 8 | `Thread#kill` cannot interrupt a blocking native call |
+  | `library/timeout` | 1 killed | 1 | ditto |
+
+  **75 → 9.** The nine that remain are the last two rows, measured the same way
+  on 2026-11-14: 321 files across those three modules, 275 passing against
+  MRI's 371, nine killed under rbgo and none under MRI.
+
+  ⛔ None of this was measurable until the reference interpreter was repaired:
+  it had been scoring a clean **0** on every file because its bundled gems were
+  off the load path, which a sweep reports as a *result* rather than as a
+  broken instrument. See `cmd/mriref`.
 - **The rest is concentrated:** `matrix` 233, `bigdecimal` 180, `stringscanner`
   154, `date`+`datetime` 179, `zlib` 130, `stringio` 94, `openssl` 93. The
   outright absences are small by comparison — `Coverage` 53, `StringScanner`'s
