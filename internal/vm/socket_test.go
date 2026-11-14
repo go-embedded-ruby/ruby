@@ -406,6 +406,82 @@ func TestSSLVerifyModeResolution(t *testing.T) {
 
 // TestSocketFeatureRequire confirms require "socket" is a provided feature (true
 // once, false after) and does not hit the filesystem.
+// ⛔ `open` WITH A BLOCK CLOSES, AND ANSWERS WITH THE BLOCK'S VALUE. It used to
+// be a bare alias for `new`, so the block form closed nothing and the socket
+// outlived the block — and a peer then waits for an EOF that never comes.
+// ruby/spec's net-http fixture stops its server by writing an unterminated
+// "CLOSE" inside `TCPSocket.open { … }` and joining the server thread; with the
+// socket still open the server's `gets` never returned and all 27
+// library/net-http files hung on that join (#931, #916).
+//
+// Asserted on the socket the block was handed, rather than through a peer, so a
+// regression fails this test instead of hanging it.
+func TestSocketOpenWithABlockClosesAndReturnsTheBlocksValue(t *testing.T) {
+	got := runSrc(t, `require "socket"
+srv = TCPServer.new("127.0.0.1", 0)
+port = srv.addr[1]
+
+# A normal return: the BLOCK's value comes back, not the socket, and the
+# socket is closed.
+sock = nil
+p(TCPSocket.open("127.0.0.1", port) { |s| sock = s; :block_value })
+p sock.closed?
+
+# An exception leaves it closed too -- this is an ensure, not a tidy-up on the
+# happy path.
+boom = nil
+begin
+  TCPSocket.open("127.0.0.1", port) { |s| boom = s; raise "boom" }
+rescue RuntimeError
+  p :raised
+end
+p boom.closed?
+
+# Without a block it still hands back an OPEN socket, exactly as .new does.
+bare = TCPSocket.open("127.0.0.1", port)
+p bare.closed?
+bare.close
+
+# The same contract on TCPServer.open.
+listener = nil
+p(TCPServer.open("127.0.0.1", 0) { |s| listener = s; :served })
+p listener.closed?
+
+srv.close
+`)
+	want := ":block_value\ntrue\n:raised\ntrue\nfalse\n:served\ntrue"
+	if got != want {
+		t.Errorf("open-with-a-block contract:\ngot  %q\nwant %q", got, want)
+	}
+}
+
+// ⛔ A VACUOUS PASS MADE VISIBLE. core/io/nonblock_spec.rb asks
+// `TCPServer.open(0) { |s| s.nonblock?.should == true }`, and while `open`
+// ignored its block that body never ran: the example passed with nothing
+// asserted, and the conformance ratchet counted it. Honouring the block turned
+// it into a NoMethodError and the ratchet reported 4 → 3 on that file — a
+// regression in the count, not in the behaviour. This is the method the example
+// had been asking for all along.
+//
+// `require "io/nonblock"` first, because that is the gate MRI puts it behind and
+// the same hook installs it on IO and on the sockets.
+func TestSocketNonblockIsInstalledByTheIONonblockFeature(t *testing.T) {
+	got := runSrc(t, `require "socket"
+srv = TCPServer.new("127.0.0.1", 0)
+p srv.respond_to?(:nonblock?)
+require "io/nonblock"
+p srv.nonblock?
+p TCPSocket.instance_methods.include?(:nonblock?)
+srv.close
+`)
+	// Before the require it is absent, as in MRI; after it, a socket reports
+	// true — Go puts every socket descriptor in non-blocking mode and polls it.
+	want := "false\ntrue\ntrue"
+	if got != want {
+		t.Errorf("io/nonblock on sockets:\ngot  %q\nwant %q", got, want)
+	}
+}
+
 func TestSocketFeatureRequire(t *testing.T) {
 	if got := runSrc(t, `p require "socket"; p require "socket"`); got != "true\nfalse" {
 		t.Fatalf("require socket = %q", got)
