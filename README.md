@@ -227,9 +227,13 @@ Three readings matter more than the total:
   | | then | now | what it was |
   | --- | --- | --- | --- |
   | `library/net-ftp` | 39 killed | **0** | a blocking socket call held the emulated GVL |
-  | `library/net-http` | 27 killed | 27 | `TCPSocket.open { … }` never closed the socket, so the peer waited for an EOF that never came |
+  | `library/net-http` | 27 killed | **0** | `TCPSocket.open { … }` never closed the socket, so the peer waited for an EOF that never came |
   | `library/socket` | 8 killed | 8 | `Thread#kill` cannot interrupt a blocking native call |
   | `library/timeout` | 1 killed | 1 | ditto |
+
+  **75 → 9.** The nine that remain are the last two rows, measured the same way
+  on 2026-11-14: 321 files across those three modules, 275 passing against
+  MRI's 371, nine killed under rbgo and none under MRI.
 
   ⛔ None of this was measurable until the reference interpreter was repaired:
   it had been scoring a clean **0** on every file because its bundled gems were
