@@ -79,6 +79,12 @@ func TestEveryBlockingSocketCallReleasesTheGVL(t *testing.T) {
 	// named here, which keeps this list the single place the exemption lives.
 	releasing := map[string]bool{
 		"ioBlock": true, "threadBlock": true, "threadRelease": true, "ftpIO": true,
+		// ioBlockCancel is ioBlock plus an unblock function (#933): it releases
+		// the GVL exactly the same way and additionally makes the call return on
+		// Thread#kill. It is listed here rather than inferred, which is the whole
+		// point of keeping this map the single place an exemption lives — adding
+		// the wrapper without adding it here failed this gate, as it should.
+		"ioBlockCancel": true,
 	}
 
 	files, err := filepath.Glob("*.go")

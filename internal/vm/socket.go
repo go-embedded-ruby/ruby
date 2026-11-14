@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"strconv"
+	"time"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
@@ -68,6 +69,72 @@ func (s *tcpServer) Truthy() bool    { return true }
 // Every caller is a native Ruby method, which always holds the GVL, so there is
 // no nil-vm case to guard: a guard for one would be a branch no test could reach.
 func ioBlock(vm *VM, fn func()) { vm.threadBlock(fn) }
+
+// socketDeadliner is the part of a net.Conn / net.Listener that can make a
+// blocked call return. net.Listener does NOT declare SetDeadline — the
+// interface is Accept/Close/Addr — but *net.TCPListener and *net.UnixListener
+// both have it, so the capability is asked for rather than assumed.
+type socketDeadliner interface{ SetDeadline(time.Time) error }
+
+// unblockNow makes a call blocked on v return, by putting its deadline in the
+// past. It is the Go stand-in for MRI's unblock function: it does not close
+// anything, so the socket is still usable afterwards.
+func unblockNow(v any) {
+	if d, ok := v.(socketDeadliner); ok {
+		d.SetDeadline(time.Now())
+	}
+}
+
+// clearDeadline undoes unblockNow, so a listener that survives an interrupted
+// accept still accepts.
+func clearDeadline(v any) {
+	if d, ok := v.(socketDeadliner); ok {
+		d.SetDeadline(time.Time{})
+	}
+}
+
+// ioBlockCancel is ioBlock for a call that must be INTERRUPTIBLE, and reports
+// whether it was interrupted.
+//
+// ⛔ WHY IT EXISTS. threadRelease runs fn to completion; a Thread#kill arriving
+// while fn is parked in accept(2) is only noticed after fn returns, which for an
+// accept nobody will ever connect to is never. Measured: MRI kills such a thread
+// within 200 ms, rbgo left it alive after 3 s (#933), and that is the whole of
+// the library/socket column of #916.
+//
+// MRI's answer is the unblock function of rb_thread_call_without_gvl, whose job
+// is to make the call RETURN. rbgo already has the other half: `interruptibleWait`
+// selects on the thread's interrupt channel for waits rbgo owns. A wait the
+// KERNEL owns cannot be put in a select, so a watcher waits on the same channel
+// and calls cancel instead.
+//
+// The drain happens while the GVL is still held, as drainInterrupt requires, so
+// this wait cannot be woken by an edge meant for an earlier one.
+// ⛔ The answer travels on a CHANNEL, not on a shared bool. A `interrupted = true`
+// written by the watcher and read here is a data race that -race would fail, and
+// closing `fired` before calling cancel also orders the two: by the time this
+// returns true, cancel has been entered.
+func ioBlockCancel(vm *VM, cancel func(), fn func()) bool {
+	intr := vm.currentThread.drainInterrupt()
+	done := make(chan struct{})
+	fired := make(chan struct{})
+	go func() {
+		select {
+		case <-intr:
+			close(fired)
+			cancel()
+		case <-done:
+		}
+	}()
+	vm.threadBlock(fn)
+	close(done)
+	select {
+	case <-fired:
+		return true
+	default:
+		return false
+	}
+}
 
 // registerSocket installs the socket transport (require "socket"): the
 // TCPSocket / TCPServer classes over Go net, the BasicSocket / IPSocket / Socket
@@ -243,7 +310,18 @@ func (vm *VM) registerTCPServer(srv *RClass) {
 		s := asTCPServer(self)
 		var conn net.Conn
 		var err error
-		ioBlock(vm, func() { conn, err = s.ln.Accept() })
+		interrupted := ioBlockCancel(vm, func() { unblockNow(s.ln) },
+			func() { conn, err = s.ln.Accept() })
+		// Undo the deadline the cancel set, so a listener that outlives the
+		// interrupted thread still accepts.
+		clearDeadline(s.ln)
+		// ⛔ AN INTERRUPTED WAIT IS NOT A FAILED ONE. The error here is the
+		// deadline we ourselves put in the past; raising it would give a killed
+		// thread an IOError MRI never raises. Returning lets the thread reach its
+		// next safepoint and unwind on the kill, which is what it is there for.
+		if interrupted {
+			return object.NilV
+		}
 		if err != nil {
 			raise("IOError", "accept: %s", err.Error())
 		}

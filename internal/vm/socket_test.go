@@ -482,6 +482,54 @@ srv.close
 	}
 }
 
+// ⛔ THE UNBLOCK FUNCTION, AND THE TEST THE COVERAGE RATCHET ASKED FOR.
+// threadRelease runs its fn to completion, so a Thread#kill arriving while a
+// thread is parked in accept(2) used to be noticed only after fn returned —
+// which, for an accept nobody will connect to, is never. Measured: MRI kills
+// such a thread within 200 ms, rbgo left it alive after 3 s (#933), and that is
+// the library/socket column of #916.
+//
+// I had proved the fix with a script run by hand. The ratchet then reported
+// unblockNow at 0.0%, which says it plainly: nothing in the suite ever
+// interrupts a blocking call, so nothing would notice if the cancel stopped
+// working. This is that test.
+//
+// It waits on `status == "sleep"` rather than on a sleep of its own, which is
+// what ruby/spec does here, so a slow machine makes it slower and not flaky.
+func TestThreadKillInterruptsABlockedAccept(t *testing.T) {
+	got := runSrc(t, `require "socket"
+srv = TCPServer.new("127.0.0.1", 0)
+port = srv.addr[1]
+
+t = Thread.new { srv.accept }
+Thread.pass while t.status and t.status != "sleep"
+t.kill
+
+waited = 0.0
+while t.alive? and waited < 5.0
+  sleep 0.05
+  waited += 0.05
+end
+p t.alive?
+
+# ⛔ And the listener SURVIVES it. The cancel works by putting the deadline in
+# the past, so without clearing it afterwards every later accept would fail at
+# once — a fix that trades a hang for a broken server.
+t2 = Thread.new { srv.accept }
+Thread.pass while t2.status and t2.status != "sleep"
+client = TCPSocket.new("127.0.0.1", port)
+peer = t2.value
+p peer.class
+client.close
+peer.close
+srv.close
+`)
+	want := "false\nTCPSocket"
+	if got != want {
+		t.Errorf("kill through a blocked accept:\ngot  %q\nwant %q", got, want)
+	}
+}
+
 func TestSocketFeatureRequire(t *testing.T) {
 	if got := runSrc(t, `p require "socket"; p require "socket"`); got != "true\nfalse" {
 		t.Fatalf("require socket = %q", got)
