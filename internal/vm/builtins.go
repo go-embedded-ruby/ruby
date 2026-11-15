@@ -10281,6 +10281,33 @@ func publicConstNames(chain []*RClass) []string {
 	for i, c := range chain {
 		earlier := chain[:i]
 		keep := func(name string) bool {
+			// ⛔ A key containing "::" is not a constant NAME, it is an INDEX
+			// ENTRY. 52 binding files register a nested class twice — once in its
+			// parent's table under its simple name, and once in the top-level
+			// table under its qualified name — and the second form is how a
+			// binding looks its own classes up later
+			// (`vm.kafkaClass("Kafka::Producer")`, four sites in kafka alone;
+			// actioncable_bind.go, io.go and embed.go read the table the same way).
+			//
+			// Measured 2026-11-15 against MRI 4.0.7: Object.constants answered
+			// 1620 where MRI answers 120, and 1303 of those 1620 carried "::".
+			// MRI has NONE, because a nested constant belongs to its enclosing
+			// module (#817).
+			//
+			// ⛔ The fix is here and not at the 52 registration sites, which is the
+			// opposite of what the count suggests: those keys are READ. And
+			// json.go's comment justifies them by exceptionObject's lookup, which
+			// is stale — errorClass (vm.go) walks the tree for a qualified name
+			// and never reads the flat key. The comment refuted the first
+			// hypothesis and the code refuted the comment.
+			//
+			// Evidence that these are not constants in any usable sense:
+			// `Object.send(:remove_const, :"AASM::Error")` raises
+			// `NameError: wrong constant name` — this table reported a key that
+			// this interpreter's own constant API refuses.
+			if strings.Contains(name, "::") {
+				return false
+			}
 			return !c.privateConsts[name] && !inConstTables(earlier, name)
 		}
 		if len(c.autoloads) == 0 {
