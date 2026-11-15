@@ -98,10 +98,18 @@ func TestEachExitPathFlushesExceptTheImmediateOne(t *testing.T) {
 //
 // The error is still RETURNED: an uncaught exception is what happened, and the
 // host decides what to print. Only the teardown was missing.
+//
+// ⛔ It uses runKeepingError, NOT runSrcErr. The two do the same thing, and
+// runSrcErr lives behind `//go:build !windows && !wasm` — so reaching for it
+// here compiled on darwin and broke SEVEN CI lanes with `undefined: runSrcErr`,
+// including every `compile on every target` one, because CI vets the test binary
+// for GOOS=wasip1 and GOOS=js. runKeepingError exists for exactly that reason and
+// says so in its own comment (alloc_bounds_internal_test.go:20); the answer was
+// already written, with its why, in a sibling file of this package.
 func TestAnUncaughtExceptionStillTearsTheInterpreterDown(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "x.txt")
-	_, out, err := runSrcErr(t, fmt.Sprintf(`
+	_, out, err := runKeepingError(t, fmt.Sprintf(`
 f = File.open(%q, "w")
 f.write("payload")
 at_exit { puts "handler ran" }
@@ -280,6 +288,33 @@ func TestATeardownFlushNeitherRaisesNorSkipsTheRest(t *testing.T) {
 	if got := readBack(t, good); got != "kept" {
 		t.Errorf("the stream after the failing one was skipped:\ngot  %q\nwant %q", got, "kept")
 	}
+}
+
+// ⛔ THE OTHER HALF OF "does not raise": a Ruby error is swallowed, and a GO
+// FAULT IS NOT. The repository draws that line deliberately and in one place
+// already (callNative): a fault caused by Ruby INPUT becomes a rescuable Ruby
+// exception so a host can never be crashed by a program it ran, while a broken VM
+// INVARIANT stays loud rather than being laundered into something a host would
+// log and move past. flushOneAtTeardown's recover must respect it, and the
+// coverage ratchet caught this branch untested — 83.3%, "was fully covered" — on
+// macOS and ubuntu both.
+//
+// The fault is synthesised (a nil stream faults inside ioFlush at its first
+// field read) because no real flush produces one: ioFlush raises Errno through
+// raiseOpenErrno, which is the OTHER branch. That is what a test may build to
+// prove a propagation it cannot provoke.
+func TestATeardownFlushSwallowsARubyErrorButNotAGoFault(t *testing.T) {
+	vm := New(os.Stdout)
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("a Go fault at teardown must propagate, not be swallowed with the Errno")
+		}
+		if _, ok := r.(RubyError); ok {
+			t.Errorf("a Go fault was laundered into a Ruby error: %#v", r)
+		}
+	}()
+	vm.flushOneAtTeardown(nil)
 }
 
 // And the same through Ruby, which is the shape the two existing tests have: the
