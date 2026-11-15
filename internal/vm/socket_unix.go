@@ -86,7 +86,12 @@ func (vm *VM) registerUnixSockets(basic *RClass) {
 		return newUnixSocket(sock, conn, path)
 	}
 	sock.smethods["new"] = &Method{name: "new", owner: sock, native: newSock}
-	sock.smethods["open"] = &Method{name: "open", owner: sock, native: newSock}
+	// ⛔ See the note on UDPSocket.open: the block form closes, and answers with
+	// the block's value. `close` must be reachable as a method ON this class for
+	// the wrapper to find it — installStreamIO below defines it here, not on an
+	// ancestor, which is why this works and why the test asserts `closed?` rather
+	// than trusting the wrapper.
+	sock.smethods["open"] = &Method{name: "open", owner: sock, native: socketOpenWithBlock(sock, newSock)}
 
 	installStreamIO(sock, func(v object.Value) streamIO { return asUnixSocket(v) })
 	sock.define("path", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -109,7 +114,13 @@ func (vm *VM) registerUnixSockets(basic *RClass) {
 		return &unixServer{cls: srv, ln: ln, path: path}
 	}
 	srv.smethods["new"] = &Method{name: "new", owner: srv, native: newSrv}
-	srv.smethods["open"] = &Method{name: "open", owner: srv, native: newSrv}
+	// ⛔ The block form closes the listener, which matters more here than for a
+	// client socket: an AF_UNIX server is a FILE, and `close` reaches
+	// net.UnixListener.Close, which removes it (Go unlinks a listener it bound
+	// itself). A block that returned without closing would leave the path on disk
+	// and the next bind to it failing — so the leak is in the filesystem, not only
+	// in the descriptor table.
+	srv.smethods["open"] = &Method{name: "open", owner: srv, native: socketOpenWithBlock(srv, newSrv)}
 
 	srv.define("accept", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		s := asUnixServer(self)

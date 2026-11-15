@@ -832,7 +832,9 @@ func TestUNIXSocketErrors(t *testing.T) {
 		{`begin; UNIXSocket.new("/no/such/rbgo/socket.sock"); rescue SocketError; puts "noconn"; end`, "noconn"},
 		{`begin; UNIXServer.new("/no/such/rbgo/dir/x.sock"); rescue SocketError; puts "nobind"; end`, "nobind"},
 		{`srv=UNIXServer.new(GOOD); srv.close; p srv.closed?; begin; srv.accept; rescue IOError; puts "acc"; end`, "true\nacc"},
-		// .open aliases bind / connect just like .new.
+		// Without a block, .open binds / connects and hands back an OPEN object,
+		// exactly as .new does. (WITH a block it closes and answers with the
+		// block's value -- TestUnixAndUDPOpenHonourTheirBlock.)
 		{`srv=UNIXServer.open(GOOD2); p srv.listen(5); p srv.path==GOOD2; srv.close`, "0\ntrue"},
 		{`srv=UNIXServer.new(GOOD3)
 t=Thread.new{ c=UNIXSocket.open(GOOD3); c.write("z"); c.close }
@@ -849,6 +851,87 @@ conn=srv.accept; p conn.read; conn.close; srv.close; t.join`, "\"z\""},
 		if got := runSrc(t, src); got != c.want {
 			t.Errorf("src=%q\n got=%q\nwant=%q", c.src, got, c.want)
 		}
+	}
+}
+
+// ⛔ THE SAME MECHANISM AT THE THREE DOORS #931 LEFT UNWIRED.
+//
+// #932 gave `open` MRI's block semantics on TCPSocket, TCPServer and Socket.
+// #931 named the rest of the family in its "shape of the fix" and nothing
+// carried it out: UDPSocket, UNIXSocket and UNIXServer went on aliasing `open`
+// straight to `new`, so a block passed to them was DISCARDED WITHOUT A WORD —
+// not an error, not a warning, simply a body that never ran. That is the same
+// vacuous pass the nonblock_spec note above describes, and it is why this is a
+// case per door rather than one for the family: the wrapper is shared, but each
+// class had to be wired to it, and three of six were not.
+//
+// Each case asserts on the object the block was HANDED, so a regression fails
+// here instead of hanging a spec file somewhere else.
+func TestUnixAndUDPOpenHonourTheirBlock(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("AF_UNIX unsupported on Windows")
+	}
+	// ⛔ NOT t.TempDir(): it puts the TEST'S NAME in the path, and an AF_UNIX
+	// path is capped at 104 bytes of `sun_path` on darwin. This test's name is
+	// long enough on its own to push the socket past the cap, and bind(2) then
+	// answers `invalid argument` -- which reads as a bug in the code under test
+	// rather than as a path too long. The neighbouring tests use t.TempDir() and
+	// fit only because their names are shorter, which is not a property anybody
+	// would think to preserve when renaming one.
+	dir, err := os.MkdirTemp("", "s")
+	if err != nil {
+		t.Fatalf("temp dir: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	src := "require \"socket\"\nSRV=" + fmt.Sprintf("%q", filepath.Join(dir, "a.sock")) +
+		"\nCLI=" + fmt.Sprintf("%q", filepath.Join(dir, "b.sock")) + `
+# Each door reports the same three things: what came back, and whether the
+# object the block was handed is closed -- or :block_never_ran when the block
+# was discarded. That third value is the point: a door still aliased to .new
+# leaves the variable nil, and printing a WORD for it makes the regression a
+# readable diff instead of a NoMethodError on nil.
+
+# UDPSocket.open needs no peer: a datagram socket binds on its own.
+sock = nil
+back = UDPSocket.open { |s| sock = s; :udp_value }
+p [:udp, back, sock.nil? ? :block_never_ran : sock.closed?]
+
+# An exception leaves it closed too -- this is an ensure, not tidy-up on the
+# happy path.
+boom = nil
+raised = false
+begin
+  UDPSocket.open { |s| boom = s; raise "boom" }
+rescue RuntimeError
+  raised = true
+end
+p [:udp_raise, raised, boom.nil? ? :block_never_ran : boom.closed?]
+
+# UNIXServer.open closes the listener, and because an AF_UNIX listener IS a
+# file, closing it removes that file. A block returning without closing would
+# leave the path on disk -- so this asserts the filesystem, not only closed?.
+listener = nil
+back = UNIXServer.open(SRV) { |s| listener = s; :served }
+p [:unixserver, back, listener.nil? ? :block_never_ran : listener.closed?, File.exist?(SRV)]
+
+# UNIXSocket.open against a live server. ⛔ The server closes its end AT ONCE
+# and never reads: if it waited for EOF, a door still aliased to .new would
+# leave the client open and this test would HANG rather than fail. Asserting on
+# the socket the block was handed is what keeps a regression a red test.
+srv = UNIXServer.new(CLI)
+t = Thread.new { c = srv.accept; c.close }
+client = nil
+back = UNIXSocket.open(CLI) { |s| client = s; :connected }
+p [:unixsocket, back, client.nil? ? :block_never_ran : client.closed?]
+t.join
+srv.close
+`
+	want := "[:udp, :udp_value, true]\n" +
+		"[:udp_raise, true, true]\n" +
+		"[:unixserver, :served, true, false]\n" +
+		"[:unixsocket, :connected, true]"
+	if got := runSrc(t, src); got != want {
+		t.Errorf("open-with-a-block on the remaining three doors:\ngot  %q\nwant %q", got, want)
 	}
 }
 

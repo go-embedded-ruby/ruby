@@ -59,7 +59,13 @@ func (vm *VM) registerUDPSocket(ip *RClass) {
 		return &udpSocket{cls: udp, net: network, conn: conn}
 	}
 	udp.smethods["new"] = &Method{name: "new", owner: udp, native: newFn}
-	udp.smethods["open"] = &Method{name: "open", owner: udp, native: newFn}
+	// ⛔ `open` is NOT an alias for `new`: with a block it closes the socket when
+	// the block returns and answers with the BLOCK's value. #931 fixed that on
+	// TCPSocket, TCPServer and Socket and named this class as the rest of the
+	// family; the alias here was the same mechanism left unwired at three of its
+	// six doors. The gate is TestEverySocketOpenHonoursItsBlock, which derives the
+	// population from the source rather than from a list anybody maintains.
+	udp.smethods["open"] = &Method{name: "open", owner: udp, native: socketOpenWithBlock(udp, newFn)}
 
 	// #bind(host, port) rebinds the socket to a specific local address. The
 	// ephemeral socket opened by #new is released first; because nothing has been
