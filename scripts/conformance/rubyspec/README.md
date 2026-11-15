@@ -618,6 +618,12 @@ library/stringscanner                  33      215      61     154  3 (27)
 TOTAL                                 970     3676    1335    2341  152 (620)
 ```
 
+⛔ That sample is a **2026-11-10 run shown to illustrate the tool's output, not
+a current figure**, and two of its rows have since been overtaken: `library/net-ftp`
+is 128 behind with 0 files killed (not 442/39), and the `TOTAL` was counted while
+`library/socket`'s 190 files scored zero **on both sides** — so it is a floor.
+The repository README carries the dated figures; this table carries the shape.
+
 It **checks its arithmetic against each report's own footer** and refuses when
 they disagree — a rollup is exactly where a dropped row is invisible, since the
 table still looks tidy and the only symptom is a total nobody re-derives. The

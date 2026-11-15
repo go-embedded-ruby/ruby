@@ -87,17 +87,41 @@ from the code without changing the conclusion above:
   deadline made the accept complete at 2.308 s, a 5 s one at 5.307 s, and
   `ioBlock` at 0.305 s.
 
-⛔ **And yet #916 is not closed, because the measurement did not move.** The
-`library/net-ftp` specs are byte-identical after both changes: still 39 killed,
-still 459/17, still −442. Both fixes are necessary and proved on a minimal
-reproduction; at least one further cause remains, and it is in the
-spec-harness path. Three candidates have been eliminated by reading rather than
-by timing — `setsockopt`/`SO_OOBINLINE` exist, every read in `socket.go`
-already releases the GVL, and the fixture's `ruby_version_is ""..."4.1"` guard
-does open at rbgo's `RUBY_VERSION`.
+#### ⛔ What stood here was written mid-change, and the measurement has since moved
 
-⛔ `net-ftp` is therefore still **mid-change in this repository** and is not
-available for extraction until #916 settles.
+On 2026-11-13 this section reported that the `library/net-ftp` specs were
+byte-identical after the two fixes above — still 39 killed, still 459/17, still
+−442 — and concluded that a further cause remained. The conclusion was right and
+the inference drawn from it was not: *"the fix did not move the measurement"* was
+read as *"the fix is incomplete or wrong"*, when the mechanism was simply **wired
+at only some of its doors**.
+
+[#921](https://github.com/go-embedded-ruby/ruby/pull/921) bounded the *control*
+connection and [#924](https://github.com/go-embedded-ruby/ruby/pull/924) released
+the GVL around it. `dialData`, `acceptData`, `sendData`, `retrlines` and
+`retrbinary` — the **data** connection — were still holding it
+([#927](https://github.com/go-embedded-ruby/ruby/pull/927)). In **active** mode,
+which ruby/spec's fixture selects, the client listens and the server dials back,
+so a program that serves itself has both ends in one process: holding the GVL
+inside that `Accept` parks every other Ruby thread, *including the one that would
+make the call it is waiting for*. `Net::FTP.default_passive`, absent until
+[#928](https://github.com/go-embedded-ruby/ruby/pull/928), was what had kept the
+fixture from ever reaching that path.
+
+Re-measured 2026-11-13 against MRI 4.0.6, same corpus, 30 s per file:
+**`Net::FTP` is 128 behind (459 → 331), with no file killed at all** — from 39.
+
+✅ `net-ftp`'s blocking behaviour is therefore **settled here**, and the
+extraction argument above no longer waits on #916: the engine should take a
+deadline in its own API because an unbounded read in a shared engine is a shared
+denial of service, not because rbgo is mid-fix. As with `digest` and
+`securerandom`, the new home starts with the number rather than inheriting an
+unstated gap — **`net-ftp` carries −128**.
+
+⛔ #916 stays open for a different module: eight `library/socket` +
+`library/timeout` files still hang, on `Thread#kill` being unable to interrupt a
+blocking native call, with twelve conversion sites left
+([#933](https://github.com/go-embedded-ruby/ruby/issues/933)).
 
 ## First inventory of the 178 `go-ruby-*` modules rbgo binds
 

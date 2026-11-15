@@ -206,7 +206,7 @@ through the same shim, so the gap is a number rather than a guess
 | spec files in the corpus | 3,814 — of which 2,206 are swept and 1,608 are not |
 | files where the two engines differ | 970 |
 | examples MRI passes in them / rbgo passes | 3,676 / 1,335 |
-| the gap | 2,341 |
+| the gap | 2,341 — a **floor**, not a total: see `library/socket` below |
 | files rbgo produces no result for | 152 — **75 of them hang**, the rest are genuine absences |
 
 Three readings matter more than the total:
@@ -228,17 +228,40 @@ Three readings matter more than the total:
   | --- | --- | --- | --- |
   | `library/net-ftp` | 39 killed | **0** | a blocking socket call held the emulated GVL |
   | `library/net-http` | 27 killed | **0** | `TCPSocket.open { … }` never closed the socket, so the peer waited for an EOF that never came |
-  | `library/socket` | 8 killed | 8 | `Thread#kill` cannot interrupt a blocking native call |
-  | `library/timeout` | 1 killed | 1 | ditto |
+  | `library/socket` | 8 killed | **7** | `Thread#kill` could not interrupt a blocking native call; [#935](https://github.com/go-embedded-ruby/ruby/pull/935) landed the unblock-function primitive on the first of thirteen sites |
+  | `library/timeout` | 1 killed | 1 | ditto — one of the twelve sites still listed in [#933](https://github.com/go-embedded-ruby/ruby/issues/933) |
 
-  **75 → 9.** The nine that remain are the last two rows, measured the same way
-  on 2026-11-14: 321 files across those three modules, 275 passing against
-  MRI's 371, nine killed under rbgo and none under MRI.
+  **75 → 8.** The eight that remain are the last two rows, and they name their
+  own causes rather than needing a new measurement: `recv`, `send`, `recvfrom`,
+  `connect_nonblock`, `tcp_server_loop`, `udp_server_loop` and
+  `unixserver/accept`.
+
+  ⛔ A passing-example figure for those two modules stood here and has been
+  **withdrawn**: it was counted against a control that scored **7** on their 190
+  files, because `library/socket/spec_helper.rb` calls `MSpec.enable_feature`
+  and the shim defined no `MSpec`
+  ([#936](https://github.com/go-embedded-ruby/ruby/pull/936), merged). What that
+  repair revealed is the next item.
 
   ⛔ None of this was measurable until the reference interpreter was repaired:
   it had been scoring a clean **0** on every file because its bundled gems were
   off the load path, which a sweep reports as a *result* rather than as a
   broken instrument. See `cmd/mriref`.
+- ⛔ **The largest gap is `library/socket`, and the list below was compiled
+  without it.** Measured 2026-11-14 against MRI 4.0.6, same corpus, 30 s per
+  file, with the oracle repaired: `library/socket` + `library/timeout` is
+  **MRI 1790 / rbgo 224** over 190 files, so socket alone is ≈ **−1560** —
+  more than every module in the next bullet put together
+  ([#937](https://github.com/go-embedded-ruby/ruby/issues/937)). In the run
+  tabled above it read as a flat **zero on both sides**, for the reason in the
+  previous item, and a module whose control scores zero is indistinguishable
+  from a module with no gap. It is **unimplemented surface, not hangs**:
+  `Addrinfo#initialize` alone is −151, `BasicSocket#recvmsg` + `#recvmsg_nonblock`
+  −100, the address and option accessors −188 together.
+
+  The two figures are deliberately **not added up here**: they come from
+  different runs against different MRI patch releases (4.0.7 and 4.0.6), and a
+  sum across two measurements is how two errors cancel.
 - **The rest is concentrated:** `matrix` 233, `bigdecimal` 180, `stringscanner`
   154, `date`+`datetime` 179, `zlib` 130, `stringio` 94, `openssl` 93. The
   outright absences are small by comparison — `Coverage` 53, `StringScanner`'s
