@@ -71,9 +71,33 @@ and **RSpec DSL usage is 10/10** byte-identical to MRI.
 
 ## What is left
 
-Front-end (parse + compile) is essentially complete. The remaining tail is a small
-number of compile-time constructs (the 6 remaining Rails gaps) and, beyond the
-front-end, the **runtime** surface — the rest of the stdlib, C-extension
-equivalents and predefined constants — which is what stands between "parses + compiles"
-and "runs the application." That is ongoing, unproven work tracked in the sibling
-CONFORMANCE-*.md reports.
+Front-end (parse + compile) is essentially complete **against the corpora above**.
+The remaining tail is a small number of compile-time constructs (the 6 remaining
+Rails gaps) and, beyond the front-end, the **runtime** surface — the rest of the
+stdlib, C-extension equivalents and predefined constants — which is what stands
+between "parses + compiles" and "runs the application." That is ongoing, unproven
+work tracked in the sibling CONFORMANCE-*.md reports.
+
+⛔ **A second corpus has since found front-end gaps these could not.** Everything
+above is measured against the `lib/` trees of released gems and of Rails and
+Puppet. ruby/spec exercises constructs that production libraries simply do not
+write, and two parser defects are open against it as of 2026-11-15:
+
+| issue | construct | cost |
+| --- | --- | --- |
+| [#669](https://github.com/go-embedded-ruby/ruby/issues/669) | a `do…end` block inside an arrow-lambda body, after a paren-less command call | **160 ruby/spec examples** — the largest single-defect figure in the tracker |
+| [#905](https://github.com/go-embedded-ruby/ruby/issues/905) | a brace block on a name that is also a local, inside parentheses | open |
+
+Neither contradicts the measurement above. #669 is a *nesting* of the
+paren-less-command-plus-`do…end` form that **What moved the needle** records as
+fixed, so the fix and the defect are about different shapes of the same
+construct.
+
+⚠ Whether any of the **6 remaining Rails gaps** is in fact that construct has
+**not** been checked — it is a cross-reference nobody has made, not a thing
+known to be absent, and it would be worth half an hour before anyone treats
+#669 as a ruby/spec-only concern.
+
+The point worth carrying: *"essentially complete"* was true of what was asked,
+and a corpus answers only the questions it contains. The parity plan is
+[#941](https://github.com/go-embedded-ruby/ruby/issues/941).
