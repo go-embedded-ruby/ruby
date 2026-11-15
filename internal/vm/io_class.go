@@ -64,6 +64,10 @@ func (vm *VM) registerIOClassMethods(cIO, cFile *RClass) {
 			mode = vm.vmodeString(args[1]) // Integer flag set or fopen-style String
 		}
 		o := openFileIO(cFile, path, mode)
+		// Door 2 of 5: IO.sysopen's stream, which lives in fdTable. A program that
+		// writes through this very object (rather than through an IO.for_fd wrapper,
+		// which is door 5) needs it tracked here.
+		vm.trackOpenFile(o)
 		vm.nextFd++
 		o.fd = vm.nextFd
 		vm.fdTable[o.fd] = o
@@ -288,6 +292,13 @@ func (vm *VM) ioAdoptDescriptor(o, src *IOObj, pos []object.Value, opts *object.
 			}
 		}
 	}
+	// Door 5 of 5 (see trackOpenFile): the wrapper o is a DIFFERENT IOObj from the
+	// descriptor's src, sharing only its path and its buffer at this instant, and
+	// it is o that the program writes through. Tracking src at IO.sysopen is not
+	// enough — measured: IO.sysopen + IO.for_fd + write, unclosed, left the file
+	// empty under rbgo and held "payload" under MRI 4.0.7, with the sysopen site
+	// already tracked.
+	vm.trackOpenFile(o)
 }
 
 // splitIOOpts separates a trailing options Hash (IO.read/write keyword arguments)

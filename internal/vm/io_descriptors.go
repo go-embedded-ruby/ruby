@@ -348,6 +348,14 @@ func defIOSeekable(cls *RClass) {
 		}
 		copy(o.buf[off:], data)
 		o.writable = true // a written File flushes its buffer back on flush/close
+		// Door 4 of 5. MRI's rb_io_pwrite calls pwrite(2) on the descriptor, so
+		// there the bytes are on disk the moment #pwrite returns; here they are in
+		// the buffer, which makes them losable exactly like a buffered #write.
+		// Marking them dirty and tracking the stream is what keeps them (#643);
+		// that they are not on disk UNTIL a flush is a separate divergence of the
+		// buffer-backed model, not one this records as fixed.
+		o.wbufDirty = true
+		vm.trackOpenFile(o)
 		return object.IntValue(int64(len(data)))
 	})
 	cls.define("sysseek", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
@@ -733,6 +741,12 @@ func ioReopenPath(vm *VM, o *IOObj, pos []object.Value, opts *object.Hash) objec
 	o.isStr, o.closed, o.lineno = true, false, 0
 	o.w, o.pipe, o.isWriteEnd, o.pipeSynced, o.reopened = nil, nil, false, 0, nil
 	o.closeOnExecOff = false
+	// Door 3 of 5: the stream now writes a DIFFERENT path, and the one that must
+	// be flushed at teardown is o — never fresh, which is a throwaway holding the
+	// same path and the file's pre-reopen bytes, and flushing it would write those
+	// stale bytes back over o's. That is why openFileIO does not track and its
+	// callers do.
+	vm.trackOpenFile(o)
 	if explicit {
 		ms := vm.ioResolveModeEnc(pos, opts)
 		o.extEnc, o.intEnc, o.binmode, o.newline = ms.extEnc, ms.intEnc, ms.binmode, ms.newline

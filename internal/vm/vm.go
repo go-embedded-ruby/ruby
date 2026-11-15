@@ -833,6 +833,20 @@ type VM struct {
 	// normally. GVL-guarded.
 	atExit []*Proc
 
+	// openFiles holds the writable, path-backed streams this interpreter has
+	// handed to Ruby, so interpreter teardown can flush them — MRI closes every
+	// open IO at shutdown (rb_objspace_call_finalizer reaches each one's
+	// fptr_finalize, which fflushes), which is why a script that writes a file
+	// and exits without closing it still finds its bytes on disk. See
+	// trackOpenFile and flushOpenFiles (io.go), and runAtExit.
+	//
+	// Entries are never removed on #close; flushOpenFiles skips a closed stream,
+	// and trackOpenFile compacts the closed ones out whenever the slice would
+	// grow. That bounds the slice by the number of streams open AT ONCE with one
+	// site to get right, instead of an untrack call at each of the five places
+	// that set IOObj.closed. GVL-guarded, like atExit.
+	openFiles []*IOObj
+
 	// frameNames is the running method-name stack (innermost last), maintained by
 	// exec for Kernel#__method__ and #caller. GVL-guarded (VM code is serialized
 	// by the GVL).
@@ -1522,6 +1536,23 @@ func (vm *VM) Run(iseq *bytecode.ISeq) (result object.Value, err error) {
 			vm.frameCrefs = vm.frameCrefs[:0]
 			vm.frameMethods = vm.frameMethods[:0]
 			vm.fileStack = vm.fileStack[:0]
+			// An UNCAUGHT exception is still a program end, and MRI tears the
+			// interpreter down before it reports it: ruby_cleanup runs
+			// rb_ec_teardown (at_exit handlers, then the IO flush) and only then
+			// error_handle prints the message. rbgo returned the error from here
+			// having run NEITHER, so `at_exit { … }; raise "boom"` lost its handler
+			// and an unclosed file lost its bytes. Measured against MRI 4.0.7:
+			//
+			//	at_exit { puts "handler ran" }; puts "before"; raise "boom"
+			//	  MRI   exit 1, stdout "before\nhandler ran"
+			//	  rbgo  exit 1, stdout "before"            (before this line)
+			//
+			// Teardown runs with the frame stack already reset, as it does on the
+			// SystemExit and Thread#kill paths above. A handler that itself calls
+			// exit sets vm.terminalExit (runAtExitOne), which is how MRI lets it
+			// override the status; the error is still returned, because an uncaught
+			// exception is what happened and the host decides what to print.
+			vm.runAtExit()
 			result, err = nil, rerr
 		}
 	}()
