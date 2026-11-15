@@ -345,8 +345,29 @@ func (vm *VM) defineProcessExit(def func(string, NativeFn)) {
 	def("exit", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		return vm.raiseSystemExit(vm.exitStatusArg(args, 0), "exit")
 	})
+	// ⛔ raiseSystemExitImmediate, not raiseSystemExit: the ! is the whole
+	// difference between these two definitions, and this door had the
+	// non-immediate helper. Kernel#exit! (kernel_introspect.go) got it right and
+	// Process.exit! did not, so the two spellings of one method behaved
+	// differently — MRI implements both with rb_f_exit_bang.
+	//
+	// Measured 2026-11-15 against MRI 4.0.7 through cmd/oracle, on
+	// `at_exit { puts "at_exit ran" }; puts "start"; Process.exit! 4`:
+	//
+	//	MRI    status 4, stdout EMPTY        (no at_exit, nothing flushed)
+	//	rbgo   status 4, "start\nat_exit ran"
+	//
+	// The status was already right, which is why nothing caught this: only the
+	// at_exit handlers tell the two helpers apart, and a test that checks the
+	// status alone passes either way.
+	//
+	// ⚠ The `start` half of that output is a SEPARATE defect and is not fixed
+	// here: rbgo does not buffer $stdout at all (no bufio anywhere;
+	// cmd/rbgo/main.go passes os.Stdout straight through) while reporting
+	// `$stdout.sync == false`. See #676 — the choice between buffering as MRI
+	// does and reporting sync honestly is not this change's to make.
 	def("exit!", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return vm.raiseSystemExit(vm.exitStatusArg(args, 1), "exit")
+		return vm.raiseSystemExitImmediate(vm.exitStatusArg(args, 1), "exit")
 	})
 	def("abort", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		return vm.send(vm.main, "abort", args, blk)
