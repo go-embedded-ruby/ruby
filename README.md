@@ -461,9 +461,15 @@ JRuby**):
   `pid`/`ppid`/`uid`/`gid`/`euid`/`egid`. There is **no `Process.fork`**
   (`Process.respond_to?(:fork)` is `false`) — Go's runtime cannot be forked
   safely; `spawn` is the supported way to start a child. **`Kernel#fork` is a
-  different story**: `fork { ... }` *does* exist and runs the block in the same
-  process — see the table under *Known divergences*, because code that forks to
-  isolate or to drop privileges gets neither here.
+  different story**: `fork { ... }` *does* exist and runs the block **in the same
+  process**, so **code that forks to isolate or to drop privileges gets neither
+  here** — measured 2026-11-15 against MRI 4.0.7, `x = 1; fork { x = 99 }` leaves
+  the parent's `x` at **99** where MRI leaves it at **1**, and the `Integer` it
+  returns is indistinguishable from a real pid. It exists because
+  `Puppet::Util::Execution.execute` is built on it
+  ([#774](https://github.com/go-embedded-ruby/ruby/issues/774) weighs the three
+  ways out; the parity plan is
+  [#941](https://github.com/go-embedded-ruby/ruby/issues/941)).
 - **Pattern matching (`case`/`in`):** value, variable-binding, class/constant,
   array (incl. splat and nested), hash (`deconstruct_keys`, `**rest`/`**nil`),
   find (`[*pre, x, *post]`), pin (`^x`) and alternative (`a | b`) patterns;
