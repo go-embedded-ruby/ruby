@@ -770,13 +770,41 @@ type VM struct {
 	currentFiber     *Fiber            // the fiber currently running (a thread's root fiber at the top level); never nil
 
 	// Concurrency: an emulated GVL (one Ruby thread executes VM code at a time).
-	// The running goroutine holds gvl; it is released only inside blocking native
+	// The running goroutine holds gvl; it is released inside blocking native
 	// methods (Thread#join, Mutex#lock, Queue#pop, sleep, Thread.pass), where the
-	// thread's execution context is saved and the next runnable thread's restored.
+	// thread's execution context is saved and the next runnable thread's restored,
+	// and — since #940 — at an interpreter safepoint every safepointTicks units of
+	// Ruby progress, which is the only release a thread running pure Ruby reaches.
+	//
+	// ⛔ This comment used to end at "only inside blocking native methods", and
+	// that word was the whole defect: a thread that never called one of them never
+	// released the GVL, so `Thread.new { while true; end }` froze the interpreter
+	// and Thread.new itself never returned. The list was accurate and its
+	// completeness was the thing nobody checked.
 	gvl           sync.Mutex
 	currentThread *RThread   // the thread holding the GVL
 	mainThread    *RThread   // the root thread
 	threads       []*RThread // all live threads, for Thread.list (GVL-guarded)
+
+	// sinceSafepoint counts units of uninterrupted Ruby progress since the last
+	// interpreter safepoint — a backward bytecode jump, or a block invocation.
+	// VM.tickSafepoint services a safepoint every safepointTicks of them.
+	//
+	// ⛔ Every release site listed above is a BLOCKING call, so a thread running
+	// pure Ruby reached no yield point at all: `Thread.new { while true; end }`
+	// held the GVL for ever and Thread.new ITSELF never returned, because the
+	// eager-start handshake waits for the new thread to block or finish and a
+	// bare loop does neither (#940).
+	//
+	// ⛔ TWO kinds of progress are counted, and the second is not optional: a
+	// backward jump covers `while`/`until`, but `loop { }`, `Integer#times` and
+	// `Array#each` spin in a GO loop whose bytecode has no backward jump at all.
+	// Fixing only the dispatch loop was measured and left `loop { }` hanging
+	// exactly as before.
+	//
+	// Touched only while the GVL is held, so it needs no lock — the same reason
+	// envFree below needs none.
+	sinceSafepoint int
 
 	// envFree recycles per-call frame environments. exec checks one out at entry
 	// and returns it at normal exit unless a closure captured it (see Env.captured
@@ -2586,20 +2614,29 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				subj := pop()
 				raise("NoMatchingPatternError", "%s", subj.Inspect())
 			case bytecode.OpJump:
+				// ⛔ These four are the dispatch loop's only backward edges, and so
+				// the only places a thread running pure Ruby can be made to offer
+				// the GVL away. Before #940 none of them did, and a bare
+				// `loop { }` held it for ever. backJump returns at once for a
+				// forward jump, which is most of them.
+				vm.backJump(in.A, pc)
 				pc = in.A
 				continue
 			case bytecode.OpBranchIf:
 				if pop().Truthy() {
+					vm.backJump(in.A, pc)
 					pc = in.A
 					continue
 				}
 			case bytecode.OpBranchUnless:
 				if !pop().Truthy() {
+					vm.backJump(in.A, pc)
 					pc = in.A
 					continue
 				}
 			case bytecode.OpBranchNil:
 				if _, isNil := pop().(object.Nil); isNil {
+					vm.backJump(in.A, pc)
 					pc = in.A
 					continue
 				}
