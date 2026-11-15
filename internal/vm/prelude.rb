@@ -166,8 +166,53 @@ module Enumerable
   # to_set: a new Set of the elements (each preprocessed by the block, if given),
   # as MRI's Enumerable#to_set. Defined here so every Enumerable — Array, Range,
   # Hash, … — can be turned into a Set.
-  def to_set(klass = Set, *args, &block)
+  #
+  # ⛔ *args RATHER THAN `klass = Set`, and the reason is the deprecation below:
+  # with a default parameter, `to_set` and `to_set(Set)` are INDISTINGUISHABLE
+  # inside the method — klass == Set and args empty in both. MRI warns for the
+  # second and not the first, so the test is ARITY, not the value.
+  #
+  # Measured against MRI 4.0.7 through cmd/oracle (#909), and three of these are
+  # not what "with arguments warns" would lead one to write:
+  #
+  #   [1,2].to_set            silent
+  #   [1,2].to_set(Set)       warns          <- even though Set IS the default
+  #   [1,2].to_set(MySet)     warns
+  #   [1,2].to_set { … }      SILENT         <- a block alone is not "arguments"
+  #   (1..3).to_set           silent         <- see Range#to_set on forwarding
+  #   Set[1,2].to_set(Set)    SILENT         <- Set#to_set does not warn at all
+  #
+  # The message is reproduced character for character, with uplevel: 1 so the
+  # file:line prefix names the CALLER, as MRI's does.
+  #
+  # ⛔ And it is a plain `warn`, NOT the :deprecated category: measured, MRI
+  # still emits it under `Warning[:deprecated] = false`. Routing it through the
+  # category would silence a warning MRI does not silence.
+  # ⛔ The warning goes through this helper so the MESSAGE lives in ONE place and
+  # so `uplevel` is computed from a known depth. uplevel: 2 skips the helper and
+  # its caller, landing on the user's line — for Enumerable#to_set AND for any
+  # override that calls it, which is what Range#to_set needs.
+  #
+  # Measured: with the warning written inline in to_set at uplevel: 1,
+  # `(1..3).to_set(Set)` reported `prelude.rb:1174` — the line of Range#to_set's
+  # `super` — where MRI reports the caller's line. In MRI both to_set are C, so
+  # there is no intervening Ruby frame to land on; here there is, and an
+  # interpreter's own prelude has no business appearing in a user's warning.
+  private def __warn_to_set_args(args)
+    return if args.empty?
+    warn("passing arguments to Enumerable#to_set is deprecated", uplevel: 2)
+  end
+
+  # __to_set_core is to_set without the warning, so an override that has already
+  # warned (Range#to_set) does not warn a second time through `super`.
+  private def __to_set_core(args, block)
+    klass = args.empty? ? Set : args.shift
     klass.new(self, *args, &block)
+  end
+
+  def to_set(*args, &block)
+    __warn_to_set_args(args)
+    __to_set_core(args, block)
   end
 
   # to_h: each element (or each yield of the block) must be a [key, value] pair.
@@ -1140,9 +1185,28 @@ class Range
   # core/range/to_set_spec.rb:22. Unconditional rather than version-gated: no
   # spec asserts the old behaviour — nothing can assert a hang — so the only
   # thing a version gate would preserve is the way to wedge the interpreter.
-  def to_set(klass = Set, *args, &block)
+  # ⛔ TWO changes here, both forced by the deprecation warning in
+  # Enumerable#to_set (#909), and neither changes what this method returns.
+  #
+  # 1. *args, not `klass = Set`: the C above forwards argc/argv VERBATIM, and a
+  #    default parameter does not. With `klass = Set` a bare `range.to_set`
+  #    reached Enumerable#to_set carrying an explicit Set — harmless while that
+  #    method ignored the difference, and a false warning the moment it stopped.
+  #    MRI is silent for `(1..3).to_set`, measured.
+  #
+  # 2. It warns here and calls __to_set_core instead of `super`. `super` would
+  #    warn from Enumerable's frame, whose uplevel lands on THIS method's line:
+  #    measured, `(1..3).to_set(Set)` reported `prelude.rb:1174` where MRI
+  #    reports the caller. Warning here puts the user's line in the message and
+  #    the core call keeps it to one warning.
+  #
+  # ⚠ So the call shape no longer mirrors `rb_call_super` above, while the
+  # RESULT still does. The C can forward blindly because both to_set are C and
+  # add no Ruby frame; a prelude written in Ruby cannot.
+  def to_set(*args, &block)
     raise RangeError, "cannot convert endless range to a set" if self.end.nil?
-    super
+    __warn_to_set_args(args)
+    __to_set_core(args, block)
   end
 
   # Range#== is true when other is a Range (or subclass) with == begin, == end
