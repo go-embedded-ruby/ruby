@@ -869,9 +869,9 @@ hang, so code relying on it for that is unprotected under rbgo — and unprotect
 
 Otherwise:
 
-| | how it differs from MRI 4.0.5 |
+| | how it differs from MRI 4.0.7 |
 | --- | --- |
-| `RUBY_VERSION` | rbgo reports `"4.0.9"`, the latest MRI release (2026-10-23). The Ruby 4.0 **`Ruby` namespace** *is* implemented — all nine of `Ruby::{VERSION,RELEASE_DATE,PLATFORM,PATCHLEVEL,REVISION,COPYRIGHT,ENGINE,ENGINE_VERSION,DESCRIPTION}` are the **same objects** as their `RUBY_`-prefixed globals, as `version.c` defines them, so `Ruby::VERSION.equal?(RUBY_VERSION)` is `true`. The move from `3.4.1` was measured before it was made, with both engines built from one commit minus the version string: **+144 passing** over `core` and `language`, and **27 examples that went red**, which no pass total shows — see [#799](https://github.com/go-embedded-ruby/ruby/issues/799) for the list of what each of the 27 needs |
+| `RUBY_VERSION` | rbgo reports `"4.0.9"`, the latest MRI release (2026-10-23). The Ruby 4.0 **`Ruby` namespace** *is* implemented — all nine of `Ruby::{VERSION,RELEASE_DATE,PLATFORM,PATCHLEVEL,REVISION,COPYRIGHT,ENGINE,ENGINE_VERSION,DESCRIPTION}` are the **same objects** as their `RUBY_`-prefixed globals, as `version.c` defines them, so `Ruby::VERSION.equal?(RUBY_VERSION)` is `true`. The move from `3.4.1` was measured before it was made, with both engines built from one commit minus the version string: **+144 passing** over `core` and `language`, and **27 examples that went red**, which no pass total shows — see [#799](https://github.com/go-embedded-ruby/ruby/issues/799), **closed 2026-11-02**, for the list of what each of the 27 needs: the move is done, the 27 are not, and a closed issue is not finished work |
 | `Numeric#to_int` | not defined — `Complex(2.9, 0).to_int` raises `NoMethodError`; MRI returns `2` |
 | `File::Stat#==` | `a == b` is `false` for two stats of the same file (MRI: `true`); `a.==(b)` answers `true` |
 | `File#stat` on a file unlinked while open | raises `Errno::ENOENT`; MRI answers from the open descriptor. rbgo's streams are buffered by path and hold no descriptor |
