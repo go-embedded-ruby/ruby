@@ -172,3 +172,216 @@ func TestAugeasStringers(t *testing.T) {
 		t.Errorf("augeas stringers = %q / %q / %v", o.ToS(), o.Inspect(), o.Truthy())
 	}
 }
+
+// TestAugeasOpenAndCreateHonourTheirBlock covers the two constructors' block
+// form, which both discarded before #950.
+//
+// The gem's contract, from lib/augeas.rb's `self.open` and
+// lib/augeas/facade.rb's `self.create`: `yield aug` inside `begin`, `aug.close`
+// in `ensure`, and the method answers the BLOCK's value, not the handle. The
+// third part is the one a yield-only fix would still get wrong, so each case
+// returns something the handle could not be mistaken for.
+func TestAugeasOpenAndCreateHonourTheirBlock(t *testing.T) {
+	got := augeasRun(t, `
+puts Augeas.open("/r", "/l", 0) { |a| a.set("/x", "1"); "open-block-value" }.inspect
+puts Augeas.create(:root => "/r") { |a| a.set("/x", "1"); 42 }.inspect
+
+# Without a block each still answers the handle itself, open on both.
+puts Augeas.open("/r").get("/anything").inspect
+puts Augeas.create(:root => "/r").get("/anything").inspect
+
+# ⛔ The handle is closed on the way out, and closed is OBSERVABLE: the gem's
+# #close NULLs the C handle, after which every method raises from aug_handle.
+h = nil
+Augeas.open { |a| h = a }
+begin; h.get("/x"); rescue => e; puts "#{e.class}: #{e.message}"; end
+
+# ensure, not a trailing call: a block that raises still closes.
+g = nil
+begin
+  Augeas.create { |a| g = a; raise "boom" }
+rescue RuntimeError
+end
+begin; g.get("/x"); rescue => e; puts "#{e.class} after a raising block"; end
+
+# And the block's own close is not a double-close fault: the helper closes
+# through the class's #close, which raises on a handle the block already shut.
+begin
+  Augeas.open { |a| a.close }
+rescue => e
+  puts "#{e.class} when the block closed it first"
+end
+`)
+	want := `"open-block-value"
+42
+nil
+nil
+SystemCallError: Failed to retrieve connection
+SystemCallError after a raising block
+SystemCallError when the block closed it first`
+	if got != want {
+		t.Fatalf("block forms:\n got=%q\nwant=%q", got, want)
+	}
+}
+
+// TestEveryMethodOfAClosedAugeasRaises derives the population from the
+// interpreter instead of listing it.
+//
+// ⛔ A HAND-WRITTEN LIST OF METHODS IS THE ARTEFACT THIS REPOSITORY KEEPS GETTING
+// BURNED BY — #931's prose had lost UNIXServer, and #951 had to parse the package
+// to find a fourth `open`. The guard being tested here lives at ONE site (the
+// `self` accessor in augeas_bind.go), so the risk is not that a method is missed
+// today but that a method added LATER reaches the handle another way. Asking
+// `Augeas.instance_methods(false)` means such a method is in this test the day it
+// exists, with no list to update.
+//
+// What it asserts is the weakest true thing: no method of a closed handle
+// SUCCEEDS. It cannot assert the class, because arity is checked before the
+// handle — which is also the gem's order, since rb_define_method's argc is
+// enforced by Ruby before the C body runs — so `a.set` with no arguments is an
+// ArgumentError there too.
+func TestEveryMethodOfAClosedAugeasRaises(t *testing.T) {
+	got := augeasRun(t, `
+a = Augeas.create
+a.close
+bad = []
+Augeas.instance_methods(false).sort.each do |m|
+  begin
+    a.send(m)
+    bad << m
+  rescue ArgumentError, SystemCallError
+  end
+end
+puts Augeas.instance_methods(false).length
+puts bad.inspect
+`)
+	want := "18\n[]"
+	if got != want {
+		t.Fatalf("closed handle:\n got=%q\nwant=%q\n(a non-empty list is a method that reached the handle without self(); a count below 18 means instance_methods stopped answering and this test measured nothing)", got, want)
+	}
+}
+
+// TestAugeasCloseAnswersNilThenPoisonsTheHandle pins #close itself, including
+// the ordering a plain flag check would get wrong.
+func TestAugeasCloseAnswersNilThenPoisonsTheHandle(t *testing.T) {
+	got := augeasRun(t, `
+a = Augeas.create
+a.set("/x", "1")
+puts a.close.inspect
+
+# ⛔ A SECOND close RAISES, it does not quietly succeed: augeas_close calls
+# aug_handle before aug_close, so the nil check fires first.
+begin; a.close; rescue => e; puts "second close: #{e.class}"; end
+
+# close takes no arguments.
+b = Augeas.create
+begin; b.close(1); rescue => e; puts "#{e.class}: #{e.message}"; end
+# and that refusal left it usable.
+puts b.get("/nothing").inspect
+`)
+	want := `nil
+second close: SystemCallError
+ArgumentError: wrong number of arguments (given 1, expected 0)
+nil`
+	if got != want {
+		t.Fatalf("close:\n got=%q\nwant=%q", got, want)
+	}
+}
+
+// TestAugeasCreateReadsTheGemsOptionKeys covers Augeas.create's options hash,
+// which this binding used to get wrong wholesale: `create` was the same
+// positional native as `open`, while the gem's is `create(opts={})` through
+// Augeas::Facade.
+//
+// The flag arithmetic is asserted as a NUMBER rather than by re-deriving it from
+// the constants, so a test that read the same wrong constant as the code cannot
+// agree with it. ⛔ And it earned that on its first run: these numbers were
+// written from memory as [2, 8, 16] for the three save modes, the test went red,
+// and the SOURCE settled it against the test — go-ruby-augeas has SaveBackup
+// 1<<0, SaveNewFile 1<<1, TypeCheck 1<<2, NoStdinc 1<<3, SaveNoop 1<<4, NoLoad
+// 1<<5, NoModlAutoload 1<<6, EnableSpan 1<<7, which is augeas.h's AUG_* order.
+// Re-deriving them from the same constants the code uses would have agreed with
+// a wrong binding in silence. 4|16 is AUG_TYPE_CHECK|AUG_SAVE_NOOP = 20.
+func TestAugeasCreateReadsTheGemsOptionKeys(t *testing.T) {
+	got := augeasRun(t, `
+puts Augeas.create.flags
+puts [Augeas.create.root, Augeas.create.load_path].inspect
+a = Augeas.create(:root => "/r", :loadpath => "/l")
+puts [a.root, a.load_path, a.flags].inspect
+
+# ⛔ A FLAG IS SET BY ITS KEY'S PRESENCE, NOT ITS VALUE. facade.rb tests
+# "flags.key? key" and never looks at the value, so false arms it too.
+puts Augeas.create(:type_check => false).flags
+puts Augeas.create(:type_check => true).flags
+puts Augeas.create(:type_check => false, :save_mode => :noop).flags
+
+puts [Augeas.create(:save_mode => :backup).flags,
+      Augeas.create(:save_mode => :newfile).flags,
+      Augeas.create(:save_mode => :noop).flags].inspect
+puts [Augeas.create(:no_stdinc => 1).flags,
+      Augeas.create(:no_load => 1).flags,
+      Augeas.create(:no_modl_autoload => 1).flags,
+      Augeas.create(:enable_span => 1).flags].inspect
+
+# nil is the same as no hash at all, and a non-Hash is a TypeError.
+puts Augeas.create(nil).flags
+begin; Augeas.create("/r"); rescue => e; puts e.class; end
+begin; Augeas.create({}, {}); rescue => e; puts "#{e.class}: #{e.message}"; end
+`)
+	want := `0
+["", ""]
+["/r", "/l", 0]
+4
+4
+20
+[1, 2, 16]
+[8, 32, 64, 128]
+0
+TypeError
+ArgumentError: wrong number of arguments (given 2, expected 0..1)`
+	if got != want {
+		t.Fatalf("create options:\n got=%q\nwant=%q", got, want)
+	}
+}
+
+// TestAugeasCreateRaisesOnTheFIRSTBadKey pins the consequence of facade.rb
+// validating and assembling in ONE `opts.each_key` pass: the first offending key
+// raises and the rest are never looked at, so WHICH error you get depends on the
+// order the caller wrote the keys in.
+//
+// ⛔ This is the case a reimplementation gets wrong by being tidier than the
+// reference — validating all keys, or checking save_mode before the scan, gives
+// a stable answer where the gem's is order-dependent. Both orders are asserted
+// here precisely because agreeing with one of them is not agreeing with the gem.
+func TestAugeasCreateRaisesOnTheFIRSTBadKey(t *testing.T) {
+	got := augeasRun(t, `
+[[:save_mode, :bogus, :nonsense, 1], [:nonsense, 1, :save_mode, :bogus]].each do |k1, v1, k2, v2|
+  begin
+    Augeas.create({k1 => v1, k2 => v2})
+  rescue => e
+    puts "#{e.class}: #{e.message}"
+  end
+end
+
+# The two messages on their own, including nil's empty interpolation.
+begin; Augeas.create(:save_mode => :bogus); rescue => e; puts e.message; end
+begin; Augeas.create(:save_mode => nil); rescue => e; puts e.message; end
+begin; Augeas.create(:save_mode => "backup"); rescue => e; puts e.message; end
+begin; Augeas.create(:nonsense => 1); rescue => e; puts e.message; end
+begin; Augeas.create("root" => "/r"); rescue => e; puts e.message; end
+
+# A good key before a bad one still raises on the bad one.
+begin; Augeas.create(:root => "/r", :nope => 1); rescue => e; puts e.message; end
+`)
+	want := `ArgumentError: Invalid save mode bogus.
+ArgumentError: Unknown argument nonsense.
+Invalid save mode bogus.
+Invalid save mode .
+Invalid save mode backup.
+Unknown argument nonsense.
+Unknown argument root.
+Unknown argument nope.`
+	if got != want {
+		t.Fatalf("create key errors:\n got=%q\nwant=%q", got, want)
+	}
+}

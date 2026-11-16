@@ -41,6 +41,109 @@ func augPathArg(args []object.Value) string {
 	return args[0].ToS()
 }
 
+// augCreateOpts reads Augeas.create's options hash into the three values
+// Facade::open3 is called with. It mirrors lib/augeas/facade.rb's create, whose
+// whole validation is ONE pass over the caller's hash:
+//
+//	opts.each_key do |key|
+//	  if flags.key? key                       then aug_flags |= flags[key]
+//	  elsif key == :save_mode                 then … or raise "Invalid save mode #{…}."
+//	  elsif key != :root && key != :loadpath  then raise "Unknown argument #{key}."
+//	  end
+//	end
+//	aug = Augeas::Facade::open3(opts[:root], opts[:loadpath], aug_flags)
+//
+// Three consequences of that shape are reproduced on purpose, because each one
+// is a thing a reasonable reimplementation would get wrong:
+//
+//   - A FLAG IS SET BY ITS KEY'S PRESENCE, NOT ITS VALUE. `flags.key? key` never
+//     looks at the value, so `create(type_check: false)` sets TYPE_CHECK just as
+//     `create(type_check: true)` does. Surprising, and it is the contract.
+//   - :root and :loadpath are never removed from the hash; they are excluded by
+//     the final `elsif`'s own condition. The hash is not mutated.
+//   - VALIDATION AND ASSEMBLY SHARE ONE PASS, so the FIRST offending key raises
+//     and later keys are never visited. With two bad keys the error therefore
+//     depends on the caller's insertion order — `create(save_mode: :bogus,
+//     nonsense: 1)` says "Invalid save mode bogus." and the same two keys the
+//     other way round say "Unknown argument nonsense." Ranging over h.Keys,
+//     which rbgo keeps in insertion order, is what preserves that.
+//
+// The gem's base value is `defined?(Augeas::NO_ERR_CLOSE) ? Augeas::NO_ERR_CLOSE
+// : Augeas::NONE`; rbgo defines no NO_ERR_CLOSE constant, so the fallback branch
+// is the live one and the base is NONE.
+func augCreateOpts(vm *VM, args []object.Value) (root, loadPath string, flags int) {
+	if len(args) > 1 {
+		raise("ArgumentError", "wrong number of arguments (given %d, expected 0..1)", len(args))
+	}
+	flags = augeas.None
+	if len(args) == 0 || object.IsNil(args[0]) {
+		return "", "", flags
+	}
+	h := hashArgOrRaise(vm, args[0])
+
+	flagOf := map[object.Symbol]int{
+		"type_check":       augeas.TypeCheck,
+		"no_stdinc":        augeas.NoStdinc,
+		"no_load":          augeas.NoLoad,
+		"no_modl_autoload": augeas.NoModlAutoload,
+		"enable_span":      augeas.EnableSpan,
+	}
+	saveMode := map[object.Symbol]int{
+		"backup":  augeas.SaveBackup,
+		"newfile": augeas.SaveNewFile,
+		"noop":    augeas.SaveNoop,
+	}
+
+	// ⛔ Every lookup below tests PRESENCE (`v, ok := m[k]`), never `m[k] != 0`.
+	// A zero-valued flag constant would make its key read as unknown, and the
+	// map's own contents would be deciding a question about the KEY SET.
+	for _, k := range h.Keys {
+		sym, isSym := k.(object.Symbol)
+		if !isSym {
+			raise("ArgumentError", "Unknown argument %s.", augInterp(k))
+		}
+		if bit, ok := flagOf[sym]; ok {
+			flags |= bit
+			continue
+		}
+		if sym == "save_mode" {
+			mode, _ := h.Get(k)
+			m, isModeSym := mode.(object.Symbol)
+			bit, ok := saveMode[m]
+			if !isModeSym || !ok {
+				// `#{opts[:save_mode]}` is to_s: :bogus prints bogus, and nil
+				// prints nothing at all, which is the gem's message verbatim.
+				raise("ArgumentError", "Invalid save mode %s.", augInterp(mode))
+			}
+			flags |= bit
+			continue
+		}
+		if sym == "root" || sym == "loadpath" {
+			continue // read after the loop, exactly as open3's arguments are
+		}
+		raise("ArgumentError", "Unknown argument %s.", augInterp(k))
+	}
+
+	if v, ok := h.Get(object.Symbol("root")); ok && !object.IsNil(v) {
+		root = v.ToS()
+	}
+	if v, ok := h.Get(object.Symbol("loadpath")); ok && !object.IsNil(v) {
+		loadPath = v.ToS()
+	}
+	return root, loadPath, flags
+}
+
+// augInterp renders a value the way Ruby's "#{v}" does inside the gem's two
+// ArgumentError messages: to_s, and the empty string for nil. ⛔ NOT Inspect:
+// `"#{:bogus}"` is `bogus`, not `:bogus`, and getting that wrong would make
+// every message off by one character in a way no Go test of the Go side notices.
+func augInterp(v object.Value) string {
+	if object.IsNil(v) {
+		return ""
+	}
+	return v.ToS()
+}
+
 // augRaise turns a non-nil engine error into an Augeas::Error.
 func augRaise(err error) {
 	if err != nil {
@@ -60,7 +163,41 @@ func augLens(name string) augeas.Lens {
 
 // registerAugeasMethods installs the Augeas instance surface.
 func (vm *VM) registerAugeasMethods(cls *RClass) {
-	self := func(v object.Value) *augeas.Augeas { return v.(*AugeasObj).a }
+	// ⛔ THE ONE DOOR. Every method below reaches the handle through self(v) and
+	// nothing else does, which is why the closed-handle guard can live here
+	// instead of at seventeen call sites — the shape #951 had to derive with a
+	// parser because `open` had five.
+	//
+	// It is ruby-augeas's aug_handle: in ext/augeas/_augeas.c every method calls
+	// it first, and after #close has NULLed the typed-data pointer its check
+	// `if (aug == NULL) rb_raise(rb_eSystemCallError, "Failed to retrieve
+	// connection")` is what a closed handle answers. So a closed Augeas does not
+	// no-op and does not crash: it raises SystemCallError, for #get as much as
+	// for a second #close.
+	self := func(v object.Value) *augeas.Augeas {
+		o := v.(*AugeasObj)
+		if o.closed {
+			raise("SystemCallError", "Failed to retrieve connection")
+		}
+		return o.a
+	}
+
+	// close — frees the handle in the gem and returns nil. Here there is nothing
+	// to free, so it only poisons the object; what matters is that it answers nil
+	// and that everything after it raises.
+	//
+	// self(v) runs FIRST, and that ordering is the gem's: augeas_close calls
+	// aug_handle before aug_close, so closing twice raises rather than quietly
+	// succeeding. Calling the guard rather than re-testing the flag is also what
+	// keeps the two from drifting apart.
+	cls.define("close", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) != 0 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 0)", len(args))
+		}
+		self(v)
+		v.(*AugeasObj).closed = true
+		return object.NilV
+	})
 
 	// get(path) — the value at path, or nil when the node is absent / has none.
 	cls.define("get", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
