@@ -784,22 +784,36 @@ func (vm *VM) frameFileLabel(i int) string {
 	}
 }
 
-// runAtExit runs the registered at_exit blocks in LIFO order. A raise inside one
-// is swallowed so the remaining handlers still run (MRI reports it but keeps
-// going); other control-flow signals propagate.
+// runAtExit is this VM's interpreter teardown — MRI's rb_ec_teardown (eval.c),
+// which has the same two jobs in this order: run the registered at_exit blocks
+// in LIFO order (rb_ec_exec_end_proc), then let every open IO reach disk
+// (rb_objspace_call_finalizer, whose fptr_finalize fflushes each one). A raise
+// inside a handler is swallowed so the remaining handlers still run (MRI reports
+// it but keeps going); other control-flow signals propagate.
+//
+// The order is MRI's and it matters: a file an at_exit handler itself writes is
+// flushed, because the flush comes second.
 func (vm *VM) runAtExit() {
 	// Kernel#exit! / Process.exit! runs none of them: process.c rb_f_exit_bang
 	// calls _exit(2), which is precisely "terminate without running the exit
 	// handlers". Measured against MRI 4.0.5: `at_exit { puts "x" }; exit!(4)`
 	// prints nothing and exits 4.
+	//
+	// _exit(2) skips the IO flush too — it is the libc exit handlers and the
+	// object-space finalizer that it bypasses, not just the Ruby ones — so an
+	// unflushed buffer is LOST under exit!, and this return is what reproduces
+	// that. Measured against MRI 4.0.7, writing 12 bytes to a file and never
+	// closing it: `exit` leaves 12 bytes on disk, `exit!` leaves 0.
 	if vm.exitImmediate {
 		vm.atExit = nil
+		vm.openFiles = nil
 		return
 	}
 	for i := len(vm.atExit) - 1; i >= 0; i-- {
 		vm.runAtExitOne(vm.atExit[i])
 	}
 	vm.atExit = nil
+	vm.flushOpenFiles()
 }
 
 func (vm *VM) runAtExitOne(blk *Proc) {

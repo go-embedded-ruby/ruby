@@ -899,6 +899,7 @@ func (vm *VM) openFileArgs(cls *RClass, args []object.Value) *IOObj {
 	}
 	o := openFileSpec(cls, path, &ms, perm, permGiven)
 	o.extEnc, o.intEnc, o.binmode, o.newline = ms.extEnc, ms.intEnc, ms.binmode, ms.newline
+	vm.trackOpenFile(o) // door 1 of 5: File.new / File.open / IO.new on a path
 	return o
 }
 
@@ -1289,6 +1290,93 @@ func ioFlush(o *IOObj) {
 	if err != nil {
 		raiseOpenErrno(err, o.path)
 	}
+}
+
+// trackOpenFile records a writable, path-backed stream so interpreter teardown
+// can flush it (flushOpenFiles). A stream with nothing to lose — no path, or not
+// writable — is not recorded, which keeps IO.foreach and ARGF (both read-only,
+// and both deliberately absent from the call sites) out of the slice and keeps a
+// program that reads thousands of files from retaining their buffers.
+//
+// Call it wherever a writable path-backed stream becomes visible to Ruby. There
+// are FIVE such sites: File.new/File.open (openFileArgs), IO.sysopen, IO#reopen,
+// IO#pwrite, and ioAdoptDescriptor — the last reached by IO.new(fd), IO.for_fd
+// and File.new(fd), which build a SECOND IOObj over a descriptor and are the
+// door this mechanism was missing when it was first written with four.
+// TestEveryWayToGetAWritableFileFlushesAtShutdown covers them one by one, and the
+// differential in the pull request found the fifth, because a mechanism wired at
+// only some of its doors is this repository's commonest defect shape.
+func (vm *VM) trackOpenFile(o *IOObj) {
+	if o == nil || o.path == "" || !o.writable {
+		return
+	}
+	for _, p := range vm.openFiles {
+		if p == o { // idempotent: #pwrite and #reopen can land on a tracked stream
+			return
+		}
+	}
+	// Compact at the growth point: the filter is O(n) exactly when append would
+	// have copied O(n) anyway, so tracking stays amortised O(1) while the slice
+	// cannot outgrow the set of streams open at once by more than one step.
+	if len(vm.openFiles) == cap(vm.openFiles) {
+		live := vm.openFiles[:0]
+		for _, p := range vm.openFiles {
+			if !p.closed {
+				live = append(live, p)
+			}
+		}
+		vm.openFiles = live
+	}
+	vm.openFiles = append(vm.openFiles, o)
+}
+
+// flushOpenFiles flushes every tracked stream still open, which is what MRI's
+// shutdown does by closing every IO (see openFiles). It runs at the end of
+// runAtExit — AFTER the handlers, as MRI's rb_ec_teardown runs
+// rb_ec_exec_end_proc before rb_objspace_call_finalizer, so a file an at_exit
+// handler itself wrote reaches disk too — and NOT at all under Kernel#exit! /
+// Process.exit!, whose _exit(2) skips the handlers and the flush alike.
+//
+// ⛔ A TEARDOWN FLUSH MUST NOT RAISE, and getting that wrong is how this
+// function was first written. ioFlush re-opens the path (see its comment: a
+// buffer-backed stream has no descriptor), so it can fail where MRI's fflush on
+// a live fd cannot — most ordinarily when the directory has been removed under
+// the stream:
+//
+//	Dir.mktmpdir { |d| IO.for_fd(File.open(File.join(d, "f"), "w").fileno, "w").write("foo") }
+//
+// The block's exit deletes the directory, so the flush that follows gets ENOENT.
+// Raising it turned that clean program into `Errno::ENOENT @ rb_sysopen`, which
+// is what TestIOForFd and TestIOForFdModeCompat caught. MRI's shutdown ignores a
+// failing fflush (rb_io_fptr_finalize keeps no error), and at teardown there is
+// no longer anyone who could rescue one, so a Ruby error here is swallowed and
+// the remaining streams are still attempted.
+//
+// What that COSTS is stated rather than hidden: a stream whose path can no
+// longer be written loses its bytes, where MRI — holding a descriptor to an
+// unlinked file — would still write them. That is the buffer-backed model's own
+// limit (IOObj), not a decision taken here.
+func (vm *VM) flushOpenFiles() {
+	files := vm.openFiles
+	vm.openFiles = nil
+	for _, o := range files {
+		if o.closed || !o.writable || !o.wbufDirty {
+			continue
+		}
+		vm.flushOneAtTeardown(o)
+	}
+}
+
+func (vm *VM) flushOneAtTeardown(o *IOObj) {
+	defer func() {
+		if r := recover(); r != nil {
+			if _, ok := r.(RubyError); ok {
+				return // see flushOpenFiles: teardown reports nothing, as MRI does
+			}
+			panic(r) // a broken VM invariant stays loud
+		}
+	}()
+	ioFlush(o)
 }
 
 // curStdout / curStderr / curStdin return the IO currently bound to the global,
