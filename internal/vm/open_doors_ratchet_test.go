@@ -54,21 +54,7 @@ func TestEveryOpenDoorIsAccountedFor(t *testing.T) {
 	}
 
 	accounted := readOpenDoorTable(t)
-	var unlisted, aliases []string
-	seen := map[string]bool{}
-	for _, d := range doors {
-		seen[d.key] = true
-		if d.kind == openKindAlias {
-			aliases = append(aliases, fmt.Sprintf("%s (aliased to %s)", d.key, d.detail))
-			continue
-		}
-		if d.kind == openKindBlockHelper || d.kind == openKindUnsupported {
-			continue // correct by construction; see the kind's own comment below
-		}
-		if _, ok := accounted[d.key]; !ok {
-			unlisted = append(unlisted, fmt.Sprintf("%s (%s)", d.key, d.detail))
-		}
-	}
+	unlisted, aliases, stale := compareOpenDoors(doors, accounted)
 
 	if len(aliases) > 0 {
 		t.Errorf(`⛔ %d `+"`open`"+` door(s) are an ALIAS for another method:
@@ -95,19 +81,63 @@ that is merely WRITTEN DOWN is the artefact this test exists to replace.`,
 			len(unlisted), strings.Join(unlisted, "\n    "))
 	}
 
-	// The table may not keep rows for doors that no longer exist: a stale row is
-	// how a list stops describing the code.
-	var stale []string
+	if len(stale) > 0 {
+		t.Errorf(`⛔ testdata/open-doors.txt holds %d row(s) for door(s) that no longer need one:
+
+    %s
+
+Either the door is gone from the package, or IT WAS FIXED — it now goes through
+socketOpenWithBlock (or unsupported(…)) and the table describes a defect that is
+no longer there. Delete the row. ⛔ Moving the row to the "honours its block"
+section is NOT the fix: that section is for doors with INLINE handlers, and a
+socketOpenWithBlock door is correct by construction and belongs in no section.`,
+			len(stale), strings.Join(stale, "\n    "))
+	}
+}
+
+// compareOpenDoors is the whole verdict of TestEveryOpenDoorIsAccountedFor,
+// pulled out of it so it can be driven by a control
+// (TestTheDoorTableComparisonFailsInBothDirections) instead of only ever seeing
+// the live package, which is the one input that cannot show it is wrong.
+//
+// ⛔⛔ THIS FUNCTION USED TO BE RIGHT IN ONE DIRECTION ONLY, and the bug was
+// mine, one day old. It marked EVERY derived door `seen`, block-helper ones
+// included, and then called a row stale only when no door carried its key. So it
+// asked "does this door still exist?" when the question is "does this door still
+// NEED a row?". Fixing a door therefore moved nothing: Augeas.open went from an
+// inline block-discarding handler to socketOpenWithBlock and the test stayed
+// green with the row still reading "⛔ CONFIRMED DEFECT" about it. A gate that
+// cannot see the repair it was built to ask for goes on publishing a defect that
+// has been fixed — the same artefact #931's prose was, in the other direction.
+//
+// ⛔ It was not found by re-reading this file. It was found by changing the code
+// the gate watches and noticing THE GATE DID NOT MOVE. That is the only reliable
+// way to measure a check: see a-break-check-that-did-not-break.
+func compareOpenDoors(doors []openDoor, accounted map[string]string) (unlisted, aliases, stale []string) {
+	// mustList holds the keys of the doors that OWE the table a row: the inline
+	// handlers, and nothing else. An alias owes no row either — the table refuses
+	// the form outright and `aliases` reports it on its own terms.
+	mustList := map[string]bool{}
+	for _, d := range doors {
+		switch d.kind {
+		case openKindAlias:
+			aliases = append(aliases, fmt.Sprintf("%s (aliased to %s)", d.key, d.detail))
+		case openKindBlockHelper, openKindUnsupported:
+			// Correct by construction; see the kind's own comment.
+		default:
+			mustList[d.key] = true
+			if _, ok := accounted[d.key]; !ok {
+				unlisted = append(unlisted, fmt.Sprintf("%s (%s)", d.key, d.detail))
+			}
+		}
+	}
 	for key := range accounted {
-		if !seen[key] {
+		if !mustList[key] {
 			stale = append(stale, key)
 		}
 	}
 	sort.Strings(stale)
-	if len(stale) > 0 {
-		t.Errorf("testdata/open-doors.txt accounts for %d door(s) that are no longer in the package: %s",
-			len(stale), strings.Join(stale, ", "))
-	}
+	return unlisted, aliases, stale
 }
 
 type openKind int
@@ -127,6 +157,78 @@ const (
 	// openKindInline: a func literal, or any other expression. Must be listed.
 	openKindInline
 )
+
+// TestTheDoorTableComparisonFailsInBothDirections is compareOpenDoors's control.
+//
+// The live package can only ever show the comparison AGREEING. It cannot show it
+// disagreeing when it should, which is the half that was broken: the "fixed door
+// leaves a stale row" case below is the one that passed for a day while the table
+// went on calling a repaired door a confirmed defect. Each case here is a
+// disagreement the function has to produce, so a future simplification that
+// collapses one of them goes red.
+func TestTheDoorTableComparisonFailsInBothDirections(t *testing.T) {
+	const (
+		inline = "x.go:cls"
+		fixed  = "y.go:cls"
+	)
+	for _, tc := range []struct {
+		name                         string
+		doors                        []openDoor
+		accounted                    map[string]string
+		unlisted, aliases, wantStale []string
+	}{{
+		name:      "an inline door with a row agrees",
+		doors:     []openDoor{{key: inline, kind: openKindInline, detail: "inline func literal"}},
+		accounted: map[string]string{inline: "yields and closes"},
+	}, {
+		name:     "an inline door with NO row is unlisted",
+		doors:    []openDoor{{key: inline, kind: openKindInline, detail: "inline func literal"}},
+		unlisted: []string{inline + " (inline func literal)"},
+	}, {
+		// ⛔ THE CASE THAT WAS GREEN AND SHOULD NOT HAVE BEEN. The door still
+		// exists under the same key; only its KIND changed, because it was fixed.
+		name:      "a door FIXED into socketOpenWithBlock leaves its row stale",
+		doors:     []openDoor{{key: fixed, kind: openKindBlockHelper, detail: "socketOpenWithBlock"}},
+		accounted: map[string]string{fixed: "⛔ CONFIRMED DEFECT, discards its block"},
+		wantStale: []string{fixed},
+	}, {
+		name:      "a door that left the package entirely leaves its row stale",
+		doors:     nil,
+		accounted: map[string]string{fixed: "⛔ CONFIRMED DEFECT, discards its block"},
+		wantStale: []string{fixed},
+	}, {
+		name:      "an unsupported door owes no row, so a row for it is stale",
+		doors:     []openDoor{{key: fixed, kind: openKindUnsupported, detail: "unsupported(…)"}},
+		accounted: map[string]string{fixed: "whatever it used to say"},
+		wantStale: []string{fixed},
+	}, {
+		name:    "an alias is reported as an alias and owes no row",
+		doors:   []openDoor{{key: inline, kind: openKindAlias, detail: `cls.smethods["new"]`}},
+		aliases: []string{inline + ` (aliased to cls.smethods["new"])`},
+	}, {
+		name:      "an alias that someone wrote a row for is ALSO stale",
+		doors:     []openDoor{{key: inline, kind: openKindAlias, detail: `cls.smethods["new"]`}},
+		accounted: map[string]string{inline: "a row that cannot make an alias correct"},
+		aliases:   []string{inline + ` (aliased to cls.smethods["new"])`},
+		wantStale: []string{inline},
+	}} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.accounted == nil {
+				tc.accounted = map[string]string{}
+			}
+			unlisted, aliases, stale := compareOpenDoors(tc.doors, tc.accounted)
+			if !slices.Equal(unlisted, tc.unlisted) {
+				t.Errorf("unlisted:\n got=%q\nwant=%q", unlisted, tc.unlisted)
+			}
+			if !slices.Equal(aliases, tc.aliases) {
+				t.Errorf("aliases:\n got=%q\nwant=%q", aliases, tc.aliases)
+			}
+			if !slices.Equal(stale, tc.wantStale) {
+				t.Errorf("stale:\n got=%q\nwant=%q", stale, tc.wantStale)
+			}
+		})
+	}
+}
 
 type openDoor struct {
 	key    string // "<file>:<receiver>", stable across edits in a way a line number is not

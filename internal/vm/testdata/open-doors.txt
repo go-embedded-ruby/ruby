@@ -28,9 +28,15 @@ sqlite3.go:cls SQLite3::Database.open yields and closes the database in a defer 
 bolt.go:cls The bbolt database's open yields and closes the handle (bolt.go:76), returning the block's value.
 
 # ───────── does NOT honour its block. #950
-# Both take `_ *Proc` and discard it. Listed here rather than fixed so the count
-# is visible: two doors, both on binding surfaces, neither in MRI core. The two
-# are NOT in the same state — one reference was read, the other does not
-# document the method at all.
-augeas.go:cls ⛔ CONFIRMED DEFECT, reference READ. Augeas.open discards its block (augeas.go:71). ruby-augeas lib/augeas.rb defines `def self.open(root = nil, loadpath = nil, flags = NONE, &block)` which does `rv = yield aug; return rv` under `block_given?` with `ensure aug.close` — exactly socketOpenWithBlock's contract. NOT fixed here because it is TWO parts: rbgo's Augeas has no #close method at all (`git grep close internal/vm/augeas.go` is empty), so the helper would yield without closing and `aug.close` in Ruby is a NoMethodError. See #950.
+# Takes `_ *Proc` and discards it. Listed here rather than fixed so the count is
+# visible: one door, on a binding surface, not in MRI core.
+#
+# ⛔ augeas.go:cls WAS THE OTHER ONE, and its row said the fix was "blocked"
+# because rbgo's Augeas had no #close for socketOpenWithBlock to call and
+# go-ruby-augeas's handle exposes no Close. That was the WRONG LAYER: #close in
+# the gem frees a C handle, but what it makes OBSERVABLE is `nil` plus a poisoned
+# object that raises SystemCallError from every method after it — a flag and a
+# guard, needing nothing from the dependency. The door now goes through
+# socketOpenWithBlock, so it is correct by construction and owes this file no
+# row at all.
 images.go:cls UNSPECIFIED, not a known defect. Images::Image.open discards its block (images.go:93). go-ruby-images' README documents no Ruby `Image.open` and no block form at all — it documents the Go library (`images.Open("photo.jpg")`) — and ruby-vips and MiniMagick spell this operation without a block, so "no block form" may be the contract to DOCUMENT rather than a gap to fill. See #950.
