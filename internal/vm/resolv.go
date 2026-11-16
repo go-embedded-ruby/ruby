@@ -196,7 +196,19 @@ func registerResolvDNS(vm *VM, resolvMod *RClass) {
 		native: func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
 			return &RObject{class: dns, ivars: map[string]object.Value{}}
 		}}
-	dns.smethods["open"] = dns.smethods["new"]
+	// ⛔ `open` is NOT an alias for `new`. resolv.rb's Resolv::DNS.open yields the
+	// resolver, closes it however the block leaves, and answers with the BLOCK's
+	// value — the same contract socketOpenWithBlock was written for, and the
+	// fourth door #939 found and filed rather than fixed. Measured against MRI
+	// 4.0.7, `Resolv::DNS.open { |dns| :from_block }`:
+	//
+	//	MRI   yields, returns :from_block
+	//	rbgo  does NOT yield, returns #<Resolv::DNS…>   (before this)
+	//
+	// An alias cannot be fixed: `new` has no block parameter to honour, so the
+	// block was discarded silently and the call still looked like it worked.
+	dns.smethods["open"] = &Method{name: "open", owner: dns,
+		native: socketOpenWithBlock(dns, dns.smethods["new"].native)}
 	queryNotImpl := func(what string) NativeFn {
 		return func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
 			return raise("NotImplementedError", "Resolv::DNS#%s needs real DNS sockets (not yet supported)", what)
@@ -204,10 +216,40 @@ func registerResolvDNS(vm *VM, resolvMod *RClass) {
 	}
 	for _, m := range []string{
 		"getresource", "getresources", "getaddress", "getaddresses",
-		"getname", "getnames", "each_resource", "each_address", "each_name", "close",
+		"getname", "getnames", "each_resource", "each_address", "each_name",
 	} {
 		dns.define(m, queryNotImpl(m))
 	}
+	// #close is NOT on that list, and it cannot be: socketOpenWithBlock closes
+	// through the class's own `close`, so a raising one would turn every
+	// `Resolv::DNS.open { … }` into a NotImplementedError from the ensure. It is
+	// also right on its own terms — this resolver never opened a socket, so there
+	// is nothing to close — and MRI's is idempotent and answers nil. Measured
+	// against MRI 4.0.7: `close` → nil, a second `close` → no error; rbgo raised
+	// NotImplementedError for both.
+	//
+	// ⛔ AND IT TAKES NO ARGUMENTS. The existing TestResolvDNS asserts that
+	// `Resolv::DNS.new.close("x")` raises — and it did, with
+	// NotImplementedError, which is the RIGHT VERDICT FOR THE WRONG REASON: the
+	// stub raised for every call, so the test could not tell "close rejects an
+	// argument" from "close does nothing at all". A no-op `close` with a
+	// variadic body turned it red, which is the test finally asking its own
+	// question. MRI 4.0.7, measured:
+	//
+	//	d.close("x")             ArgumentError: wrong number of arguments (given 1, expected 0)
+	//	d.method(:close).arity   0
+	//	d.close                  nil
+	//
+	// defineArgc declares the 0 for #arity / #parameters / #inspect but does NOT
+	// enforce it (see its comment: natives check their own arguments), so the
+	// count is checked here too, and the two cannot disagree without this
+	// comment being wrong.
+	dns.defineArgc("close", 0, func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) != 0 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 0)", len(args))
+		}
+		return object.NilV
+	})
 
 	resource := newClass("Resolv::DNS::Resource", vm.cObject)
 	dns.consts["Resource"] = resource

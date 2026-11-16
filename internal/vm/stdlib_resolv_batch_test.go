@@ -149,9 +149,20 @@ func TestResolvDNS(t *testing.T) {
 			t.Errorf("src=%q got=%q want=%q", c.src, got, c.want)
 		}
 	}
+	// ⛔ `close` IS NOT ON THIS LIST ANY MORE, and it never belonged: MRI's
+	// Resolv::DNS#close returns nil (measured, 4.0.7) — it closes the requester's
+	// sockets, and this resolver never opened one. It sat here because the stub
+	// raised for EVERY call, so this loop's verdict was right for the wrong
+	// reason: it could not tell "close rejects its argument" from "close does
+	// nothing at all". The behaviour `close` actually owes MRI is asserted in
+	// TestResolvDNSOpenYieldsAndCloses, on the message and the arity.
+	//
+	// It also had to come off for Resolv::DNS.open to work at all:
+	// socketOpenWithBlock closes through the class's own #close, so a raising one
+	// turns every block form into that exception.
 	for _, m := range []string{
 		"getresource", "getresources", "getaddress", "getaddresses",
-		"getname", "getnames", "each_resource", "each_address", "each_name", "close",
+		"getname", "getnames", "each_resource", "each_address", "each_name",
 	} {
 		if class, _ := evalErr(t, `require "resolv"; Resolv::DNS.new.`+m+`("x")`); class != "NotImplementedError" {
 			t.Errorf("Resolv::DNS#%s raised %q, want NotImplementedError", m, class)

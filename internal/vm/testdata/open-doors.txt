@@ -1,0 +1,36 @@
+# Every `smethods["open"]` door that is NOT socketOpenWithBlock and NOT
+# unsupported(…), with what it does about its block.
+#
+# ⛔ THIS FILE DOES NOT DEFINE THE POPULATION. TestEveryOpenDoorIsAccountedFor
+# derives that by parsing the package, on every platform, and compares the two
+# both ways: a door missing from here fails, and a row here for a door that no
+# longer exists fails too. That is the whole point — #931 wrote the socket doors
+# out in prose and the prose had already lost UNIXServer, and #939 found a fourth
+# door (Resolv::DNS) that no list held at all. A list cannot be the authority on
+# its own subject.
+#
+# ⛔ The ALIAS form (`x.smethods["open"] = y.smethods["new"]`) can never appear
+# here: the test refuses it outright, because the aliased method has no block
+# parameter and so no configuration of it can honour one.
+#
+# Format: <file>:<receiver> <reason>
+# The reason must say what happens to the block, and must name what PROVES it —
+# or say plainly that nothing does, so an unverified door is countable rather
+# than quiet.
+
+# ───────── honours its block: yields, closes on the way out, answers the block's value
+io.go:cFile File.open yields and closes through the RUBY-level #close (io.go:598, via ioYieldAndClose), so a subclass override runs; covered behaviourally by the core/file and core/io spec files and by TestEveryWayToGetAWritableFileFlushesAtShutdown's block-free forms.
+io_class.go:cIO IO.open yields via ioYieldAndClose (io_class.go:43) after forFd builds the stream; same close path as File.open.
+io.go:cls StringIO.open yields, then closes AND drops the backing string (#string => nil) in a defer, even on a raise (io.go:2349).
+dir.go:cDir Dir.open yields and marks the handle closed in a defer, even on a raise (dir.go:348).
+net_ftp.go:ftp Net::FTP.open yields the connected client through ftpWithClose, which closes on unwind (net_ftp.go:110).
+sqlite3.go:cls SQLite3::Database.open yields and closes the database in a defer (sqlite3.go:102); SQLite3::Database.new shares the same func.
+bolt.go:cls The bbolt database's open yields and closes the handle (bolt.go:76), returning the block's value.
+
+# ───────── does NOT honour its block. #950
+# Both take `_ *Proc` and discard it. Listed here rather than fixed so the count
+# is visible: two doors, both on binding surfaces, neither in MRI core. The two
+# are NOT in the same state — one reference was read, the other does not
+# document the method at all.
+augeas.go:cls ⛔ CONFIRMED DEFECT, reference READ. Augeas.open discards its block (augeas.go:71). ruby-augeas lib/augeas.rb defines `def self.open(root = nil, loadpath = nil, flags = NONE, &block)` which does `rv = yield aug; return rv` under `block_given?` with `ensure aug.close` — exactly socketOpenWithBlock's contract. NOT fixed here because it is TWO parts: rbgo's Augeas has no #close method at all (`git grep close internal/vm/augeas.go` is empty), so the helper would yield without closing and `aug.close` in Ruby is a NoMethodError. See #950.
+images.go:cls UNSPECIFIED, not a known defect. Images::Image.open discards its block (images.go:93). go-ruby-images' README documents no Ruby `Image.open` and no block form at all — it documents the Go library (`images.Open("photo.jpg")`) — and ruby-vips and MiniMagick spell this operation without a block, so "no block form" may be the contract to DOCUMENT rather than a gap to fill. See #950.
