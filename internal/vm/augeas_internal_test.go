@@ -327,6 +327,14 @@ puts [Augeas.create(:no_stdinc => 1).flags,
 puts Augeas.create(nil).flags
 begin; Augeas.create("/r"); rescue => e; puts e.class; end
 begin; Augeas.create({}, {}); rescue => e; puts "#{e.class}: #{e.message}"; end
+
+# ⛔ open's OWN arity guard, which create's does not cover. The gem's open takes
+# three positional arguments and no more; a fourth is an ArgumentError, not a
+# silently ignored argument. This line is here because the CI coverage ratchet
+# named it: registerAugeas read 94.4% "(was fully covered)" with the guard
+# written and never executed — the second time in one session that a branch I
+# added went unmeasured because I did not run covratchet locally.
+begin; Augeas.open("/r", "/l", 0, 1); rescue => e; puts "#{e.class}: #{e.message}"; end
 `)
 	want := `0
 ["", ""]
@@ -338,7 +346,8 @@ begin; Augeas.create({}, {}); rescue => e; puts "#{e.class}: #{e.message}"; end
 [8, 32, 64, 128]
 0
 TypeError
-ArgumentError: wrong number of arguments (given 2, expected 0..1)`
+ArgumentError: wrong number of arguments (given 2, expected 0..1)
+ArgumentError: wrong number of arguments (given 4, expected 0..3)`
 	if got != want {
 		t.Fatalf("create options:\n got=%q\nwant=%q", got, want)
 	}
