@@ -27,9 +27,11 @@ net_ftp.go:ftp Net::FTP.open yields the connected client through ftpWithClose, w
 sqlite3.go:cls SQLite3::Database.open yields and closes the database in a defer (sqlite3.go:102); SQLite3::Database.new shares the same func.
 bolt.go:cls The bbolt database's open yields and closes the handle (bolt.go:76), returning the block's value.
 
-# ───────── does NOT honour its block. #950
-# Takes `_ *Proc` and discards it. Listed here rather than fixed so the count is
-# visible: one door, on a binding surface, not in MRI core.
+# ───────── discards its block, and that is the CONTRACT. #950
+# One door, on a binding surface, not in MRI core. It was listed here as
+# "UNSPECIFIED, not a known defect" while nobody had read the reference. The
+# reference has now been read and it settles the question: there is no block
+# form to honour, so a discarded block is Ruby behaving normally, not a gap.
 #
 # ⛔ augeas.go:cls WAS THE OTHER ONE, and its row said the fix was "blocked"
 # because rbgo's Augeas had no #close for socketOpenWithBlock to call and
@@ -39,4 +41,4 @@ bolt.go:cls The bbolt database's open yields and closes the handle (bolt.go:76),
 # guard, needing nothing from the dependency. The door now goes through
 # socketOpenWithBlock, so it is correct by construction and owes this file no
 # row at all.
-images.go:cls UNSPECIFIED, not a known defect. Images::Image.open discards its block (images.go:93). go-ruby-images' README documents no Ruby `Image.open` and no block form at all — it documents the Go library (`images.Open("photo.jpg")`) — and ruby-vips and MiniMagick spell this operation without a block, so "no block form" may be the contract to DOCUMENT rather than a gap to fill. See #950.
+images.go:cls ⛔ NOT A DEFECT, reference READ. Images::Image.open discards its block (images.go:93), and MiniMagick — which go-ruby-images' README names as what it replaces, "a MiniMagick / ruby-vips replacement" — defines `def self.open(path_or_url, ext = nil, **options)` with NO block parameter: no `yield`, no `block_given?`, no `ensure`. The only blocks in its body are internal, passed to `uri.open` / `pathname.open`. ruby-vips has no `Image.open` at all (`Vips::Image.new_from_file`). A Ruby method that takes no block and is given one simply ignores it, so this door is correct as written. ⛔⛔ AND WIRING IT ANYWAY WOULD BE WORSE THAN POINTLESS: socketOpenWithBlock closes through the CLASS'S OWN `close`, and on Images::Image `close` is the MORPHOLOGICAL CLOSING operator — dilate then erode, taking a radius — just as `#open` is morphological opening. The helper would run an image filter on the way out of the block believing it had released something. Measured, not reasoned: wiring it makes the program die with `ArgumentError: wrong number of arguments (given 0, expected 1)` from that operator. ⛔ The row stays BECAUSE the door is correct — it is what keeps the next reader from "fixing" a door that looks exactly like the three real bugs (#931/#932 sockets, #952 Augeas). (MiniMagick's `self.create(ext, &block)` does yield a Tempfile to write into, but rbgo binds no `Images::Image.create`, so that is not a door here.) Settles #950.

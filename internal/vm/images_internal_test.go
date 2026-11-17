@@ -177,6 +177,63 @@ puts r.join("|")
 	}
 }
 
+// TestImagesImageOpenTakesNoBlock pins a NON-defect, which is the only reason it
+// exists.
+//
+// #950 asked whether Images::Image.open discarding its block was a gap, the way
+// the socket doors' discarded blocks were (#931/#932: 27 hung spec files) and
+// the way Augeas.open's was (#952). Reading the reference settles it the other
+// way. go-ruby-images' README calls itself "a MiniMagick / ruby-vips
+// replacement", and MiniMagick's is:
+//
+//	def self.open(path_or_url, ext = nil, **options)
+//
+// with no block parameter — no `yield`, no `block_given?`, no `ensure`. The only
+// blocks in its body are internal, handed to `uri.open` / `pathname.open`.
+// ruby-vips has no `Image.open` at all; it spells this `Vips::Image
+// .new_from_file`. A Ruby method that takes no block and is handed one ignores
+// it, so rbgo discarding it IS the contract.
+//
+// ⛔ WITHOUT THIS TEST THE CORRECT BEHAVIOUR IS INDISTINGUISHABLE FROM THE
+// DEFECT IT RESEMBLES. The three other `open` doors that discarded a block were
+// all real bugs — #931/#932 for the sockets, #952 for Augeas — so the next
+// reader to notice this one has every reason to assume the same and to "fix" it
+// into socketOpenWithBlock.
+//
+// ⛔⛔ AND THAT FIX WOULD BE WORSE THAN POINTLESS, which is what the mutation
+// showed rather than reasoned: socketOpenWithBlock closes through the CLASS'S
+// OWN `close`, and on Images::Image `close` is the MORPHOLOGICAL CLOSING
+// operator — dilate then erode, taking a radius — just as `#open` is
+// morphological opening. Wiring the door makes the program die with
+//
+//	ArgumentError: wrong number of arguments (given 0, expected 1)
+//
+// from that operator, called with no radius on the way out of the block. The
+// helper's "close whatever the class calls close" contract is silent about
+// classes where that name means something else, and this is one.
+func TestImagesImageOpenTakesNoBlock(t *testing.T) {
+	dir := t.TempDir()
+	src := fmt.Sprintf(`
+require "images"
+Images::Image.read(Images::Canvas.new(2, 2, Images::Color::WHITE).to_blob).write(%q)
+
+ran = false
+got = Images::Image.open(%q) { |i| ran = true; "the block's value" }
+
+# The block is not called, and open answers the IMAGE -- not the block's value,
+# which is the half a yield-only "fix" would still get wrong.
+puts ran.inspect
+puts got.class
+puts got.dimensions.inspect
+`, dir+"/in.png", dir+"/in.png")
+	want := "false\nImages::Image\n[2, 2]"
+	if got := runSrc(t, src); got != want {
+		t.Errorf("Image.open with a block:\n got=%q\nwant=%q\n"+
+			"a block that RAN, or a return value that is not the image, means this door was wired to "+
+			"socketOpenWithBlock -- see testdata/open-doors.txt: MiniMagick's open takes no block", got, want)
+	}
+}
+
 // TestImagesImageErrors covers every Images::Image error branch: a missing file
 // and a corrupt blob (imagesWrap -> Images::Error), a non-positive resize and an
 // unencodable convert (also imagesWrap), a bad rotation, an out-of-bounds pixel

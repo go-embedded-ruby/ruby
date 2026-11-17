@@ -89,6 +89,22 @@ func (vm *VM) registerImagesImage(mod *RClass) {
 	vm.consts["Images::Image"] = cls
 
 	// Images::Image.open(path) decodes the image file at path.
+	//
+	// ⛔ NOT socketOpenWithBlock, AND IT MUST NOT BECOME IT. Two reasons, and the
+	// second is the dangerous one:
+	//
+	//  1. MiniMagick — what go-ruby-images' README says it replaces — declares
+	//     `def self.open(path_or_url, ext = nil, **options)` with no block
+	//     parameter at all, so there is no block form to honour (#950).
+	//  2. That helper closes by sending the class's OWN `close`, and on this
+	//     class `close` is the MORPHOLOGICAL CLOSING operator — dilate then
+	//     erode, taking a radius (see registerImagesTransforms). So the wiring
+	//     would call an image filter on the way out of the block, believing it
+	//     was releasing a resource. `Images::Image#open` is the morphological
+	//     opening for the same reason; the collision is on both names.
+	//
+	// TestImagesImageOpenTakesNoBlock and testdata/open-doors.txt both go red if
+	// this is "fixed".
 	cls.smethods["open"] = &Method{name: "open", owner: cls,
 		native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 			imagesArity(args, 1)

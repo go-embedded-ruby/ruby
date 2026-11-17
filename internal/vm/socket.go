@@ -233,6 +233,21 @@ func (vm *VM) installSocketNonblock() {
 // connection, so there is one close per class instead of a second spelling of
 // it; each of those is already idempotent, so a block that closed the socket
 // itself does not get it closed twice.
+//
+// ⛔ THAT CARRIES AN UNSTATED ASSUMPTION: that on the class being wrapped,
+// `close` MEANS "release the resource". It is not true of every class in this
+// package. Images::Image has a `close` — the morphological closing operator,
+// dilate then erode, taking a radius — and an `open` that is morphological
+// opening, so wrapping Images::Image.open here would run an image filter on the
+// way out of the block believing it had released something; measured, the
+// program dies with `wrong number of arguments (given 0, expected 1)` from that
+// operator (#950, images.go).
+//
+// Nothing here can tell the two meanings apart — a native checks its own
+// arguments, so even arity is not introspectable. The check that can is
+// testdata/open-doors.txt plus TestEveryOpenDoorIsAccountedFor: every `open`
+// door is either wrapped here or carries a row saying why not. Before wrapping
+// a new class, read what ITS `close` does.
 func socketOpenWithBlock(cls *RClass, newFn NativeFn) NativeFn {
 	return func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		v := newFn(vm, self, args, nil)
