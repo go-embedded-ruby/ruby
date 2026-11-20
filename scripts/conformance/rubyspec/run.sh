@@ -36,8 +36,8 @@
 #
 # Env:
 #   RBGO      path to the rbgo binary   (default: built from ./cmd/rbgo)
-#   SPECDIR   ruby/spec checkout        (default: cloned to CACHE at SPEC_SHA)
-#   CACHE     clone cache dir           (default: /tmp/rubyspec-corpus)
+#   SPECDIR   ruby/spec checkout        (default: CACHE; moved to SPEC_SHA)
+#   CACHE     clone cache dir           (default: <user cache dir>/rbgo/rubyspec-corpus)
 #   JOBS      parallelism               (default: number of CPUs)
 #   TIMEOUT   per-file timeout seconds  (default: 25)
 #   UPDATE_BASELINE=1  rewrite BASELINE from this sweep and exit 0
@@ -46,7 +46,7 @@ set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$HERE/../../.." && pwd)"
 RBGO="${RBGO:-/tmp/rbgo-rubyspec}"
-CACHE="${CACHE:-/tmp/rubyspec-corpus}"
+CACHE="${CACHE:-}"
 SPECDIR="${SPECDIR:-$CACHE}"
 TIMEOUT="${TIMEOUT:-25}"
 JOBS="${JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)}"
@@ -67,19 +67,13 @@ echo "rbgo: $RBGO"
 
 echo
 echo "== ruby/spec corpus =="
-if [ ! -d "$SPECDIR/language" ]; then
-  if ! command -v git >/dev/null 2>&1; then
-    echo "git missing and no corpus at $SPECDIR — cannot run ratchet" >&2
-    exit 2
-  fi
-  rm -rf "$CACHE"
-  git clone --filter=blob:none "$SPEC_URL" "$CACHE" >/dev/null 2>&1 || {
-    echo "clone failed (offline?) — cannot run ratchet" >&2; exit 2; }
-  (cd "$CACHE" && git checkout -q "$SPEC_SHA") || {
-    echo "checkout of $SPEC_SHA failed" >&2; exit 2; }
-  SPECDIR="$CACHE"
-fi
-echo "corpus: $SPECDIR @ $SPEC_SHA"
+# cmd/specpin (#857) puts the corpus at SPEC_SHA and prints `corpus: <dir> @
+# <sha>` with the commit READ BACK from git, not this constant. It never
+# deletes a directory: one that is neither empty nor a checkout of its own is
+# refused, where this block used to `rm -rf` it.
+SPECDIR="$(cd "$REPO_ROOT" && GOWORK=off go run ./scripts/conformance/rubyspec/cmd/specpin \
+  -sha "$SPEC_SHA" -url "$SPEC_URL" ${SPECDIR:+-cache "$SPECDIR"})" || {
+  echo "no corpus at $SPEC_SHA — cannot run ratchet" >&2; exit 2; }
 
 # Install the MSpec shim in place of ruby/spec's real spec_helper.
 cp "$HERE/spec_helper.rb" "$SPECDIR/spec_helper.rb"

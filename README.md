@@ -1314,8 +1314,8 @@ had regressed.
 ```bash
 scripts/conformance/rubyspec/run.sh          # judge against the baseline
 UPDATE_BASELINE=1 scripts/conformance/rubyspec/run.sh   # re-record after a win
-# point it at an existing corpus instead of cloning:
-SPECDIR=/path/to/ruby-spec CACHE=/path/to/ruby-spec scripts/conformance/rubyspec/run.sh
+# point it at an existing ruby/spec clone (checked out at the pinned commit):
+SPECDIR=/path/to/ruby-spec scripts/conformance/rubyspec/run.sh
 ```
 
 ### CI layering
