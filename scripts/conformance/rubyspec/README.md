@@ -319,6 +319,87 @@ Those 50 files are the surface any claim about the move has to cover.
 It remains the right instrument for the other half too: a `UPDATE_BASELINE=1`
 that absorbs a loss silently.
 
+## Which examples the MACHINE selects — `cmd/platguard`
+
+`ruby_version_is` selects the population by version; `platform_is` selects it by
+machine. Both decide whether examples run at all, so both are read the same way
+and for the same reason.
+
+The shim had **two** sources for what platform this is, under a comment saying
+it had one (#837):
+
+```ruby
+PLATFORMS = [:darwin, :bsd, :unix]   # a literal
+class PlatformGuard
+  PLATFORM = RUBY_PLATFORM           # derived
+```
+
+On darwin the two agree, so the split is **invisible from the machine the work
+is done on**. On the ubuntu lane that enforces the gate, `platform_is :linux`
+was false and `PlatformGuard.os?(:linux)` was true.
+
+mspec has no list either (`lib/mspec/guards/platform.rb:26-38`): every name but
+`:windows` and `:wsl` is a plain substring of `RUBY_PLATFORM`. So the shim's
+`platform_is` / `platform_is_not` now call `PlatformGuard`, there is no list,
+and nothing is typed twice. `platform_is_not` is `!match?` over the **same**
+predicate (`:116-122`), not a second negation rebuilt from the parts.
+
+Measured over the pinned corpus — 2206 files, 420 guard sites, 3 of which the
+reader refuses rather than guesses at:
+
+| machine | skipped but should run | ran but should not |
+|---|---|---|
+| `x86_64-linux` | 20 guards, ≥29 examples, 19 files | 11 guards, ≥11 examples, 10 files |
+| `arm64-darwin` | 2 guards, 1 file is whole-file | 1 guard, 1 example, 1 file |
+
+The two directions are never summed; one says the measurement is too small, the
+other that it is of the wrong machine.
+
+### ⛔ The size options are in BITS, and comparing them to bytes shut both branches
+
+`PlatformGuard::POINTER_SIZE` is `RbConfig::SIZEOF["void*"] * 8` upstream
+(`platform.rb:61-66`) — 64 on a 64-bit machine. The shim compared the corpus's
+`pointer_size: 64` against `WORDSIZE / 8`, which is 8. So `pointer_size: 64`
+**and** `pointer_size: 32` were both false, on every machine, and every guard
+written that way was shut. Nothing looked wrong, because a guard being shut is
+what a guard does.
+
+Two whole files are nothing but those guards. Measured with `cmd/shimdelta` on
+darwin, same binary, same corpus, only the shim changed:
+
+```text
+  +188   core/array/pack/j_spec.rb     (0 -> 188)
+  +216   core/string/unpack/j_spec.rb  (0 -> 216)
+```
+
+Both were recorded as `0` in `BASELINE`, which is what a file contributing
+nothing looks like from the outside.
+
+## Measuring a change to the SHIM — `cmd/shimdelta`
+
+`cmd/specdelta` compares two **engines** through one shim. That is the wrong
+axis for a change to the shim's guards, where the engine is fixed and the shim
+decides which examples exist. `shimdelta` runs one interpreter over the same
+files under two `spec_helper.rb` and reports the move, which is what
+[re-recording the baseline](#re-recording-the-baseline) requires be known first.
+
+```sh
+go run ./cmd/shimdelta -rbgo <binary> -corpus <checkout> \
+  -control <old spec_helper.rb> -treatment <new spec_helper.rb> \
+  -file core/array/pack/j_spec.rb
+```
+
+It refuses two byte-identical shims, counts a missing tally as `DIDNOTRUN`
+rather than as zero, and prints the gained and lost totals on separate lines.
+
+⛔ It measures **passing** examples and nothing else, because the shim's file
+channel carries the pass count alone (#843) and the four-field line lives on
+stdout, which the judge must not read. A guard change that removes a *failure*
+is therefore invisible to it — and that happens: on darwin `platform_is :bsd`
+in `core/file/sticky_spec.rb` held one BSD-only expectation that was being
+asserted on a mac, and fixing the guard took the file from `pass=4 fail=1` to
+`pass=4 fail=0` while `shimdelta` correctly reported no change.
+
 ## Making the reference interpreter able to answer — `cmd/mriref`
 
 ⛔ **An MRI that cannot load its bundled gems scores a clean ZERO on every file,
@@ -672,9 +753,9 @@ what a ratchet should be:
 
 | stubbed (raises `SpecSkip`) | where |
 |---|---|
-| `ruby_exe` — no subprocess | `spec_helper.rb:930` |
-| `ruby_cmd` — no subprocess command line | `spec_helper.rb:931` |
-| `output_to_fd` — no real fd redirection | `spec_helper.rb:306` |
+| `ruby_exe` — no subprocess | `spec_helper.rb:976` |
+| `ruby_cmd` — no subprocess command line | `spec_helper.rb:977` |
+| `output_to_fd` — no real fd redirection | `spec_helper.rb:341` |
 
 ⛔ **That table is the whole list, and it is now derived rather than retyped.**
 It had a fourth row, "some `argf`/IO helpers", with no `where` — and nothing in
@@ -687,7 +768,7 @@ top-level README name exactly that set.
 
 ⛔ **`complain`, `output` and `be_computed_by` are NOT stubbed**, and this
 paragraph said they were until 2026-11-08. They are implemented:
-`ComplainMatcher` at `spec_helper.rb:230-262` with a real `$stderr` capture
+`ComplainMatcher` at `spec_helper.rb:265-297` with a real `$stderr` capture
 (`complain` wired at `:249`), `OutputMatcher` at `:254-279`, and
 `be_computed_by` at `:199`.
 

@@ -183,7 +183,7 @@ there is no honest way to turn it into a percentage of the language:
   measurement. (rbgo does bind a large set of stdlib and gem replacements — see
   *Supported today* — but their conformance is not what this figure reports.)
 - **The shim is not MSpec.** Exactly three helpers are stubbed — `ruby_exe` and
-  `ruby_cmd` (`spec_helper.rb:930-931`) and `output_to_fd` (`:306`) — so the
+  `ruby_cmd` (`spec_helper.rb:976-977`) and `output_to_fd` (`:341`) — so the
   examples that need them are counted as **skipped**, not passed. That makes the
   total a conservative lower bound. `complain`, `output` and `be_computed_by`
   are **implemented**; this list claimed otherwise until

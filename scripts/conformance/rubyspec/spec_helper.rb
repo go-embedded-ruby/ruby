@@ -70,7 +70,23 @@ $RB_RESULT_FILE = ENV.delete("RBGO_RESULT_FILE")
 # interpreter, the shim then measures at THAT interpreter's version, which is the
 # only answer that is ever right.
 CUR_VERSION = RUBY_VERSION
-PLATFORMS = [:darwin, :bsd, :unix]
+
+# ⛔ THERE IS NO LIST OF PLATFORM NAMES, and that is the fix for #837.
+#
+# This line used to read `PLATFORMS = [:darwin, :bsd, :unix]`, a literal, while
+# `PlatformGuard::PLATFORM = RUBY_PLATFORM` sat twenty lines below it under a
+# comment saying the literal was the single source of truth. They CAN disagree,
+# and on the ubuntu lane that enforces the gate they do: `PlatformGuard.os?
+# (:linux)` is true there and `PLATFORMS.include?(:linux)` is false. On darwin
+# the two agree, so the split is invisible from the machine the work is done on.
+#
+# mspec has no such list either (lib/mspec/guards/platform.rb:26-38): every name
+# but `:windows` and `:wsl` is a plain substring of RUBY_PLATFORM. So the guards
+# below ask PlatformGuard, and nothing here is typed twice.
+#
+# Measured with cmd/platguard over the pinned corpus (2206 files, 420 guard
+# sites): on x86_64-linux the literal skipped 20 guards that should run and ran
+# 11 that should not; on arm64-darwin24, 2 and 1.
 WORDSIZE = 64
 ENDIAN = :little
 
@@ -90,9 +106,17 @@ if Object.const_defined?(:Warning) && Warning.respond_to?(:[]=)
 end
 
 # mspec/lib/mspec/guards/platform.rb. Only the entry points the corpus reaches
-# are provided; PLATFORMS/WORDSIZE above stay the single source of truth so the
-# guard helpers and this class cannot disagree.
+# are provided. This class is the ONLY place that decides what platform this is:
+# the `platform_is` / `platform_is_not` helpers below call it rather than
+# consulting a second source, so the two cannot disagree (#837).
+#
+# ⛔ THE SIZES ARE IN BITS, as mspec's are (platform.rb:61-73, both of them
+# `RbConfig::SIZEOF[…] * 8`). The corpus writes `platform_is pointer_size: 64`,
+# never 8. The helper below used to compare that 64 against `WORDSIZE / 8`, so
+# BOTH the 64 and the 32 branch of every such guard were false and neither ran.
 class PlatformGuard
+  # mspec reads RbConfig's host triple under JRuby and RUBY_PLATFORM otherwise;
+  # only the second arm can be reached here.
   PLATFORM = RUBY_PLATFORM
   C_LONG_SIZE = WORDSIZE
   POINTER_SIZE = WORDSIZE
@@ -101,7 +125,18 @@ class PlatformGuard
     args.any? { |name| RUBY_ENGINE.start_with?(name == :rubinius ? 'rbx' : name.to_s) }
   end
   def self.standard?; implementation?(:ruby); end
-  def self.os?(*oses); oses.any? { |os| os == :windows ? !!(PLATFORM =~ /(mswin|mingw)/) : PLATFORM.include?(os.to_s) }; end
+  # platform.rb:26-38: :windows is a regexp over the triple, :wsl is its own
+  # predicate, and every other name is a plain substring. A name this build has
+  # never heard of is therefore simply false, not an error.
+  def self.os?(*oses)
+    oses.any? do |os|
+      case os
+      when :windows then !!(PLATFORM =~ /(mswin|mingw)/)
+      when :wsl then wsl?
+      else PLATFORM.include?(os.to_s)
+      end
+    end
+  end
   def self.windows?; os?(:windows); end
   def self.wasi?; os?(:wasi); end
   def self.wsl?; false; end
@@ -864,25 +899,36 @@ def ruby_version_is(range, &b); _guard_run(_version_in_range(range), &b); end
 def version_is(base, range, &b); _guard_run(_version_in_range(range, base.to_s), &b); end
 def kernel_version_is(range, &b); _guard_run(_version_in_range(range, PlatformGuard.kernel_version), &b); end
 def ruby_bug(*a, &b); _guard_run(true, &b); end   # assume bug fixed
-def platform_is(*args, &b)
+# mspec/lib/mspec/guards/platform.rb:97-122, transcribed. `match?` ANDs the
+# platform names with every option, and the two entry points are `run_if` and
+# `run_unless` over that ONE predicate.
+#
+# ⛔ ONE PREDICATE, NEGATED — never a second negation derived from the parts.
+# The earlier `platform_is_not` rebuilt its own answer by OR-ing the parts
+# together, which is not De Morgan's dual of this and diverges the moment a
+# site carries a name AND an option: `platform_is_not :linux, c_long_size: 32`
+# on 64-bit linux is `!(true && false)` = RUN here and upstream, and was
+# SKIPPED by the old code. Sharing the predicate makes that unrepresentable.
+#
+# c_long_size guards examples written for a platform whose C long is narrower
+# than this one. Ignoring it ran a 32-bit-only example here:
+# "abc" * ((2 ** 31) - 1) is a legal six-gigabyte string on a 64-bit platform,
+# and building it took 6.5 GB out of a CI runner's sixteen.
+def _platform_match?(args)
   opts = args.last.is_a?(Hash) ? args.pop : {}
-  match = args.empty? ? true : args.any? { |s| PLATFORMS.include?(s) }
-  match &&= (opts[:wordsize].nil? || opts[:wordsize] == WORDSIZE)
-  match &&= (opts[:pointer_size].nil? || opts[:pointer_size] == WORDSIZE / 8)
-  # c_long_size guards examples written for a platform whose C long is narrower
-  # than this one. Ignoring it ran a 32-bit-only example here:
-  # "abc" * ((2 ** 31) - 1) is a legal six-gigabyte string on a 64-bit platform,
-  # and building it took 6.5 GB out of a CI runner's sixteen.
-  match &&= (opts[:c_long_size].nil? || opts[:c_long_size] == WORDSIZE)
-  _guard_run(match, &b)
+  match = args.empty? ? true : PlatformGuard.os?(*args)
+  opts.each do |key, value|
+    case key
+    when :os then match &&= PlatformGuard.os?(*value)
+    when :pointer_size then match &&= PlatformGuard.pointer_size?(value)
+    when :wordsize then match &&= PlatformGuard.wordsize?(value)
+    when :c_long_size then match &&= PlatformGuard.c_long_size?(value)
+    end
+  end
+  match
 end
-def platform_is_not(*args, &b)
-  opts = args.last.is_a?(Hash) ? args.pop : {}
-  match = args.any? { |s| PLATFORMS.include?(s) }
-  match ||= (!opts[:wordsize].nil? && opts[:wordsize] != WORDSIZE)
-  match ||= (!opts[:c_long_size].nil? && opts[:c_long_size] != WORDSIZE)
-  _guard_run(!match, &b)
-end
+def platform_is(*args, &b); _guard_run(_platform_match?(args), &b); end
+def platform_is_not(*args, &b); _guard_run(!_platform_match?(args), &b); end
 def not_supported_on(*engines, &b); _guard_run(!engines.include?(:ruby), &b); end
 def not_compliant_on(*engines, &b); _guard_run(!engines.include?(:ruby), &b); end
 def compliant_on(*engines, &b); _guard_run(engines.include?(:ruby), &b); end
