@@ -5,9 +5,132 @@
 package guardcensus
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
+	"runtime"
 	"testing"
 )
+
+// TestWalkPlatformTakesSpecFilesAndNotDirectoriesNamedLikeThem gives the walk's
+// filter a witness on each side. A directory whose name ends in `_spec.rb` is
+// not impossible, and reading one would be an error attributed to the corpus;
+// a suite the caller did not name must not be walked at all, because the gate
+// sweeps exactly two and a census of three measures a different population.
+func TestWalkPlatformTakesSpecFilesAndNotDirectoriesNamedLikeThem(t *testing.T) {
+	root := t.TempDir()
+	mkdir := func(p string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Join(root, p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write := func(p, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(root, p), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	mkdir("core/io")
+	mkdir("core/trap_spec.rb") // a DIRECTORY whose name ends in _spec.rb
+	mkdir("language")
+	mkdir("library")
+	write("core/io/seek_spec.rb", "platform_is :darwin do\n  it \"x\" do\n  end\nend\n")
+	write("core/io/fixtures.rb", "platform_is :linux do\nend\n")     // not a spec file
+	write("library/socket_spec.rb", "platform_is :linux do\nend\n")  // suite not named
+	write("language/block_spec.rb", "platform_is_not :windows do\n") // a spec file
+
+	sites, files, err := WalkPlatform(root, []string{"language", "core"})
+	if err != nil {
+		t.Fatalf("WalkPlatform: %v", err)
+	}
+	if files != 2 {
+		t.Fatalf("read %d file(s), want 2 — a directory named *_spec.rb or an unnamed suite was walked", files)
+	}
+	if len(sites) != 2 {
+		t.Fatalf("found %d site(s), want 2: %+v", len(sites), sites)
+	}
+	for _, s := range sites {
+		if s.File == "library/socket_spec.rb" || s.File == "core/io/fixtures.rb" {
+			t.Fatalf("walked %s, which is outside the named suites or not a spec file", s.File)
+		}
+	}
+}
+
+// TestWalkPlatformReportsWhatItCouldNotRead holds the two error arms that stand
+// between a partial read and a clean-looking census.
+//
+// ⛔ THIS IS THE FAILURE MODE THE WHOLE PACKAGE EXISTS TO AVOID, one layer
+// down. Swallow either of these and the walk returns a SHORTER census with no
+// error — and a shorter census is not wrong-looking anywhere downstream, it is
+// simply a smaller number reported with the same confidence as a whole one.
+// cmd/platguard would then print "0 disagreements" for a corpus it half read.
+//
+// The skips are about what the host can express, not about what the code does:
+// Windows does not honour mode 0, and root ignores it. Both lanes that record
+// the baseline run this.
+func TestWalkPlatformReportsWhatItCouldNotRead(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("a 0-mode path is not a permission denial on this platform")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("running as root, which ignores the mode this test sets")
+	}
+
+	t.Run("a directory it cannot enter", func(t *testing.T) {
+		root := t.TempDir()
+		locked := filepath.Join(root, "core", "locked")
+		if err := os.MkdirAll(locked, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(locked, "a_spec.rb"), []byte("platform_is :linux do\nend\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(locked, 0); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+		if _, err := os.ReadDir(locked); err == nil {
+			t.Skip("this filesystem read the directory at mode 0; the condition could not be arranged")
+		}
+		if sites, _, err := WalkPlatform(root, []string{"core"}); err == nil {
+			t.Fatalf("WalkPlatform returned %d site(s) and no error for a subtree it could not enter", len(sites))
+		}
+	})
+
+	t.Run("a spec file it cannot open", func(t *testing.T) {
+		root := t.TempDir()
+		dir := filepath.Join(root, "core")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		spec := filepath.Join(dir, "a_spec.rb")
+		if err := os.WriteFile(spec, []byte("platform_is :linux do\nend\n"), 0o000); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(spec, 0o644) })
+		if _, err := os.ReadFile(spec); err == nil {
+			t.Skip("this filesystem read the file at mode 0; the condition could not be arranged")
+		}
+		if sites, _, err := WalkPlatform(root, []string{"core"}); err == nil {
+			t.Fatalf("WalkPlatform returned %d site(s) and no error for a file it could not open", len(sites))
+		}
+	})
+}
+
+// TestWalkPlatformSaysItReadNothingRatherThanReportingAnEmptyCensus keeps the
+// two apart: `files == 0` is what lets a caller refuse, instead of printing a
+// clean census of a tree it never opened.
+func TestWalkPlatformSaysItReadNothingRatherThanReportingAnEmptyCensus(t *testing.T) {
+	sites, files, err := WalkPlatform(t.TempDir(), []string{"language", "core"})
+	if err != nil {
+		t.Fatalf("WalkPlatform on an empty tree: %v", err)
+	}
+	if files != 0 || len(sites) != 0 {
+		t.Fatalf("got %d file(s) and %d site(s) from an empty tree", files, len(sites))
+	}
+}
 
 // The shim's constants as they stood when #837 was filed. The tests drive
 // Literal with these rather than with whatever the shim holds today, because
@@ -75,6 +198,35 @@ func TestClassifyPlatformReadsTheShapesTheCorpusActuallyUses(t *testing.T) {
 			"an argument list that does not close on its line is REFUSED",
 			"platform_is(:windows, :darwin, :freebsd, :netbsd,",
 			PlatformSite{Unclassified: true},
+		},
+		{
+			// The call is mentioned but never made: no `(` and no space after
+			// the name, so there is nothing to read as an argument list. A
+			// reader that fell through here would report a guard with no names,
+			// which means "every platform" — the most permissive answer there
+			// is, invented out of a line it could not parse.
+			"a bare mention with nothing after it is REFUSED",
+			"  x = platform_is",
+			PlatformSite{Unclassified: true},
+		},
+		{
+			// `FOO` is neither a symbol, nor a string, nor `key: value`. It is
+			// a constant the census cannot resolve, and guessing would put the
+			// site on one side of the comparison on no evidence.
+			// Block stays true: the reader did establish that the line opens
+			// one, and only then failed on the arguments. Harmless, because an
+			// Unclassified site is never judged by either side.
+			"an argument this reader cannot resolve is REFUSED",
+			"  platform_is FOO do",
+			PlatformSite{Block: true, Unclassified: true},
+		},
+		{
+			// An option name nothing implements. mspec's match? ignores an
+			// unknown key, but ignoring it here would silently widen the guard,
+			// so the site is refused and counted apart instead.
+			"an option this reader does not know is REFUSED",
+			"  platform_is endian: :big do",
+			PlatformSite{Block: true, Unclassified: true},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

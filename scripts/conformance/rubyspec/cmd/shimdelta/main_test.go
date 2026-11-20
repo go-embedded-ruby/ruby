@@ -4,7 +4,155 @@
 
 package main
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"runtime"
+	"testing"
+)
+
+// TestReadTallyTellsAnAbsentAnswerFromZero is the I/O half of the same rule
+// TestAMissingTallyIsNeverReadAsZero holds in the arithmetic. Both are needed:
+// the classifier can be right about `Ran: false` while the reader never
+// produces it.
+func TestReadTallyTellsAnAbsentAnswerFromZero(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, content string) string {
+		t.Helper()
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+
+	for _, tc := range []struct {
+		name string
+		path string
+		want result
+	}{
+		// ⭐ The pair that matters. Both produce the number 0 if you read the
+		// file carelessly; they mean opposite things.
+		{"a file that is not there at all", filepath.Join(dir, "no-such-file"), result{}},
+		{"a spec that really passed nothing", write("zero", "0\n"), result{Ran: true, Pass: 0}},
+
+		{"an empty file — killed between create and write", write("empty", ""), result{}},
+		{"whitespace only", write("blank", " \n\t\n"), result{}},
+		{"something that is not a number", write("junk", "RBGO_RESULT pass=9999\n"), result{}},
+		{"a real tally", write("real", "188\n"), result{Ran: true, Pass: 188}},
+		{"a tally with no trailing newline", write("bare", "216"), result{Ran: true, Pass: 216}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := readTally(tc.path)
+			if got != tc.want {
+				t.Fatalf("readTally = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestWalkTakesSpecFilesAndNotDirectoriesNamedLikeThem gives the corpus walk a
+// witness on each side of its filter. A directory called `x_spec.rb` is a real
+// shape — ruby/spec has `core/io/buffer/`, and nothing stops a fixture
+// directory being named that way — and handing one to the runner as if it were
+// a file would produce a DIDNOTRUN that means nothing.
+func TestWalkTakesSpecFilesAndNotDirectoriesNamedLikeThem(t *testing.T) {
+	root := t.TempDir()
+	mkdir := func(p string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Join(root, p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	touch := func(p string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(root, p), []byte("# spec\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	mkdir("core/io")
+	mkdir("core/trap_spec.rb") // a DIRECTORY whose name ends in _spec.rb
+	mkdir("language")
+	mkdir("library") // a suite that is not asked for
+	touch("core/io/seek_spec.rb")
+	touch("core/io/fixtures.rb") // not a spec
+	touch("language/block_spec.rb")
+	touch("library/socket_spec.rb") // outside the named suites
+
+	got, err := walk(root, []string{"language", "core", "", "  "})
+	if err != nil {
+		t.Fatalf("walk: %v", err)
+	}
+	want := []string{"core/io/seek_spec.rb", "language/block_spec.rb"}
+	if len(got) != len(want) {
+		t.Fatalf("walk found %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("walk found %v, want %v", got, want)
+		}
+	}
+}
+
+// TestWalkReportsADirectoryItCannotRead holds the WalkDir callback's error
+// arm. Without it the walk would swallow an unreadable subtree and hand back a
+// SHORT file list — and a shorter list is not an error anywhere downstream: it
+// is simply a smaller measurement, reported with the same confidence as a
+// whole one.
+//
+// ⛔ The skips are about what the host can express, not about what the code
+// does. Windows does not honour a 0-mode directory, and root ignores the
+// permission entirely, so on those the test cannot ARRANGE the condition. It
+// says so and skips rather than asserting something weaker, because a test
+// that quietly passes where it could not set up is the thing it is guarding
+// against. The ubuntu and macos lanes both run it.
+func TestWalkReportsADirectoryItCannotRead(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("a 0-mode directory is not a readable-permission denial on this platform")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("running as root, which ignores the directory mode this test sets")
+	}
+	root := t.TempDir()
+	locked := filepath.Join(root, "core", "locked")
+	if err := os.MkdirAll(locked, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(locked, "a_spec.rb"), []byte("# spec\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(locked, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+
+	// The control: the arrangement really did make it unreadable. A chmod that
+	// silently did nothing would leave this test asserting on a walk that
+	// simply succeeded.
+	if _, err := os.ReadDir(locked); err == nil {
+		t.Skip("this filesystem let the directory be read at mode 0; the condition could not be arranged")
+	}
+
+	got, err := walk(root, []string{"core"})
+	if err == nil {
+		t.Fatalf("walk returned %v and no error for a subtree it could not read", got)
+	}
+}
+
+// TestWalkRefusesNothingWhenASuiteIsAbsent is the other side: a suite that is
+// not present is SKIPPED, not an error, because a caller measuring one suite
+// should not have to own the other. The empty result is then the caller's to
+// refuse — main does, with exit 2.
+func TestWalkRefusesNothingWhenASuiteIsAbsent(t *testing.T) {
+	got, err := walk(t.TempDir(), []string{"language", "core"})
+	if err != nil {
+		t.Fatalf("walk on an empty tree: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("walk found %v in an empty tree", got)
+	}
+}
 
 // TestAMissingTallyIsNeverReadAsZero is the whole reason this command is not a
 // shell loop around two sweeps.

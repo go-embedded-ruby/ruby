@@ -215,10 +215,46 @@ func runOne(rbgo, corpus, file string, timeout time.Duration) result {
 		return result{}
 	}
 
-	b, err := os.ReadFile(path)
-	if err != nil || len(strings.TrimSpace(string(b))) == 0 {
-		return result{}
-	}
+	return readTally(path)
+}
+
+// readTally turns the shim's result file into a result.
+//
+// ⛔ THIS IS THE COMMAND'S WHOLE THESIS, IN FOUR LINES, so it is a function of
+// a path and nothing else — it was inline in runOne, where the only way to
+// exercise it was to build an interpreter and run a corpus, and a mutation
+// sweep found every one of its arms unheld.
+//
+// Four different things produce no usable number, and every one of them must
+// come back `Ran: false` rather than `Pass: 0`:
+//
+//	the file is absent    the spec crashed, timed out, or never loaded
+//	the file is empty     the shim was killed between creating and writing
+//	only whitespace       the same, one write later
+//	not a number          something other than the shim wrote there
+//
+// `Pass: 0` is a real answer — a spec file whose examples all fail says exactly
+// that — and it is the answer this must never fabricate.
+//
+// ⛔ ONE REFUSAL, NOT THREE. The first draft opened with
+// `if err != nil || text == ""`, which reads like the line carrying all of the
+// above and holds nothing: on a read error `b` is nil, so `text` is already
+// "", and `Atoi("")` below refuses every one of the four cases on its own. A
+// mutation sweep deleted that line and no test moved. It is gone rather than
+// documented, because a guard that cannot fail is a guard nobody can keep
+// honest — and the seven-row table above `readTally` still passes, which is
+// what says the coverage was never in that line to begin with.
+//
+// ⛔ AND THE DISCARDED ERROR BELOW IS NOT THE ONE THAT BIT US. Elsewhere in
+// this repository, swallowing an `exec` error made "the binary never started"
+// read as "the probe printed nothing", and those need OPPOSITE answers. Here
+// the four cases need the SAME answer — the caller asks one question, "is
+// there a usable number", and a file that could not be read and a file holding
+// junk are both "no". The distinction to keep is between an error the caller
+// must tell apart from a value, and an error that IS the value; this is the
+// second, and it is the only reason `_` is allowed to stand.
+func readTally(path string) result {
+	b, _ := os.ReadFile(path)
 	n, err := strconv.Atoi(strings.TrimSpace(string(b)))
 	if err != nil {
 		return result{}
