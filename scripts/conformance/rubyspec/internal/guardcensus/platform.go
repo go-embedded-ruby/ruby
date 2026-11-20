@@ -376,14 +376,29 @@ func CensusPlatform(path string, src []byte) []PlatformSite {
 // WalkPlatform censuses every *_spec.rb under root/suite for each named suite,
 // with File relative to root. The suites are NAMED, and the file count comes
 // back, for the same reasons Walk gives.
+//
+// ⛔ THE RELATIVE PATH IS BUILT, NOT ASKED FOR, and that is a deliberate
+// divergence from Walk above. Walk ends its callback with
+//
+//	rel, rerr := filepath.Rel(root, p)
+//	if rerr != nil { return rerr }
+//
+// and that refusal CANNOT FIRE: WalkDir is rooted at filepath.Join(root, suite),
+// so every p it yields already starts with root, which is the one condition Rel
+// needs. A mutation sweep deleted the arm and nothing failed, because nothing
+// could. Keeping a refusal no input can reach means keeping a line no test can
+// ever hold — and this file argues, two functions down, that such a guard is
+// one nobody can keep honest. The suite and the walked remainder give the same
+// answer with no error to invent.
 func WalkPlatform(root string, suites []string) ([]PlatformSite, int, error) {
 	var sites []PlatformSite
 	files := 0
 	for _, suite := range suites {
-		if fi, err := os.Stat(filepath.Join(root, suite)); err != nil || !fi.IsDir() {
+		dir := filepath.Join(root, suite)
+		if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
 			continue
 		}
-		err := filepath.WalkDir(filepath.Join(root, suite), func(p string, d fs.DirEntry, err error) error {
+		err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}
@@ -395,11 +410,8 @@ func WalkPlatform(root string, suites []string) ([]PlatformSite, int, error) {
 			if rerr != nil {
 				return rerr
 			}
-			rel, rerr := filepath.Rel(root, p)
-			if rerr != nil {
-				return rerr
-			}
-			sites = append(sites, CensusPlatform(filepath.ToSlash(rel), b)...)
+			rel := filepath.ToSlash(filepath.Join(suite, strings.TrimPrefix(p, dir)))
+			sites = append(sites, CensusPlatform(rel, b)...)
 			return nil
 		})
 		if err != nil {
