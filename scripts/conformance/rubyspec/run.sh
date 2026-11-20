@@ -27,10 +27,12 @@
 # file not loading, or 43 specs regressing, and those need opposite responses.
 # Judged per file, no margin is needed and every move names its file.
 #
-# Each spec file runs in its own rbgo process (the shim prints a
-# `RBGO_RESULT pass=.. fail=.. error=.. skip=..` line at exit); a file that
-# crashes, times out or fails to load contributes 0 and is listed. The corpus is
-# pinned to SPEC_SHA for reproducibility.
+# Each spec file runs in its own rbgo process and reports its pass count
+# through RBGO_RESULT_FILE -- a path this script names and the spec is never
+# told, because a tally read out of the subject's own stdout is a tally the
+# subject can dictate (#843). A file that crashes, times out or fails to load
+# writes nothing, contributes 0 and is listed. The corpus is pinned to SPEC_SHA
+# for reproducibility.
 #
 # Env:
 #   RBGO      path to the rbgo binary   (default: built from ./cmd/rbgo)
@@ -87,16 +89,26 @@ trap 'rm -f "$RESULTS"' EXIT
 
 run_one() {
   f="$1"
-  # Strip NULs: some specs print binary data, which bash command substitution
-  # would warn about ("ignored null byte in input").
-  out="$(cd "$SPECDIR" && timeout "$TIMEOUT" "$RBGO" "$f" 2>&1 | tr -d '\000')"
-  res="$(printf '%s\n' "$out" | grep '^RBGO_RESULT' | head -1)"
-  if [ -z "$res" ]; then
-    printf 'FILEFAIL\t%s\n' "${f#"$SPECDIR"/}"
+  # ⛔ The tally comes back through a file, NOT through the subject's stdout
+  # (#843). The shim reads RBGO_RESULT_FILE and deletes it from ENV before any
+  # spec code runs, so the spec can neither learn this path nor write it; a
+  # spec that prints `RBGO_RESULT pass=9999 …` no longer dictates its own
+  # recorded count. The file holds the pass count and nothing else, so reading
+  # it is `cat` — the `grep '^RBGO_RESULT' | head -1` and the
+  # `sed -E 's/.*pass=([0-9]+).*/\1/'` that used to live here are gone, and
+  # with them the last place where a not-quite-matching line yielded a
+  # non-numeric count.
+  rf="$(mktemp)"
+  (cd "$SPECDIR" && RBGO_RESULT_FILE="$rf" timeout "$TIMEOUT" "$RBGO" "$f" >/dev/null 2>&1)
+  if [ -s "$rf" ]; then
+    printf 'OK\t%s\t%s\n' "${f#"$SPECDIR"/}" "$(cat "$rf")"
   else
-    p="$(printf '%s' "$res" | sed -E 's/.*pass=([0-9]+).*/\1/')"
-    printf 'OK\t%s\t%s\n' "${f#"$SPECDIR"/}" "$p"
+    # Absent or empty: a crash, a timeout, a file that would not load, or a
+    # shim that never reached at_exit. All of them are FILEFAIL, which is the
+    # behaviour this already had for a missing result line.
+    printf 'FILEFAIL\t%s\n' "${f#"$SPECDIR"/}"
   fi
+  rm -f "$rf"
 }
 export -f run_one
 export SPECDIR RBGO TIMEOUT

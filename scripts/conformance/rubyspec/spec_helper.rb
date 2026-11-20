@@ -19,6 +19,32 @@ $RB_FAILS = []   # [kind, describe, it, exc_class, msg]
 $mock_registry = nil
 $mock_installs = nil
 
+# ⛔ THE TALLY'S OWN CHANNEL, which the subject cannot write to (#843).
+#
+# The `RBGO_RESULT` line below goes to stdout — the same stream the spec writes
+# to — and the ratchet used to fish it back out with `grep … | head -1`. The
+# shim prints at exit, so ANYTHING the spec printed is first: a spec containing
+# `puts "RBGO_RESULT pass=9999 fail=0 error=0 skip=0"` was recorded as 9999
+# while failing every example, and `UPDATE_BASELINE=1` banked that number.
+# Measured 2026-10-31 with a probe in the corpus; it is quoted on #843 rather
+# than committed.
+#
+# That needs no adversary. A spec for `puts`, for `$stdout` or for `String#%`
+# can emit the prefix by accident, a `SPEC_SHA` bump pulls in whatever upstream
+# wrote since, and the harness's `2>&1` means a WARNING text is enough.
+#
+# So when the harness names a file, the tally goes THERE and the subject is
+# never told where. The name is read once, here, before any spec code runs, and
+# DELETED from the environment in the same breath: a spec that prints
+# `ENV["RBGO_RESULT_FILE"]` gets nil, so it cannot write the file either. (That
+# `ENV.delete` returns the value and leaves `nil` behind was measured against
+# MRI 4.0.7 with cmd/oracle: both engines agreed byte for byte.)
+#
+# The stdout line STAYS, unchanged, for a hand-run and for cmd/specdelta, whose
+# own reader already refuses two `RBGO_RESULT` lines in one run. It is now
+# HUMAN output; the file is the protocol.
+$RB_RESULT_FILE = ENV.delete("RBGO_RESULT_FILE")
+
 # ⛔ DERIVED, never typed again (#799). This selects the POPULATION the whole
 # conformance figure is counted over: at 3.4.1 every example behind a
 # `ruby_version_is "4.0"` guard is removed from the suite before anything runs
@@ -1181,6 +1207,17 @@ end
 
 at_exit do
   $stdout.puts "RBGO_RESULT pass=#{$RB_PASS} fail=#{$RB_FAIL} error=#{$RB_ERROR} skip=#{$RB_SKIP}"
+  # The ratchet's channel (#843). Deliberately the pass count ALONE, as decimal
+  # digits and nothing else, because the shell's only remaining job is to hand
+  # the bytes to the judge: no prefix to match, no field to extract, nothing
+  # that can half-match. The four-field tally stays on stdout above, where
+  # cmd/specdelta reads it.
+  #
+  # Written AFTER that line, so a failure here cannot cost specdelta its input.
+  # Unwritable is left to raise: every file would then come back as FILEFAIL,
+  # which is loud, and a rescue here would make a broken harness look like an
+  # engine that scores zero.
+  File.write($RB_RESULT_FILE, "#{$RB_PASS}\n") if $RB_RESULT_FILE
   $RB_FAILS.each do |kind, dsc, itn, cls, msg|
     $stdout.puts "RBGO_DETAIL\t#{kind}\t#{cls}\t#{(dsc.to_s + ' | ' + itn.to_s).gsub(/\s+/, ' ')[0, 160]}\t#{msg.to_s.gsub(/\s+/, ' ')[0, 160]}"
   end

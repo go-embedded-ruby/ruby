@@ -9,8 +9,32 @@ Ruby language and core library).
 `run.sh` runs the `language/` and `core/` suites of ruby/spec — pinned to the
 commit in `SPEC_SHA` — through rbgo, under a minimal MSpec-compatible shim
 (`spec_helper.rb`, installed in place of ruby/spec's real `spec_helper.rb`).
-Each spec file runs in its own `rbgo` process; the shim prints a
-`RBGO_RESULT pass=.. fail=.. error=.. skip=..` line at exit.
+Each spec file runs in its own `rbgo` process. At exit the shim reports twice,
+and the two reports are **not interchangeable**:
+
+| channel | content | who reads it |
+|---|---|---|
+| the file named by `RBGO_RESULT_FILE` | the pass count, decimal digits and nothing else | `run.sh`, for the ratchet |
+| stdout | `RBGO_RESULT pass=.. fail=.. error=.. skip=..`, then the `RBGO_DETAIL` lines | a human, and `cmd/specdelta` |
+
+⛔ The file exists because the stdout line is **written into the stream the
+subject also writes to**, and `run.sh` used to fish it back out with
+`grep '^RBGO_RESULT' | head -1`. The shim prints at exit, so anything the spec
+printed came first: a file that failed every example while printing
+`RBGO_RESULT pass=9999 …` was recorded as `OK <path> 9999`, and
+`UPDATE_BASELINE=1` banked that number (measured 2026-10-31; issue #843).
+
+No adversary is needed for that. A spec for `puts`, for `$stdout` or for
+`String#%` can emit the prefix by accident, a `SPEC_SHA` bump pulls in whatever
+upstream has written since, and the old `2>&1` meant a *warning* text was
+enough.
+
+`run.sh` now names a path per spec file and the shim **deletes
+`RBGO_RESULT_FILE` from `ENV`** before any spec code runs, so the subject can
+neither print the tally nor learn where it goes. Reading it is `cat`: the
+`grep | head -1` and the `sed -E 's/.*pass=([0-9]+).*/\1/'` are gone, and with
+them the last place where a not-quite-matching line produced a non-numeric
+count.
 
 The sweep is then handed to `cmd/ratchet`, which judges it **file by file**
 against `BASELINE`:
@@ -545,7 +569,14 @@ It keys on the **description** and not the message, because a message carries
 object addresses that differ between two runs of the *same* binary.
 
 **Two channels.** `RBGO_RESULT pass=…` comes out of the subject's own stdout, so
-a subject that miscounts can claim anything. specdelta also counts the
+a subject that miscounts can claim anything. (specdelta still reads that stream,
+because the four-field tally and the `RBGO_DETAIL` lines it needs are only
+there — `RBGO_RESULT_FILE` carries the pass count alone. Its guard against a
+forged line is to refuse **two** result lines in one run, which is exactly what
+a forgery produces alongside the shim's own. The ratchet, which needs only the
+one number, moved off the stream entirely instead: see *What it does* and #843.
+Giving specdelta the same out-of-band channel would mean widening the file's
+format, and is not part of that change.) specdelta also counts the
 `RBGO_DETAIL` lines and flags a file that printed **fewer** than its own
 `fail + error` tally. It is an inequality and not an equality, because the shim
 emits a detail with no counter for a `before(:all)` failure and a counter with
@@ -641,9 +672,9 @@ what a ratchet should be:
 
 | stubbed (raises `SpecSkip`) | where |
 |---|---|
-| `ruby_exe` — no subprocess | `spec_helper.rb:904` |
-| `ruby_cmd` — no subprocess command line | `spec_helper.rb:905` |
-| `output_to_fd` — no real fd redirection | `spec_helper.rb:280` |
+| `ruby_exe` — no subprocess | `spec_helper.rb:930` |
+| `ruby_cmd` — no subprocess command line | `spec_helper.rb:931` |
+| `output_to_fd` — no real fd redirection | `spec_helper.rb:306` |
 
 ⛔ **That table is the whole list, and it is now derived rather than retyped.**
 It had a fourth row, "some `argf`/IO helpers", with no `where` — and nothing in
@@ -656,7 +687,7 @@ top-level README name exactly that set.
 
 ⛔ **`complain`, `output` and `be_computed_by` are NOT stubbed**, and this
 paragraph said they were until 2026-11-08. They are implemented:
-`ComplainMatcher` at `spec_helper.rb:204-249` with a real `$stderr` capture
+`ComplainMatcher` at `spec_helper.rb:230-262` with a real `$stderr` capture
 (`complain` wired at `:249`), `OutputMatcher` at `:254-279`, and
 `be_computed_by` at `:199`.
 

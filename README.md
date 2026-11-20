@@ -177,13 +177,13 @@ counters — agreed on every one of the 2,206 per-file records except
 there is no honest way to turn it into a percentage of the language:
 
 - **Only `language/` and `core/` are swept.** `run.sh` walks exactly those two
-  trees and no others (`scripts/conformance/rubyspec/run.sh:106`); ruby/spec's
+  trees and no others (`scripts/conformance/rubyspec/run.sh:118`); ruby/spec's
   `library/`, `optional/`, `command_line/` and `security/` trees are **not run
   at all**. Most of what people mean by "the standard library" is outside this
   measurement. (rbgo does bind a large set of stdlib and gem replacements — see
   *Supported today* — but their conformance is not what this figure reports.)
 - **The shim is not MSpec.** Exactly three helpers are stubbed — `ruby_exe` and
-  `ruby_cmd` (`spec_helper.rb:882-883`) and `output_to_fd` (`:280`) — so the
+  `ruby_cmd` (`spec_helper.rb:930-931`) and `output_to_fd` (`:306`) — so the
   examples that need them are counted as **skipped**, not passed. That makes the
   total a conservative lower bound. `complain`, `output` and `be_computed_by`
   are **implemented**; this list claimed otherwise until
