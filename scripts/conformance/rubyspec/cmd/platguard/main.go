@@ -138,14 +138,7 @@ func main() {
 		fmt.Fprintf(out, "  ⛔ example counts are a LOWER BOUND: it_behaves_like expands at run time and a static reader cannot see it\n")
 
 		if *list {
-			sorted := append([]gc.Disagreement{}, ds...)
-			sort.Slice(sorted, func(i, j int) bool {
-				if sorted[i].Site.File != sorted[j].Site.File {
-					return sorted[i].Site.File < sorted[j].Site.File
-				}
-				return sorted[i].Site.Line < sorted[j].Site.Line
-			})
-			for _, d := range sorted {
+			for _, d := range inCorpusOrder(ds) {
 				verdict := "value"
 				if d.Site.Block {
 					if d.Lost() {
@@ -163,4 +156,28 @@ func main() {
 	if disagrees {
 		os.Exit(1)
 	}
+}
+
+// inCorpusOrder returns the disagreements sorted by file and then by line,
+// leaving the caller's slice alone.
+//
+// ⛔ THE ORDER IS PART OF THE REPORT, not a presentation detail. This listing
+// is read by diffing one run against another — that is how the 17 rows main
+// had already moved were told apart from the 8 this change moved — and a
+// listing whose rows arrive in walk order moves them about whenever the
+// filesystem does. Two runs of the same census must produce the same bytes.
+//
+// It also has to be a function rather than an inline closure, because a
+// comparator inside a `sort.Slice` call in `main` cannot be exercised by
+// anything: a mutation sweep found the file comparison here held by nothing at
+// all, which is to say the report's order was never checked.
+func inCorpusOrder(ds []gc.Disagreement) []gc.Disagreement {
+	sorted := append([]gc.Disagreement{}, ds...)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		if sorted[i].Site.File != sorted[j].Site.File {
+			return sorted[i].Site.File < sorted[j].Site.File
+		}
+		return sorted[i].Site.Line < sorted[j].Site.Line
+	})
+	return sorted
 }
