@@ -12,6 +12,20 @@
 // RUBY_PLATFORM agree. A tool that could only answer about its own host would
 // have reported a clean corpus from the machine where the work is done.
 //
+// ⛔ A FILE THIS CENSUS DOES NOT NAME CAN STILL MOVE, and the reason is not a
+// bug here: ruby/spec is built on `it_behaves_like`, so a guard lives in a
+// shared-examples file and its examples are counted against whichever spec
+// files include it. Three files with NO guard of their own moved on the ubuntu
+// sweep for #837 — core/string/{byteslice,element_reference}_spec.rb through
+// `platform_is pointer_size: 64` at core/string/shared/slice.rb:122, and
+// core/kernel/require_spec.rb through `platform_is :darwin` at
+// core/kernel/shared/require.rb:230. They were nearly written off as flakes on
+// the evidence that their own source contains no guard, which is evidence
+// about the wrong file.
+//
+// So this census bounds the guards; it does not bound the FILES. Read the
+// shared directory a spec includes before concluding a move is noise.
+//
 //	platguard -root <ruby/spec checkout> [-platform x86_64-linux] [-list]
 //
 // Exit status: 0 the census ran and the two readings agree; 1 they disagree;
