@@ -5,9 +5,11 @@
 package ruby_test
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -59,6 +61,11 @@ end
 func buildRbgo(t *testing.T) string {
 	t.Helper()
 	bin := filepath.Join(t.TempDir(), "rbgo")
+	// `go build -o` writes EXACTLY the path given, so on Windows the result is
+	// an extensionless file that CreateProcess will not start.
+	if runtime.GOOS == "windows" {
+		bin += ".exe"
+	}
 	build := exec.Command("go", "build", "-o", bin, "./cmd/rbgo")
 	build.Env = append(os.Environ(), "GOWORK=off", "CGO_ENABLED=0")
 	if out, err := build.CombinedOutput(); err != nil {
@@ -90,9 +97,17 @@ func miniCorpus(t *testing.T) string {
 }
 
 // runProbe runs the forging spec. resultFile == "" means the variable is not set
-// at all, which is the hand-run case. The exit status is deliberately ignored:
-// a spec with a failing example is a normal outcome for this harness, and the
-// evidence wanted is the two streams plus the file.
+// at all, which is the hand-run case.
+//
+// ⛔ A non-zero EXIT STATUS is ignored and a failure to START is fatal, and the
+// two are not the same thing. A spec with a failing example is a normal outcome
+// for this harness, so its status says nothing; but a binary that never ran
+// returns empty output, and empty output makes every assertion below fail with
+// the wrong reason. The first version of this helper wrote `out, _ :=` under a
+// comment justifying only the first case, and the Windows lane then reported
+// "the probe never printed its forged tally" for a build this test had named
+// without `.exe`. "Could not ask" and "answered differently" need opposite
+// responses -- the same rule cmd/oracle's own documentation states.
 func runProbe(t *testing.T, bin, corpus, resultFile string) string {
 	t.Helper()
 	cmd := exec.Command(bin, "core/probe_spec.rb")
@@ -107,7 +122,11 @@ func runProbe(t *testing.T, bin, corpus, resultFile string) string {
 		env = append(env, "RBGO_RESULT_FILE="+resultFile)
 	}
 	cmd.Env = env
-	out, _ := cmd.CombinedOutput()
+	out, err := cmd.CombinedOutput()
+	var exited *exec.ExitError
+	if err != nil && !errors.As(err, &exited) {
+		t.Fatalf("could not run %s: %v\noutput so far:\n%s", bin, err, out)
+	}
 	return string(out)
 }
 
