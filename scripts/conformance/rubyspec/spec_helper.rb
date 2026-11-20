@@ -887,10 +887,30 @@ def mock_to_int(val); mock_int(val); end
 # picked the OLDER branch — wording that neither MRI 4.0.5 nor rbgo produces, so
 # the example could not be scored by either engine. Route every guard through
 # this helper so the no-block form answers.
+#
+# ⛔ AND THE BLOCK FORM RETURNS THE BLOCK'S VALUE (#962). guard.rb:80 is
+# `yield if yield?(false)`, whose value IS the method's value — `ensure
+# unregister` does not change it. This helper used to end in a hardcoded `nil`,
+# which is the same defect the paragraph above fixed for the no-block form, one
+# form over: a guard used as an EXPRESSION contributed nothing. The corpus does
+# that in core/file/stat/birthtime_spec.rb:3-5,
+#
+#   platform_is(:windows, :darwin, :freebsd, :netbsd,
+#               *ruby_version_is("4.0") { :linux },
+#              ) do
+#
+# where `*nil` splats to nothing, so the file was guarded for a list that never
+# contained :linux and was skipped on the gate's own ubuntu runner at a version
+# where upstream runs it. It had only ever run there because the old literal
+# `PLATFORMS` matched :darwin on every machine (#837) — two defects cancelling,
+# and removing that one is what made this one measurable.
+#
+# A shut guard still yields nil, from `yield if match` itself: that is mspec's
+# answer too, and it is why the splat adds nothing on a machine the guard
+# excludes.
 def _guard_run(match)
   return match unless block_given?
   yield if match
-  nil
 end
 
 def ruby_version_is(range, &b); _guard_run(_version_in_range(range), &b); end

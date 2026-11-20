@@ -753,8 +753,8 @@ what a ratchet should be:
 
 | stubbed (raises `SpecSkip`) | where |
 |---|---|
-| `ruby_exe` — no subprocess | `spec_helper.rb:976` |
-| `ruby_cmd` — no subprocess command line | `spec_helper.rb:977` |
+| `ruby_exe` — no subprocess | `spec_helper.rb:996` |
+| `ruby_cmd` — no subprocess command line | `spec_helper.rb:997` |
 | `output_to_fd` — no real fd redirection | `spec_helper.rb:341` |
 
 ⛔ **That table is the whole list, and it is now derived rather than retyped.**
