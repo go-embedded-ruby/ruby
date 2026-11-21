@@ -77,17 +77,29 @@ ratchet cannot be mistaken for a failing one.
 ## Usage
 
 ```sh
-# Run the ratchet (clones the pinned corpus to /tmp on first run):
+# Run the ratchet (clones the pinned corpus into the user cache directory on
+# first run — ~/Library/Caches/rbgo/rubyspec-corpus on macOS,
+# ${XDG_CACHE_HOME:-~/.cache}/rbgo/rubyspec-corpus elsewhere):
 scripts/conformance/rubyspec/run.sh
 
 # Re-record the baseline after a genuine improvement:
 UPDATE_BASELINE=1 scripts/conformance/rubyspec/run.sh
 
-# Point at an existing checkout instead of cloning:
+# Point at an existing ruby/spec clone instead (it is CHECKED OUT at SPEC_SHA):
 SPECDIR=~/src/ruby-spec scripts/conformance/rubyspec/run.sh
 ```
 
 Environment overrides: `RBGO`, `SPECDIR`, `CACHE`, `JOBS`, `TIMEOUT`.
+
+The corpus is put in place by [`cmd/specpin`](cmd/specpin/main.go) (#857). It
+prints `corpus: <dir> @ <sha>` with the commit **read back from git** after
+checkout — not the `SPEC_SHA` constant, so a cache left at another commit can no
+longer be reported as the pinned one. It never deletes a directory: one that is
+neither empty nor a git checkout of its own (at its top level) is refused, where
+the script used to `rm -rf` whatever `CACHE` named. A `SPECDIR` clone already
+at `SPEC_SHA` is used as is, offline; one at another commit is moved with
+`git checkout --force` only if its `origin` is `SPEC_URL` exactly, and refused
+otherwise — so do not point it at a tree with work in progress.
 
 ## Re-recording the baseline
 
@@ -226,7 +238,8 @@ a NoMethodError expectation it asks a real rbgo whether the method exists at all
 no instance is constructed), and reports the ones that do not.
 
 ```bash
-go run ./scripts/conformance/rubyspec/cmd/phantom -root /tmp/rubyspec-corpus -rbgo /tmp/rbgo-rubyspec
+# the corpus run.sh pinned (macOS path; ~/.cache/rbgo/rubyspec-corpus on Linux)
+go run ./scripts/conformance/rubyspec/cmd/phantom -root ~/Library/Caches/rbgo/rubyspec-corpus -rbgo /tmp/rbgo-rubyspec
 ```
 
 Measured on `main` after #849: **59 attributable expectations over 2206 spec
@@ -270,7 +283,7 @@ re-recorded — a static read, needing no sweep, and so runnable on a loaded
 machine where a sweep is not:
 
 ```bash
-go run ./scripts/conformance/rubyspec/cmd/guards -root /tmp/rubyspec-corpus -list
+go run ./scripts/conformance/rubyspec/cmd/guards -root ~/Library/Caches/rbgo/rubyspec-corpus -list
 ```
 
 It separates the two shapes, because they do opposite things:
