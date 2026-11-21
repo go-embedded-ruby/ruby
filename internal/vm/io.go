@@ -218,10 +218,11 @@ func (o *IOObj) writeBytes(p []byte) int {
 		copy(o.buf[o.pos:], p)
 		o.pos += len(p)
 		o.syncStr()
+		if o.path != "" {
+			o.wbufDirty = true // bytes accepted but not on disk: MRI's fptr->wbuf.len
+		}
 		if o.sync { // sync=true: a File's writes reach disk immediately (no buffering)
 			ioFlush(o)
-		} else if o.path != "" {
-			o.wbufDirty = true // bytes accepted but not on disk: MRI's fptr->wbuf.len
 		}
 		return len(p)
 	}
@@ -1269,8 +1270,18 @@ func notRegular(p string) bool {
 // permission puts the owner-write bit back for the length of the write and
 // restores the file's mode afterwards. That is the descriptor's grant, replayed;
 // it never widens a file this stream was not already entitled to write.
+//
+// Only PENDING bytes are written (#969). The buffer also holds what the file
+// contained at open, plus any bytes #ungetc pushed back, and neither belongs on
+// disk: MRI's io_fflush with an empty write buffer writes nothing. Before this
+// gate, a stream opened "r+" or "a" and closed untouched put its open-time
+// snapshot back over another writer's bytes, and re-created a file unlinked
+// while it was open. wbufDirty stands in for fptr->wbuf.len, and every write
+// into the buffer that must reach the disk sets it (writeBytes, and #pwrite's
+// buffer fallback); opens that truncate do so on disk at once and need no
+// flush.
 func ioFlush(o *IOObj) {
-	if !o.writable || o.path == "" {
+	if !o.writable || o.path == "" || !o.wbufDirty {
 		return
 	}
 	o.wbufDirty = false
