@@ -62,16 +62,16 @@ func pwriteFile(path string, data []byte, off int) error {
 // gives: the stream already holds the descriptor's grant
 // (`File.new(path, "w", 0444)` writes through), and reopening by path must not
 // take it away. It never widens the file's mode beyond the write. When the
-// mode cannot be read or changed, the original refusal stands.
+// mode cannot be read, the original refusal stands; when it cannot be changed
+// (a file this process does not own), the retry is refused for permission
+// again and that refusal is returned, so no separate branch is needed for it.
 func writeAtWithOwnerWrite(path string, data []byte, off int, refused error) error {
 	st, err := os.Stat(path)
 	if err != nil {
 		return refused
 	}
 	mode := st.Mode().Perm()
-	if os.Chmod(path, mode|0o200) != nil {
-		return refused
-	}
+	_ = os.Chmod(path, mode|0o200)
 	err = writeAtPath(path, data, off)
 	_ = os.Chmod(path, mode)
 	return err

@@ -42,6 +42,15 @@ func TestPositionalIOReachesTheFile(t *testing.T) {
 		{"a stream created 0444 still pwrites through its grant",
 			fmt.Sprintf(`q = %q + "ro"; f = File.new(q, "w", 0444); f.pwrite("AB", 0); p [File.binread(q), format("%%o", File.stat(q).mode & 0o777)]`, p),
 			"[\"AB\", \"444\"]\n"},
+		// The stream's own descriptor in MRI is unaffected by a later chmod, so
+		// it still reads the file; here the path is unreadable and pread falls
+		// back to the buffer, which holds the same bytes.
+		{"pread on a path made unreadable after open falls back to the buffer",
+			reset + fmt.Sprintf(`f = File.open(%q, "r"); File.chmod(0, %q); r = f.pread(3, 2); File.chmod(0o644, %q); p r`, p, p, p),
+			"\"234\"\n"},
+		{"pread past the end of an unlinked file is still end of file",
+			reset + fmt.Sprintf(`f = File.open(%q, "r"); File.unlink(%q); begin; f.pread(1, 10); rescue EOFError => e; p e.message; end`, p, p),
+			"\"end of file reached\"\n"},
 		{"pwrite on an unlinked path falls back to the buffer",
 			reset + fmt.Sprintf(`f = File.open(%q, "r+"); File.unlink(%q); p [f.pwrite("AB", 0), f.pread(4, 0)]`, p, p),
 			"[2, \"AB23\"]\n"},
