@@ -31,11 +31,22 @@
 #   it falls hardest on the shortest-running one.
 set -u
 RUNS="${1:-5}"
-RBGO="${RBGO:-/tmp/rbgo}"
+RBGO="${RBGO:-}"
 RUBY="${RUBY:-ruby}"
 JRUBY="${JRUBY:-jruby}"
 TRUFFLE="${TRUFFLE:-truffleruby}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
+
+# #964: built EVERY run from this checkout, into a directory this run owns and
+# deletes. It used to time whatever sat at /tmp/rbgo — built by any checkout,
+# at any commit — and a benchmark of the wrong interpreter publishes as well as
+# one of the right one.
+if [ -z "$RBGO" ]; then
+  RBGO_DIR="$(mktemp -d)"
+  trap 'rm -rf "$RBGO_DIR"' EXIT
+  RBGO="$RBGO_DIR/rbgo"
+  (cd "$HERE/../.." && GOWORK=off go build -o "$RBGO" ./cmd/rbgo) || exit 1
+fi
 
 # hires PROG ARGS... → "MILLISECONDS EXITSTATUS", with the child's own output
 # discarded inside the fork so that neither stream can reach this one.

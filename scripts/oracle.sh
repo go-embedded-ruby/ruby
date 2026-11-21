@@ -12,7 +12,7 @@
 #   scripts/oracle.sh -b scripts/conformance/core_ext.txt   # batch: one snippet
 #                                                           # per line (# = comment)
 #
-# Environment overrides: RBGO (default: /tmp/rbgo, else built from ./cmd/rbgo),
+# Environment overrides: RBGO (default: built from ./cmd/rbgo every run),
 # MRI (default: ruby), JRUBY (default: jruby), TRUFFLE (default: truffleruby). A
 # reference that is not installed is skipped with a note rather than failing the
 # run, so the oracle still works with whichever references are present.
@@ -24,13 +24,13 @@ MRI=${MRI:-ruby}
 JRUBY=${JRUBY:-jruby}
 TRUFFLE=${TRUFFLE:-truffleruby}
 
+# #964: built EVERY run, into a directory this run owns and deletes. It used
+# to prefer any /tmp/rbgo already present — another checkout's interpreter.
 if [ -z "$RBGO" ]; then
-	if [ -x /tmp/rbgo ]; then
-		RBGO=/tmp/rbgo
-	else
-		RBGO=/tmp/rbgo-oracle
-		(cd "$here" && GOWORK=off go build -o "$RBGO" ./cmd/rbgo)
-	fi
+	RBGO_DIR=$(mktemp -d)
+	trap 'rm -rf "$RBGO_DIR"' EXIT
+	RBGO="$RBGO_DIR/rbgo"
+	(cd "$here" && GOWORK=off go build -o "$RBGO" ./cmd/rbgo) || exit 1
 fi
 
 usage() {
