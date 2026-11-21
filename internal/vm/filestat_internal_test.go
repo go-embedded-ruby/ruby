@@ -441,11 +441,18 @@ func TestStatGroupsDefault(t *testing.T) {
 // TestIOFlushError covers ioFlush's write-failure branch: flushing a writable
 // file stream whose path is an unwritable directory raises Errno::ENOENT.
 func TestIOFlushError(t *testing.T) {
-	o := &IOObj{isStr: true, writable: true, path: "/no/such/dir/x.txt", buf: []byte("data")}
+	o := &IOObj{isStr: true, writable: true, wbufDirty: true, path: "/no/such/dir/x.txt", buf: []byte("data")}
 	if got := catchRaise(func() { ioFlush(o) }); got != "Errno::ENOENT" {
 		t.Errorf("ioFlush error: got %q want Errno::ENOENT", got)
 	}
 	// A non-writable or path-less stream flushes to a no-op (no raise).
 	ioFlush(&IOObj{isStr: true, writable: false, path: "/no/such"})
 	ioFlush(&IOObj{isStr: true, writable: true, path: ""})
+	// Nothing pending: no write at all, so even an unwritable path does not
+	// raise (#969). The same stream with wbufDirty set raised above.
+	if got := catchRaise(func() {
+		ioFlush(&IOObj{isStr: true, writable: true, path: "/no/such/dir/x.txt", buf: []byte("data")})
+	}); got != "" {
+		t.Errorf("ioFlush with nothing pending raised %q", got)
+	}
 }
