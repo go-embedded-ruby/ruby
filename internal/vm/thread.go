@@ -423,6 +423,63 @@ func (vm *VM) threadBlock(fn func()) { vm.threadRelease(fn, "sleep") }
 // t.status != 'run'"), which never ends if a passing thread looks asleep.
 func (vm *VM) threadPass(fn func()) { vm.threadRelease(fn, "") }
 
+// safepointTicks is how many units of uninterrupted Ruby progress pass between
+// interpreter safepoints. It trades throughput against how long a spinning
+// thread can keep the GVL: the bar #935 set for a blocked accept is that an
+// interrupt arrives within 0.1 s as it does in MRI, and this is the knob that
+// has to hold it for a CPU-bound thread.
+//
+// ⛔ The value is a starting point and NOT a measured one. A counter paid on
+// every tick is only one of two designs; the other is MRI's, where the timer
+// thread sets a flag and the loop pays a single load (rb_thread_schedule).
+// Which one to keep is a measurement on a quiet machine, recorded on #940.
+const safepointTicks = 4096
+
+// tickSafepoint counts one unit of uninterrupted Ruby progress and services a
+// safepoint every safepointTicks of them.
+//
+// ⛔ The reason this is needed is not that the existing safepoints check too
+// rarely — serviceSafepoint's own comment argues correctly that checking at the
+// cooperative yield points is ENOUGH, since a cross-thread raise can only be
+// queued while the target holds no GVL. The hole is in the unstated premise:
+// that the target eventually reaches one of those points. A bare `while true;
+// end` never does. So what this adds is the YIELD that makes that premise true,
+// not another check.
+func (vm *VM) tickSafepoint() {
+	vm.sinceSafepoint++
+	if vm.sinceSafepoint < safepointTicks {
+		return
+	}
+	vm.sinceSafepoint = 0
+	vm.interpreterSafepoint()
+}
+
+// backJump is called at every jump in the dispatch loop and does nothing unless
+// the jump goes BACKWARD (target at or before the current pc), which is the only
+// kind that can loop.
+func (vm *VM) backJump(target, pc int) {
+	if target > pc {
+		return
+	}
+	vm.tickSafepoint()
+}
+
+// interpreterSafepoint is the yield point a thread running pure Ruby reaches. It
+// is Thread.pass's body (thread.go, Thread.pass) at a point where the
+// interpreter sits between instructions, which is what makes it safe: the pc has
+// already been published and no operand is half-consumed.
+//
+// The pass is skipped when this is the only live thread, because there is nobody
+// to hand the GVL to and threadRelease would still pay an unlock, a Gosched, a
+// relock and two context copies. serviceSafepoint still runs: it is three field
+// reads when nothing is queued, and it is what delivers a kill or a raise.
+func (vm *VM) interpreterSafepoint() {
+	if len(vm.threads) > 1 {
+		vm.threadPass(runtime.Gosched)
+	}
+	vm.serviceSafepoint(vm.currentThread)
+}
+
 // threadRelease is the body shared by threadBlock and threadPass: save this
 // thread's context, optionally publish a status for the window in which it does
 // not hold the GVL, release it, run fn, then take the GVL back and restore both.

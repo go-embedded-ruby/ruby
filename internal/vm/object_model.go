@@ -1817,6 +1817,14 @@ func (vm *VM) callBlock(p *Proc, args []object.Value) object.Value {
 // callBlockSelf is callBlock with an explicit self, used by define_method to
 // rebind the block's self to the method's receiver.
 func (vm *VM) callBlockSelf(p *Proc, self object.Value, args []object.Value) object.Value {
+	// ⛔ The SECOND door of #940, and the one a fix at the dispatch loop's
+	// backward edges cannot reach. `loop { }`, `Integer#times` and `Array#each`
+	// spin in a GO loop that calls this; their bytecode contains no backward
+	// jump, so vm.backJump never fires. Measured: wiring only the dispatch loop
+	// made `while true; end` agree with MRI byte for byte and left `loop { }`
+	// hanging exactly as before. This is the funnel every native iterator passes
+	// through, once per iteration.
+	vm.tickSafepoint()
 	if p.native != nil {
 		// Proc#call is nonRetaining, so the OpSend fast path hands us the caller's
 		// live operand-stack region directly. An ISeq block body copies its args
