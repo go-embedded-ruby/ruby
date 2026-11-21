@@ -19,7 +19,7 @@
 #   scripts/conformance/apps/run.sh --clone      # clone missing libs (needs network)
 #   scripts/conformance/apps/run.sh --only rake  # one library
 #
-# Environment overrides: RBGO (default /tmp/rbgo, else built from ./cmd/rbgo),
+# Environment overrides: RBGO (default: built from ./cmd/rbgo every run),
 # MRI (default: ruby), CACHE (default /tmp/ger-apps-cache).
 set -eu
 
@@ -41,14 +41,14 @@ while [ $# -gt 0 ]; do
 	shift
 done
 
+# #964: built EVERY run, into a directory this run owns and deletes. It used
+# to prefer any /tmp/rbgo already present — another checkout's interpreter.
 if [ -z "$RBGO" ]; then
-	if [ -x /tmp/rbgo ]; then
-		RBGO=/tmp/rbgo
-	else
-		RBGO=/tmp/rbgo-apps
-		echo "building rbgo -> $RBGO"
-		(cd "$repo" && GOWORK=off go build -o "$RBGO" ./cmd/rbgo)
-	fi
+	RBGO_DIR=$(mktemp -d)
+	trap 'rm -rf "$RBGO_DIR"' EXIT
+	RBGO="$RBGO_DIR/rbgo"
+	echo "building rbgo -> $RBGO"
+	(cd "$repo" && GOWORK=off go build -o "$RBGO" ./cmd/rbgo) || exit 1
 fi
 
 if ! command -v "$MRI" >/dev/null 2>&1; then

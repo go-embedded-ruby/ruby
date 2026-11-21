@@ -35,7 +35,7 @@
 # for reproducibility.
 #
 # Env:
-#   RBGO      path to the rbgo binary   (default: built from ./cmd/rbgo)
+#   RBGO      path to the rbgo binary   (default: built from ./cmd/rbgo EVERY run)
 #   SPECDIR   ruby/spec checkout        (default: CACHE; moved to SPEC_SHA)
 #   CACHE     clone cache dir           (default: <user cache dir>/rbgo/rubyspec-corpus)
 #   JOBS      parallelism               (default: number of CPUs)
@@ -45,7 +45,8 @@ set -u
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$HERE/../../.." && pwd)"
-RBGO="${RBGO:-/tmp/rbgo-rubyspec}"
+RBGO="${RBGO:-}"
+RBGO_DIR=""
 CACHE="${CACHE:-}"
 SPECDIR="${SPECDIR:-$CACHE}"
 TIMEOUT="${TIMEOUT:-25}"
@@ -60,10 +61,21 @@ SPEC_URL="https://github.com/ruby/spec"
 BASELINE="$HERE/BASELINE"
 
 echo "== build rbgo =="
-if [ ! -x "$RBGO" ]; then
+# #964: built EVERY run, into a directory this run owns and deletes. The old
+# default reused whatever sat at /tmp/rbgo-rubyspec — the interpreter of the
+# first checkout that ever ran this on the machine — and printed the same
+# line either way. The build cache makes a rebuild cheap; a stale binary
+# makes a whole sweep measure the wrong code.
+if [ -z "$RBGO" ]; then
+  RBGO_DIR="$(mktemp -d)"
+  trap 'rm -rf "$RBGO_DIR"' EXIT # widened below once RESULTS exists
+  RBGO="$RBGO_DIR/rbgo"
   (cd "$REPO_ROOT" && GOWORK=off CGO_ENABLED=0 go build -o "$RBGO" ./cmd/rbgo) || exit 1
 fi
 echo "rbgo: $RBGO"
+# What was measured, read from the binary rather than from its path.
+go version -m "$RBGO" | grep -E 'vcs\.(revision|modified)' ||
+  echo "  (no vcs stamp in $RBGO: built outside a git tree, or with -buildvcs=false)"
 
 echo
 echo "== ruby/spec corpus =="
@@ -79,7 +91,7 @@ SPECDIR="$(cd "$REPO_ROOT" && GOWORK=off go run ./scripts/conformance/rubyspec/c
 cp "$HERE/spec_helper.rb" "$SPECDIR/spec_helper.rb"
 
 RESULTS="$(mktemp)"
-trap 'rm -f "$RESULTS"' EXIT
+trap 'rm -f "$RESULTS"; if [ -n "$RBGO_DIR" ]; then rm -rf "$RBGO_DIR"; fi' EXIT
 
 run_one() {
   f="$1"
@@ -114,8 +126,12 @@ find "$SPECDIR/language" "$SPECDIR/core" -name '*_spec.rb' | sort \
 
 # Hand the sweep to the judge. Everything above this line runs processes;
 # everything below it decides, and that half is Go.
-RATCHET="$(mktemp -d)/ratchet"
-trap 'rm -f "$RESULTS" "$RATCHET"' EXIT
+RATCHET_DIR="$(mktemp -d)"
+RATCHET="$RATCHET_DIR/ratchet"
+# One trap for everything this run created. It used to be replaced here by one
+# that no longer named the rbgo directory, and the `exec` below skipped EXIT
+# traps altogether, so every run left its binaries behind (#964).
+trap 'rm -f "$RESULTS"; rm -rf "$RATCHET_DIR"; if [ -n "$RBGO_DIR" ]; then rm -rf "$RBGO_DIR"; fi' EXIT
 (cd "$REPO_ROOT" && GOWORK=off CGO_ENABLED=0 go build -o "$RATCHET" ./scripts/conformance/rubyspec/cmd/ratchet) || exit 2
 
 echo
@@ -124,8 +140,12 @@ if [ "${UPDATE_BASELINE:-0}" = "1" ]; then
   # refusal and the stamp both live in Go (cmd/ratchet, #876); this line only
   # carries the flag, so there is no second place where the rule could differ.
   if [ "${ABSORB:-0}" = "1" ]; then
-    exec "$RATCHET" -baseline "$BASELINE" -results "$RESULTS" -update -absorb
+    "$RATCHET" -baseline "$BASELINE" -results "$RESULTS" -update -absorb
+    exit $?
   fi
-  exec "$RATCHET" -baseline "$BASELINE" -results "$RESULTS" -update
+  "$RATCHET" -baseline "$BASELINE" -results "$RESULTS" -update
+  exit $?
 fi
-exec "$RATCHET" -baseline "$BASELINE" -results "$RESULTS"
+# Not exec: exec replaces the shell, and the EXIT trap above would never run.
+"$RATCHET" -baseline "$BASELINE" -results "$RESULTS"
+exit $?

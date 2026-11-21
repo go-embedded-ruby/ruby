@@ -238,8 +238,10 @@ a NoMethodError expectation it asks a real rbgo whether the method exists at all
 no instance is constructed), and reports the ones that do not.
 
 ```bash
+# run.sh deletes the rbgo it built (#964), so build one from THIS checkout first
+d="$(mktemp -d)" && go build -o "$d/rbgo" ./cmd/rbgo
 # the corpus run.sh pinned (macOS path; ~/.cache/rbgo/rubyspec-corpus on Linux)
-go run ./scripts/conformance/rubyspec/cmd/phantom -root ~/Library/Caches/rbgo/rubyspec-corpus -rbgo /tmp/rbgo-rubyspec
+go run ./scripts/conformance/rubyspec/cmd/phantom -root ~/Library/Caches/rbgo/rubyspec-corpus -rbgo "$d/rbgo"
 ```
 
 Measured on `main` after #849: **59 attributable expectations over 2206 spec
