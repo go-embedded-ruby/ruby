@@ -209,6 +209,11 @@ func TestRunsOwnRefusals(t *testing.T) {
 			t.Skip("the cache directory comes from other variables there")
 		}
 		url, older, _ := upstream(t)
+		// The sweep's mutant of :87 did exactly what this row says: it cloned
+		// into rbgo/rubyspec-corpus under the PACKAGE directory, left there as
+		// an untracked tree. A temporary working directory keeps a broken
+		// build from writing into the source tree.
+		t.Chdir(t.TempDir())
 		t.Setenv("HOME", "")
 		t.Setenv("XDG_CACHE_HOME", "")
 		var out, errb bytes.Buffer
