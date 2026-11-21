@@ -36,10 +36,10 @@ import (
 // or false for a stream that has none: a StringIO, a pipe end, a popen stream, a
 // device or fifo, or a path that no longer resolves.
 func ioPositionalPath(o *IOObj) (string, bool) {
-	if o.path == "" || o.pipe != nil || o.popen != nil {
+	if o.pipe != nil || o.popen != nil {
 		return "", false
 	}
-	st, err := os.Stat(o.path)
+	st, err := os.Stat(o.path) // "" (a StringIO) does not resolve either
 	if err != nil || !st.Mode().IsRegular() {
 		return "", false
 	}
@@ -49,23 +49,28 @@ func ioPositionalPath(o *IOObj) (string, bool) {
 // pwriteFile writes data at off in the file at path and touches nothing else:
 // no other byte of the file, and nothing of the stream that opened it. A write
 // past the end leaves a hole, as pwrite(2) does.
-//
-// A refusal for permission is retried with the owner-write bit put back for the
-// length of the write, for the reason ioFlush gives: the stream already holds
-// the descriptor's grant (`File.new(path, "w", 0444)` writes through), and
-// reopening by path must not take it away.
 func pwriteFile(path string, data []byte, off int) error {
 	err := writeAtPath(path, data, off)
-	if !errors.Is(err, fs.ErrPermission) {
-		return err
+	if errors.Is(err, fs.ErrPermission) {
+		err = writeAtWithOwnerWrite(path, data, off, err)
 	}
-	st, sterr := os.Stat(path)
-	if sterr != nil {
-		return err
+	return err
+}
+
+// writeAtWithOwnerWrite retries a write refused for permission with the
+// owner-write bit put back for the length of the write, for the reason ioFlush
+// gives: the stream already holds the descriptor's grant
+// (`File.new(path, "w", 0444)` writes through), and reopening by path must not
+// take it away. It never widens the file's mode beyond the write. When the
+// mode cannot be read or changed, the original refusal stands.
+func writeAtWithOwnerWrite(path string, data []byte, off int, refused error) error {
+	st, err := os.Stat(path)
+	if err != nil {
+		return refused
 	}
 	mode := st.Mode().Perm()
 	if os.Chmod(path, mode|0o200) != nil {
-		return err
+		return refused
 	}
 	err = writeAtPath(path, data, off)
 	_ = os.Chmod(path, mode)
@@ -88,33 +93,22 @@ func writeAtPath(path string, data []byte, off int) error {
 // preadFile reads up to n bytes at off from the file at path. It returns io.EOF
 // when off is at or past the end, which IO#pread raises as EOFError.
 //
-// The read is bounded by the file's size, not by n: n comes from Ruby, and
-// `f.pread(2**62, 0)` must not be an allocation of 2**62 bytes.
+// What it allocates is bounded by what the file holds past off, not by n: n
+// comes from Ruby, and `f.pread(2**40, 0)` must not be an allocation of 2**40
+// bytes. io.ReadAll grows with what is actually read, and the section reader
+// caps that at n (it clamps off+n itself when the sum would overflow).
 func preadFile(path string, n, off int) ([]byte, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
-	st, err := f.Stat()
+	data, err := io.ReadAll(io.NewSectionReader(f, int64(off), int64(n)))
 	if err != nil {
 		return nil, err
 	}
-	size := st.Size()
-	if int64(off) >= size {
+	if len(data) == 0 {
 		return nil, io.EOF
 	}
-	want := size - int64(off)
-	if int64(n) < want {
-		want = int64(n)
-	}
-	buf := make([]byte, want)
-	m, err := f.ReadAt(buf, int64(off))
-	if m > 0 {
-		return buf[:m], nil // a short read: the file shrank since Stat
-	}
-	if err == nil {
-		err = io.EOF
-	}
-	return nil, err
+	return data, nil
 }
