@@ -5,6 +5,12 @@
 #     core/file/stat/birthtime_spec.rb: 0 passing, baseline 1 (-1)
 #     core/io/buffer/resize_spec.rb: 14 passing, baseline 15 (-1)
 #     core/io/seek_spec.rb: 14 passing, baseline 15 (-1)
+# ✎ EDITED BY HAND on 2026-11-21, two rows, sum unchanged (24106):
+#     core/kernel/require_spec.rb 69 -> 68: its FLOOR. It read 68 in 2 of 4
+#       attempts at code that cannot affect it, incl. both values at one SHA
+#       (run 44816548538). Pinned as #885 pinned core/random/bytes_spec.rb (#887).
+#     core/file/stat/birthtime_spec.rb 0 -> 1: what #965 made it; read 1 in
+#       all 3 attempts whose logs were read; the 0 above was absorbed for #961.
 OK	core/argf/argf_spec.rb	2
 OK	core/argf/argv_spec.rb	1
 OK	core/argf/binmode_spec.rb	2
@@ -650,7 +656,7 @@ OK	core/file/size_spec.rb	22
 OK	core/file/socket_spec.rb	4
 OK	core/file/split_spec.rb	9
 OK	core/file/stat/atime_spec.rb	1
-OK	core/file/stat/birthtime_spec.rb	0
+OK	core/file/stat/birthtime_spec.rb	1
 OK	core/file/stat/blksize_spec.rb	1
 OK	core/file/stat/blockdev_spec.rb	2
 OK	core/file/stat/blocks_spec.rb	1
@@ -1124,7 +1130,7 @@ OK	core/kernel/readline_spec.rb	2
 OK	core/kernel/readlines_spec.rb	2
 OK	core/kernel/remove_instance_variable_spec.rb	11
 OK	core/kernel/require_relative_spec.rb	55
-OK	core/kernel/require_spec.rb	69
+OK	core/kernel/require_spec.rb	68
 OK	core/kernel/respond_to_missing_spec.rb	17
 OK	core/kernel/respond_to_spec.rb	18
 OK	core/kernel/select_spec.rb	3
