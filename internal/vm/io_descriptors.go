@@ -5,6 +5,8 @@
 package vm
 
 import (
+	"errors"
+	"io"
 	"math/big"
 	"os"
 	"strings"
@@ -325,6 +327,23 @@ func defIOSeekable(cls *RClass) {
 		if off < 0 {
 			raise("Errno::EINVAL", "Invalid argument - pread")
 		}
+		// #949: pread(2) reads the FILE, so it sees what another writer has put
+		// there since this stream was opened. rb_io_pread flushes this stream's
+		// own pending writes first, and so does this, so they are seen too.
+		if p, ok := ioPositionalPath(o); ok {
+			if o.wbufDirty {
+				ioFlush(o)
+			}
+			data, err := preadFile(p, n, off)
+			if err == nil {
+				return ioReadResult(data, buf)
+			}
+			if errors.Is(err, io.EOF) {
+				raise("EOFError", "end of file reached")
+			}
+			// Unreadable by path (removed between the two calls, permission):
+			// the buffer below is what this stream last saw.
+		}
 		if off >= len(o.buf) {
 			raise("EOFError", "end of file reached")
 		}
@@ -346,15 +365,18 @@ func defIOSeekable(cls *RClass) {
 		if end := off + len(data); end > len(o.buf) {
 			o.buf = append(o.buf, make([]byte, end-len(o.buf))...)
 		}
-		copy(o.buf[off:], data)
-		o.writable = true // a written File flushes its buffer back on flush/close
-		// Door 4 of 5. MRI's rb_io_pwrite calls pwrite(2) on the descriptor, so
-		// there the bytes are on disk the moment #pwrite returns; here they are in
-		// the buffer, which makes them losable exactly like a buffered #write.
-		// Marking them dirty and tracking the stream is what keeps them (#643);
-		// that they are not on disk UNTIL a flush is a separate divergence of the
-		// buffer-backed model, not one this records as fixed.
-		o.wbufDirty = true
+		copy(o.buf[off:], data) // so this stream's own later reads see them
+		o.writable = true       // a written File flushes its buffer back on flush/close
+		// #949: MRI's rb_io_pwrite is pwrite(2), so the bytes are on disk the
+		// moment it returns, and ONLY those bytes: the stream's other pending
+		// writes stay pending. pwriteFile does exactly that, so on success
+		// nothing new is waiting and wbufDirty is left as it was.
+		if p, ok := ioPositionalPath(o); !ok || pwriteFile(p, data, off) != nil {
+			// Door 4 of 5. No file reachable by path: the bytes are in the buffer
+			// only, losable like a buffered #write until a flush. Marking them
+			// dirty and tracking the stream is what keeps them (#643).
+			o.wbufDirty = true
+		}
 		vm.trackOpenFile(o)
 		return object.IntValue(int64(len(data)))
 	})
