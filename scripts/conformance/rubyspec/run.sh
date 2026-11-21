@@ -67,8 +67,12 @@ echo "== build rbgo =="
 # line either way. The build cache makes a rebuild cheap; a stale binary
 # makes a whole sweep measure the wrong code.
 if [ -z "$RBGO" ]; then
-  RBGO_DIR="$(mktemp -d)"
+  # #974: no `set -e` here, so a failed mktemp must stop the run itself, or
+  # RBGO would become /rbgo.
+  RBGO_DIR="$(mktemp -d)" || { echo "mktemp -d failed" >&2; exit 1; }
   trap 'rm -rf "$RBGO_DIR"' EXIT # widened below once RESULTS exists
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
   RBGO="$RBGO_DIR/rbgo"
   (cd "$REPO_ROOT" && GOWORK=off CGO_ENABLED=0 go build -o "$RBGO" ./cmd/rbgo) || exit 1
 fi

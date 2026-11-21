@@ -24,19 +24,33 @@ MRI=${MRI:-ruby}
 JRUBY=${JRUBY:-jruby}
 TRUFFLE=${TRUFFLE:-truffleruby}
 
-# #964: built EVERY run, into a directory this run owns and deletes. It used
-# to prefer any /tmp/rbgo already present — another checkout's interpreter.
-if [ -z "$RBGO" ]; then
-	RBGO_DIR=$(mktemp -d)
-	trap 'rm -rf "$RBGO_DIR"' EXIT
-	RBGO="$RBGO_DIR/rbgo"
-	(cd "$here" && GOWORK=off go build -o "$RBGO" ./cmd/rbgo) || exit 1
-fi
-
 usage() {
 	echo "usage: $0 (-e '<ruby>' | -b <corpus-file> | <program.rb>)" >&2
 	exit 2
 }
+
+# The arguments are checked before anything is built (#974): a usage error
+# answers at once instead of after a compile.
+case "${1:-}" in
+'') usage ;;
+-e | -b | --batch) [ $# -ge 2 ] || usage ;;
+esac
+
+# #964: built EVERY run, into a directory this run owns and deletes. It used
+# to prefer any /tmp/rbgo already present — another checkout's interpreter.
+# #974: /bin/sh may be dash, which runs no EXIT trap on a signal, so INT and
+# TERM exit explicitly and the EXIT trap still removes the directory.
+if [ -z "$RBGO" ]; then
+	RBGO_DIR=$(mktemp -d) || {
+		echo "mktemp -d failed" >&2
+		exit 1
+	}
+	trap 'rm -rf "$RBGO_DIR"' EXIT
+	trap 'exit 130' INT
+	trap 'exit 143' TERM
+	RBGO="$RBGO_DIR/rbgo"
+	(cd "$here" && GOWORK=off go build -o "$RBGO" ./cmd/rbgo) || exit 1
+fi
 
 # run executes a reference binary, or notes that it is absent (so a missing
 # reference is skipped, not counted as a divergence).
