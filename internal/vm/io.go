@@ -638,7 +638,7 @@ func (vm *VM) registerIO() {
 	cFile.define("chmod", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
 		ioFlush(o)
-		if err := fileChmod(o.path, os.FileMode(intArg(args[0])&0o7777)); err != nil {
+		if err := fileChmod(o.path, chmodMode(int64(intArg(args[0])))); err != nil {
 			raise("Errno::ENOENT", "No such file or directory @ apply2files - %s", o.path)
 		}
 		return object.IntValue(0)
@@ -1290,13 +1290,7 @@ func ioFlush(o *IOObj) {
 		return
 	}
 	if errors.Is(err, fs.ErrPermission) {
-		if st, sterr := os.Stat(o.path); sterr == nil {
-			mode := st.Mode().Perm()
-			if chmodErr := os.Chmod(o.path, mode|0o200); chmodErr == nil {
-				err = os.WriteFile(o.path, o.buf, 0o644)
-				_ = os.Chmod(o.path, mode)
-			}
-		}
+		err = withOwnerWrite(o.path, err, func() error { return os.WriteFile(o.path, o.buf, 0o644) })
 	}
 	if err != nil {
 		raiseOpenErrno(err, o.path)
@@ -3110,10 +3104,17 @@ func ioClosedRealIO(o *IOObj) {
 // does: an Integer or #to_int value narrowed to the off_t (a long long) the
 // position is stored in, raising RangeError for a Bignum too large to fit.
 func (vm *VM) ioOfftArg(v object.Value) int {
+	return clampInt(vm.ioOfftArg64(v))
+}
+
+// ioOfftArg64 is ioOfftArg without the narrowing to int: an off_t is 64 bits on
+// every platform MRI builds for, and a file offset passed to the OS must not be
+// clamped to 2**31-1 on a 32-bit target (#973).
+func (vm *VM) ioOfftArg64(v object.Value) int64 {
 	if _, ok := v.(*object.Bignum); ok {
 		raise("RangeError", "bignum too big to convert into 'long long'")
 	}
-	return clampInt(vm.toIntCoerce(v))
+	return int64(vm.toIntCoerce(v))
 }
 
 // ioCIntArg coerces an argument the way MRI's NUM2INT does for a value stored in

@@ -157,7 +157,7 @@ func (vm *VM) registerFileUtils() {
 	// every platform (chmod is largely a no-op on Windows, so the seam is the only
 	// way to cover the failure path there).
 	sdef("chmod", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		mode := os.FileMode(intArg(args[0]) & 0o7777)
+		mode := chmodMode(int64(intArg(args[0])))
 		for _, p := range pathsOf(args[1]) {
 			if err := fileChmod(p, mode); err != nil {
 				raise("Errno::ENOENT", "No such file or directory @ fileutils_chmod - %s", p)
@@ -197,7 +197,7 @@ func (vm *VM) registerFileUtils() {
 	// chmod_R recurses chmod into directories, as Puppet's report store driver does
 	// (FileUtils.chmod_R(0o750, dir)).
 	sdef("chmod_R", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		mode := os.FileMode(intArg(args[0]) & 0o7777)
+		mode := chmodMode(int64(intArg(args[0])))
 		for _, p := range pathsOf(args[1]) {
 			for _, q := range fuWalk(p) {
 				if err := fileChmod(q, mode); err != nil {
