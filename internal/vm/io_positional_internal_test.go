@@ -53,7 +53,17 @@ func TestIOPositionalPathAnswersOnlyForARegularFile(t *testing.T) {
 // restore.
 func TestWriteAtWithOwnerWriteKeepsTheRefusal(t *testing.T) {
 	refused := errors.New("the first refusal")
-	err := writeAtWithOwnerWrite(filepath.Join(t.TempDir(), "gone"), []byte("x"), 0, refused)
+	var err error
+	func() {
+		// A retry that goes on without a mode dereferences nothing; assert
+		// that, rather than let a crash be the only witness.
+		defer func() {
+			if r := recover(); r != nil {
+				t.Errorf("an unreadable mode crashed the retry: %v", r)
+			}
+		}()
+		err = writeAtWithOwnerWrite(filepath.Join(t.TempDir(), "gone"), []byte("x"), 0, refused)
+	}()
 	if !errors.Is(err, refused) {
 		t.Errorf("got %v, want the original refusal", err)
 	}
