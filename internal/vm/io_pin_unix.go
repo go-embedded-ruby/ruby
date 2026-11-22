@@ -26,8 +26,9 @@ func pinFile(path string) *os.File {
 	return nil
 }
 
-// dupFd is dup(2) with close-on-exec, the seam a test uses to make it fail.
-var dupFd = func(fd int) (int, error) { return unix.FcntlInt(uintptr(fd), unix.F_DUPFD_CLOEXEC, 0) }
+// dupFd is dup(2) with close-on-exec (dupCloexec, per platform), the seam a
+// test uses to make it fail.
+var dupFd = dupCloexec
 
 // dupPin gives a second stream its own descriptor on the pinned inode, so that
 // closing one stream leaves the other's pin in place. nil when f is nil, closed,
