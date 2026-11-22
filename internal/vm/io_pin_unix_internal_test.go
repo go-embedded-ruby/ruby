@@ -118,9 +118,18 @@ func TestDupPinGivesItsOwnDescriptor(t *testing.T) {
 	}
 	_ = dup.Close()
 
-	if dupPin(nil) != nil {
-		t.Error("dupPin(nil) gave a pin")
-	}
+	// A nil pin is refused by SyscallConn's error, and gives no pin rather than
+	// a crash further in.
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Errorf("dupPin(nil) panicked: %v", r)
+			}
+		}()
+		if dupPin(nil) != nil {
+			t.Error("dupPin(nil) gave a pin")
+		}
+	}()
 	if dupPin(pin) != nil {
 		t.Error("dupPin of a closed pin gave a pin")
 	}
