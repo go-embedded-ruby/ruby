@@ -147,9 +147,13 @@ func (vm *VM) registerSpawn() {
 		} else if n > avail {
 			n = avail
 		}
+		n = o.partialLimit(n)
+		wasAt := o.atDescriptor() // io_getpartial reads the descriptor when rbuf is empty (#974)
 		data := o.buf[o.pos : o.pos+n]
 		o.pos += n
-		return ioReadResult(data, buf)
+		v := ioReadResult(data, buf) // copies data before readThrough compacts buf
+		o.readThrough(wasAt)
+		return v
 	})
 
 	// readpartial(maxlen, outbuf = nil): a length-limited read that, unlike
@@ -193,9 +197,13 @@ func (vm *VM) registerSpawn() {
 		if n > avail {
 			n = avail
 		}
+		n = o.partialLimit(n)
+		wasAt := o.atDescriptor() // io_getpartial reads the descriptor when rbuf is empty (#974)
 		data := o.buf[o.pos : o.pos+n]
 		o.pos += n
-		return ioReadResult(data, buf)
+		v := ioReadResult(data, buf) // copies data before readThrough compacts buf
+		o.readThrough(wasAt)
+		return v
 	})
 
 	// IO#reopen and IO#fcntl live in io_descriptors.go, beside the rest of the

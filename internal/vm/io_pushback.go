@@ -28,11 +28,22 @@ package vm
 //     way, as rb_io_tell's "pos -= fptr->rbuf.len" does.
 //
 // L is negative when more bytes were pushed back than had been read. lseek
-// then fails and the descriptor stays where the read-ahead left it, which is
-// where a following write lands: 0 when nothing had been read, and otherwise
-// end-of-file — MRI reads a file of up to 8192 bytes whole, and a larger one
-// refuses that much pushback with "ungetbyte failed" (io_ungetbyte's capacity
-// check), which this model does not reproduce.
+// then fails and the descriptor stays where it was, which is where a following
+// write lands. Where it was depends on how the bytes were read:
+//
+//   - a buffered read (getc, gets, getbyte, readchar, ...) fills rbuf ahead of
+//     the cursor, and MRI reads a file of up to 8192 bytes whole: the
+//     descriptor is at end-of-file. A larger file refuses that much pushback
+//     with "ungetbyte failed" (io_ungetbyte's capacity check), which this
+//     model does not reproduce;
+//   - IO#read and #readpartial on an empty rbuf read straight into the string
+//     (io_bufread, io_getpartial), and a successful or discarding io_unread
+//     empties rbuf: the descriptor is at the cursor, and stays there.
+//
+// fdAt is that second case: the offset the descriptor is at while rbuf holds
+// no file bytes. Every operation that empties rbuf sets it to the cursor; a
+// buffered read moves the cursor past it, and then the descriptor is at
+// end-of-file.
 //
 // Only file streams are tracked. StringIO#ungetc writes into its string
 // (strio_unget_bytes) and a pipe cannot seek (FMODE_DUPLEX makes io_unread a
@@ -82,6 +93,9 @@ func (o *IOObj) pushbackUnread() int {
 func (o *IOObj) unreadPushback(discard bool) {
 	u := o.pushbackUnread()
 	if u == 0 {
+		if discard {
+			o.fdAt = o.pos // rbuf emptied: the descriptor is at the cursor
+		}
 		return
 	}
 	logical := o.pos - u
@@ -93,9 +107,36 @@ func (o *IOObj) unreadPushback(discard bool) {
 	switch {
 	case logical >= 0:
 		o.pos = logical
-	case o.pos > 0:
+	case o.pos != o.fdAt:
 		o.pos = len(o.buf) // the read-ahead reached end-of-file
 	}
+	o.fdAt = o.pos
+}
+
+// atDescriptor reports whether rbuf is empty: no pushback, and no file bytes
+// read ahead of the cursor. Only then do IO#read and #readpartial go straight
+// to the descriptor; with anything buffered, io_bufread takes it and refills
+// with io_fillbuf, a buffered read-ahead.
+func (o *IOObj) atDescriptor() bool {
+	return o.pushbackUnread() == 0 && o.pos == o.fdAt
+}
+
+// readThrough follows a read that went straight to the descriptor (wasAt):
+// rbuf is still empty and the descriptor is at the cursor.
+func (o *IOObj) readThrough(wasAt bool) {
+	if wasAt {
+		o.compactPushback()
+		o.fdAt = o.pos
+	}
+}
+
+// partialLimit is io_getpartial's bound: with pushback in rbuf, #readpartial
+// and #read_nonblock return only what is buffered, never reading on past it.
+func (o *IOObj) partialLimit(n int) int {
+	if u := o.pushbackUnread(); u > 0 {
+		return min(n, u)
+	}
+	return n
 }
 
 // tellPos is rb_io_tell: the logical position, which is negative when more

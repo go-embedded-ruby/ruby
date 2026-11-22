@@ -147,6 +147,9 @@ type IOObj struct {
 	// ungetLo/ungetHi bound the bytes #ungetc/#ungetbyte spliced into buf on a
 	// file stream, which are not the file's (io_pushback.go). Empty when equal.
 	ungetLo, ungetHi int
+	// fdAt is where MRI's descriptor is while its read buffer holds no file
+	// bytes; a failed io_unread leaves the cursor there (io_pushback.go).
+	fdAt int
 }
 
 // pipeBuf is the shared byte channel behind an IO.pipe reader/writer pair. Each
@@ -222,6 +225,7 @@ func (o *IOObj) writeBytes(p []byte) int {
 		}
 		copy(o.buf[o.pos:], p)
 		o.pos += len(p)
+		o.fdAt = o.pos // a write leaves rbuf empty and the descriptor past it
 		o.syncStr()
 		if o.path != "" {
 			o.wbufDirty = true // bytes accepted but not on disk: MRI's fptr->wbuf.len
@@ -668,6 +672,12 @@ func (vm *VM) registerIO() {
 			raise("IOError", "closed stream")
 		}
 		ioFlush(o)
+		if o.writable {
+			// rb_file_size: flush_before_seek on a writable stream, whose
+			// io_unread drops what #ungetc pushed back (#974). A read-only
+			// stream keeps it, and its buffer answers without it below.
+			o.unreadPushback(true)
+		}
 		if st, err := os.Stat(o.path); err == nil {
 			return object.IntValue(st.Size())
 		}
@@ -2087,7 +2097,7 @@ func defStringIORead(cls *RClass) {
 			raise("Errno::EINVAL", "Invalid argument")
 		}
 		o.unreadPushback(true) // io_seek → flush_before_seek → io_unread (#974)
-		o.pos = n
+		o.pos, o.fdAt = n, n
 		return args[0]
 	})
 	cls.define("seek", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
@@ -2123,7 +2133,7 @@ func defStringIORead(cls *RClass) {
 		if newPos < 0 {
 			raise("Errno::EINVAL", "Invalid argument")
 		}
-		o.pos = newPos
+		o.pos, o.fdAt = newPos, newPos
 		return object.IntValue(0)
 	})
 	cls.define("rewind", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -2131,6 +2141,7 @@ func defStringIORead(cls *RClass) {
 		ioClosedRealIO(o)      // real IO/File raises on a closed stream; StringIO tolerates it
 		o.unreadPushback(true) // io_seek(fptr, 0, 0) → io_unread (#974)
 		o.pos, o.lineno = 0, 0 // #rewind resets both the position and the line number
+		o.fdAt = 0
 		return object.IntValue(0)
 	})
 	cls.define("truncate", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
@@ -2215,15 +2226,20 @@ func defStringIORead(cls *RClass) {
 			if o.pos >= len(o.buf) {
 				return result(nil, n > 0) // a length read at EOF is nil; a 0-length read is ""
 			}
+			wasAt := o.atDescriptor() // io_bufread: an empty rbuf is bypassed
 			end := min(o.pos+n, len(o.buf))
 			data := o.buf[o.pos:end]
 			o.pos = end
-			return result(data, false)
+			v := result(data, false) // copies data before readThrough compacts buf
+			o.readThrough(wasAt)
+			return v
 		}
 		start := min(o.pos, len(o.buf)) // pos= may have moved past the end
 		data := o.buf[start:]
 		o.pos = len(o.buf)
-		return result(data, false)
+		v := result(data, false)
+		o.readThrough(true) // read_all drains rbuf and reads the rest directly
+		return v
 	})
 	// readpartial(maxlen, out = nil): read up to maxlen bytes, blocking only until
 	// some are available. On the in-memory buffer that is the leading maxlen bytes;

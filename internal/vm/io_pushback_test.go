@@ -53,6 +53,26 @@ func TestUngetcOnAFileIsNotTheFiles(t *testing.T) {
 			`sysread for buffered IO"0123456789\nabc\n"`},
 		{"sysseek refuses buffered data", `f.getc; f.ungetc("Z"); begin; f.sysseek(0); rescue IOError => e; print e.message; end`,
 			`sysseek for buffered IO"0123456789\nabc\n"`},
+		// A negative position after a direct read: io_bufread / io_getpartial
+		// read straight into the string when rbuf is empty, so when io_unread's
+		// lseek fails the descriptor is at the cursor, not at end-of-file.
+		{"read(n) leaves the descriptor at the cursor", `f.read(1); f.ungetc("XYZ"); f.write("Q"); print f.pos`,
+			`2"0Q23456789\nabc\n"`},
+		{"readpartial too", `f.readpartial(2); f.ungetc("XYZ"); f.write("Q"); print f.pos`, `3"01Q3456789\nabc\n"`},
+		{"read_nonblock too", `f.read_nonblock(1); f.ungetc("XYZ"); f.flush; print f.pos, f.read(2).inspect`,
+			`1"12""0123456789\nabc\n"`},
+		{"a seek empties rbuf", `f.seek(1); f.ungetc("XYZ"); f.write("Q")`, `"0Q23456789\nabc\n"`},
+		{"pos= empties rbuf", `f.pos = 2; f.ungetc("WXYZ"); f.write("Q")`, `"01Q3456789\nabc\n"`},
+		{"a write empties rbuf", `f.write("Q"); f.ungetc("XYZ"); f.write("R")`, `"QR23456789\nabc\n"`},
+		{"a read past the pushback refills ahead to end-of-file",
+			`f.read(1); f.ungetc("XY"); f.read(4); f.ungetc("STUVWXYZ"); f.write("Q"); print f.pos`,
+			`16"0123456789\nabc\nQ"`},
+		{"readpartial stops at the pushback", `f.read(1); f.ungetc("XY"); print f.readpartial(5)`, `XY"0123456789\nabc\n"`},
+		{"read_nonblock stops at the pushback", `f.read(1); f.ungetc("XY"); print f.read_nonblock(5)`, `XY"0123456789\nabc\n"`},
+		{"size drops the pushback of a writable stream", `f.read(1); f.ungetc("XYZ"); print [f.size, f.pos, f.read(2)].inspect`,
+			`[15, 1, "12"]"0123456789\nabc\n"`},
+		{"a pending write is flushed without the pushback", `f.write("AB"); f.getc; f.ungetc("ZY"); f.flush; print f.pos`,
+			`1"AB23456789\nabc\n"`},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
