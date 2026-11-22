@@ -62,7 +62,7 @@ func TestWriteAtWithOwnerWriteKeepsTheRefusal(t *testing.T) {
 				t.Errorf("an unreadable mode crashed the retry: %v", r)
 			}
 		}()
-		err = writeAtWithOwnerWrite(filepath.Join(t.TempDir(), "gone"), []byte("x"), 0, refused)
+		err = writeAtWithOwnerWrite(filepath.Join(t.TempDir(), "gone"), nil, []byte("x"), 0, refused)
 	}()
 	if !errors.Is(err, refused) {
 		t.Errorf("got %v, want the original refusal", err)
@@ -76,7 +76,7 @@ func TestWriteAtPathReportsAFailedWrite(t *testing.T) {
 	if err := os.WriteFile(file, []byte("0123"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeAtPath(file, []byte("x"), -1); err == nil {
+	if err := writeAtPath(file, nil, []byte("x"), -1); err == nil {
 		t.Error("a write at offset -1 reported success")
 	}
 }

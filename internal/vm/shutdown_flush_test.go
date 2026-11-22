@@ -275,8 +275,8 @@ func TestATeardownFlushNeitherRaisesNorSkipsTheRest(t *testing.T) {
 	good := filepath.Join(dir, "good.txt")
 	vm := New(os.Stdout)
 	vm.openFiles = []*IOObj{
-		{isStr: true, writable: true, wbufDirty: true, path: filepath.Join(dir, "no-such-dir", "bad.txt"), buf: []byte("lost")},
-		{isStr: true, writable: true, wbufDirty: true, path: good, buf: []byte("kept")},
+		{isStr: true, writable: true, dirty: []ioSpan{{0, 4}}, path: filepath.Join(dir, "no-such-dir", "bad.txt"), buf: []byte("lost")},
+		{isStr: true, writable: true, dirty: []ioSpan{{0, 4}}, path: good, buf: []byte("kept")},
 	}
 	if r := func() (r any) {
 		defer func() { r = recover() }()

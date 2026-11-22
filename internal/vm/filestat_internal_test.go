@@ -441,22 +441,22 @@ func TestStatGroupsDefault(t *testing.T) {
 // TestIOFlushError covers ioFlush's write-failure branch: flushing a writable
 // file stream whose path is an unwritable directory raises Errno::ENOENT.
 func TestIOFlushError(t *testing.T) {
-	o := &IOObj{isStr: true, writable: true, wbufDirty: true, path: "/no/such/dir/x.txt", buf: []byte("data")}
+	o := &IOObj{isStr: true, writable: true, dirty: []ioSpan{{0, 4}}, path: "/no/such/dir/x.txt", buf: []byte("data")}
 	if got := catchRaise(func() { ioFlush(o) }); got != "Errno::ENOENT" {
 		t.Errorf("ioFlush error: got %q want Errno::ENOENT", got)
 	}
 	// Each of these is a no-op: no write is attempted, so none raises. Every row
-	// is pending (wbufDirty) except the last, so each one is refused by its own
-	// clause of the guard alone. The unwritable path makes an attempted write
+	// is pending (a dirty range) except the last, so each one is refused by its
+	// own clause of the guard alone. The unwritable path makes an attempted write
 	// visible as Errno::ENOENT rather than as a file appearing somewhere.
 	noops := []struct {
 		name string
 		o    *IOObj
 	}{
-		{"not writable", &IOObj{isStr: true, writable: false, wbufDirty: true, path: "/no/such/dir/x.txt"}},
-		{"no path", &IOObj{isStr: true, writable: true, wbufDirty: true, path: ""}},
+		{"not writable", &IOObj{isStr: true, writable: false, dirty: []ioSpan{{0, 4}}, path: "/no/such/dir/x.txt"}},
+		{"no path", &IOObj{isStr: true, writable: true, dirty: []ioSpan{{0, 4}}, path: ""}},
 		// #969: nothing pending, so even a writable stream with a path does not
-		// write. The same stream with wbufDirty set raised above.
+		// write. The same stream with a dirty range raised above.
 		{"nothing pending", &IOObj{isStr: true, writable: true, path: "/no/such/dir/x.txt", buf: []byte("data")}},
 	}
 	for _, c := range noops {

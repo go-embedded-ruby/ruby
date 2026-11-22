@@ -179,7 +179,7 @@ func defIOReadExtra(cls *RClass) {
 		}
 		str := vm.asWriteString(args[0])
 		ioCheckOpen(o)
-		if o.wbufDirty {
+		if o.pending() {
 			vm.rbWarn("syswrite for buffered IO")
 		}
 		n := o.writeBytes(ioShortWrite(o, str.Bytes()))
@@ -223,11 +223,13 @@ func defIOReadExtra(cls *RClass) {
 			}
 			o.rdClosed, o.closed = true, true
 			o.pipeEndClosed()
+			o.unpin()
 			return object.NilV
 		}
 		o.rdClosed = true
 		if o.wrClosed { // both halves shut ⇒ the stream is fully closed
 			o.closed = true
+			o.unpin()
 		}
 		return object.NilV
 	})
@@ -246,12 +248,14 @@ func defIOReadExtra(cls *RClass) {
 			ioFlush(o)
 			o.wrClosed, o.closed = true, true
 			o.pipeEndClosed()
+			o.unpin()
 			return object.NilV
 		}
 		ioFlush(o)
 		o.wrClosed = true
 		if o.rdClosed {
 			o.closed = true
+			o.unpin()
 		}
 		return object.NilV
 	})
@@ -337,7 +341,7 @@ func defIOSeekable(cls *RClass) {
 		// there since this stream was opened. rb_io_pread flushes this stream's
 		// own pending writes first, and so does this, so they are seen too.
 		if p, ok := ioPositionalPath(o); ok {
-			if o.wbufDirty {
+			if o.pending() {
 				ioFlush(o)
 			}
 			data, err := preadFile(p, n, off)
@@ -377,9 +381,9 @@ func defIOSeekable(cls *RClass) {
 		// #949: MRI's rb_io_pwrite is pwrite(2), so the bytes are on disk the
 		// moment it returns, and ONLY those bytes: the stream's other pending
 		// writes stay pending. pwriteFile does exactly that, so on success
-		// nothing new is waiting and wbufDirty is left as it was.
+		// nothing new is waiting and the pending ranges are left as they were.
 		if p, ok := ioPositionalPath(o); ok {
-			err := pwriteFile(p, data, off)
+			err := pwriteFile(p, o.ident, data, off)
 			if err == nil {
 				o.mirrorPwrite(data, off) // best effort: the file has the bytes
 				return object.IntValue(int64(len(data)))
@@ -388,8 +392,9 @@ func defIOSeekable(cls *RClass) {
 			// the largest offset, ENOSPC, EIO. MRI raises that errno; it used to
 			// be swallowed here and the bytes put in the buffer instead. A
 			// refusal for permission is the one kept as before: the owner-write
-			// retry failed, so the buffer below is the stream's grant.
-			if !errors.Is(err, fs.ErrPermission) {
+			// retry failed, so the buffer below is the stream's grant. A path
+			// replaced since the check above goes to the buffer too (#974).
+			if !errors.Is(err, fs.ErrPermission) && !errors.Is(err, errNotTheOpenedFile) {
 				raisePwriteErr(err, o.path)
 			}
 		}
@@ -399,7 +404,7 @@ func defIOSeekable(cls *RClass) {
 		if !o.mirrorPwrite(data, off) {
 			raise("Errno::EFBIG", "File too large @ rb_io_pwrite - %s", o.path)
 		}
-		o.wbufDirty = true
+		o.markDirty(int(off), int(off)+len(data))
 		return object.IntValue(int64(len(data)))
 	})
 	cls.define("sysseek", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
@@ -726,7 +731,11 @@ func ioReopenIO(vm *VM, o, other *IOObj) object.Value {
 	o.isStr, o.w, o.pipe, o.isWriteEnd = other.isStr, other.w, other.pipe, other.isWriteEnd
 	o.pipeSynced, o.reopened = other.pipeSynced, other.reopened
 	// "if (RTEST(orig->pathv)) fptr->pathv = orig->pathv; else … fptr->pathv = Qnil"
-	o.path = other.path
+	o.path, o.ident = other.path, other.ident
+	o.unpin()
+	// Its own pin, so either stream may close first.
+	o.pin = dupPin(other.pin)
+
 	o.cls = other.cls // RBASIC_SET_CLASS(io, rb_obj_class(nfile))
 	return o
 }
@@ -777,7 +786,11 @@ func ioReopenPath(vm *VM, o *IOObj, pos []object.Value, opts *object.Hash) objec
 		ioFlush(o)
 	}
 	fresh := openFileIO(o.cls, name, modeBase(mode))
-	o.buf, o.pos, o.path = fresh.buf, fresh.pos, fresh.path
+	o.buf, o.pos, o.path, o.ident = fresh.buf, fresh.pos, fresh.path, fresh.ident
+	o.unpin()
+	// The stream takes the new file's pin over.
+	o.pin, fresh.pin = fresh.pin, nil
+
 	o.ungetLo, o.ungetHi = 0, 0 // the read buffer, pushback included, is dropped (#974)
 	if keepHalves {
 		o.writable, o.appendMode, o.openMode = !o.wrClosed, false, ""
