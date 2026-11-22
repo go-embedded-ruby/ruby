@@ -143,6 +143,10 @@ type IOObj struct {
 	// holds its whole output; bytes written to the stream are kept in popen.stdin,
 	// out of the buffer being read, and cannot reach a child that is already gone.
 	popen *popenProc
+
+	// ungetLo/ungetHi bound the bytes #ungetc/#ungetbyte spliced into buf on a
+	// file stream, which are not the file's (io_pushback.go). Empty when equal.
+	ungetLo, ungetHi int
 }
 
 // pipeBuf is the shared byte channel behind an IO.pipe reader/writer pair. Each
@@ -209,7 +213,8 @@ func (o *IOObj) writeBytes(p []byte) int {
 		return len(p)
 	}
 	if o.isStr {
-		if o.appendMode { // append mode: every write lands at end, ignoring position
+		o.unreadPushback(true) // rb_io_check_writable → io_unread (#974)
+		if o.appendMode {      // append mode: every write lands at end, ignoring position
 			o.pos = len(o.buf)
 		}
 		if end := o.pos + len(p); end > len(o.buf) {
@@ -666,7 +671,7 @@ func (vm *VM) registerIO() {
 		if st, err := os.Stat(o.path); err == nil {
 			return object.IntValue(st.Size())
 		}
-		return object.IntValue(int64(len(o.buf)))
+		return object.IntValue(int64(len(o.diskBytes())))
 	})
 	cFile.define("flock", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return vm.fileFlock(self.(*IOObj), clampInt(vm.toIntCoerce(args[0])))
@@ -1285,12 +1290,13 @@ func ioFlush(o *IOObj) {
 		return
 	}
 	o.wbufDirty = false
-	err := os.WriteFile(o.path, o.buf, 0o644)
+	content := o.diskBytes() // never the bytes #ungetc pushed back (#974)
+	err := os.WriteFile(o.path, content, 0o644)
 	if err == nil {
 		return
 	}
 	if errors.Is(err, fs.ErrPermission) {
-		err = withOwnerWrite(o.path, err, func() error { return os.WriteFile(o.path, o.buf, 0o644) })
+		err = withOwnerWrite(o.path, err, func() error { return os.WriteFile(o.path, content, 0o644) })
 	}
 	if err != nil {
 		raiseOpenErrno(err, o.path)
@@ -1703,6 +1709,7 @@ func defIOWrite(cls *RClass) {
 		o := self.(*IOObj)
 		ioClosedRealIO(o) // MRI: IO#flush raises on a closed stream; StringIO#flush does not
 		ioFlush(o)
+		o.unreadPushback(true) // rb_io_flush_raw: io_unread when readable (#974)
 		return self
 	})
 	cls.define("fsync", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -2064,7 +2071,9 @@ func defStringIORead(cls *RClass) {
 		if o.closed && !ioIsStringIO(o) {
 			raise("IOError", "closed stream")
 		}
-		return object.IntValue(int64(o.pos))
+		// rb_io_tell: the descriptor's offset minus what the read buffer still
+		// holds, pushback included — negative when more was pushed back than read.
+		return object.IntValue(int64(o.tellPos()))
 	})
 	// #tell is a true alias of #pos, as in MRI.
 	defineBuiltinSecondName(cls, "tell", "pos")
@@ -2077,6 +2086,7 @@ func defStringIORead(cls *RClass) {
 		if n < 0 {
 			raise("Errno::EINVAL", "Invalid argument")
 		}
+		o.unreadPushback(true) // io_seek → flush_before_seek → io_unread (#974)
 		o.pos = n
 		return args[0]
 	})
@@ -2096,6 +2106,9 @@ func defStringIORead(cls *RClass) {
 				whence = vm.seekWhence(args[1])
 			}
 		}
+		// io_seek → flush_before_seek → io_unread: the pushback is dropped and
+		// SEEK_CUR counts from the logical position (#974).
+		o.unreadPushback(true)
 		var newPos int
 		switch whence {
 		case 1: // SEEK_CUR
@@ -2116,6 +2129,7 @@ func defStringIORead(cls *RClass) {
 	cls.define("rewind", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
 		ioClosedRealIO(o)      // real IO/File raises on a closed stream; StringIO tolerates it
+		o.unreadPushback(true) // io_seek(fptr, 0, 0) → io_unread (#974)
 		o.pos, o.lineno = 0, 0 // #rewind resets both the position and the line number
 		return object.IntValue(0)
 	})
@@ -2133,6 +2147,7 @@ func defStringIORead(cls *RClass) {
 		if n < 0 {
 			raise("Errno::EINVAL", "Invalid argument")
 		}
+		o.unreadPushback(true) // rb_io_check_writable → io_unread (#974)
 		if n < len(o.buf) {
 			o.buf = o.buf[:n]
 		} else if n > len(o.buf) {
