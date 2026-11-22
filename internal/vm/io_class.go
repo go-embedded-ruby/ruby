@@ -259,7 +259,7 @@ func (vm *VM) ioAdoptFd(cls *RClass, fd int, pos []object.Value, opts *object.Ha
 
 func (vm *VM) ioAdoptDescriptor(o, src *IOObj, pos []object.Value, opts *object.Hash) {
 	ms := vm.ioResolveModeEnc(pos, opts)
-	o.isStr, o.buf, o.path = true, src.buf, src.path
+	o.isStr, o.buf, o.path, o.ident = true, src.buf, src.path, src.ident
 	o.binmode, o.noAutoclose = ms.binmode, ms.noAutoclose
 	o.extEnc, o.intEnc, o.newline = ms.extEnc, ms.intEnc, ms.newline
 	if ms.explicit {

@@ -40,7 +40,10 @@ func ioPositionalPath(o *IOObj) (string, bool) {
 		return "", false
 	}
 	st, err := os.Stat(o.path) // "" (a StringIO) does not resolve either
-	if err != nil || !st.Mode().IsRegular() {
+	// A path that now names another file is not reachable either (#974): MRI's
+	// descriptor still reaches the file it opened, whose bytes are the
+	// buffer's.
+	if err != nil || !st.Mode().IsRegular() || !o.namesOpenedFile(st) {
 		return "", false
 	}
 	return o.path, true
@@ -48,11 +51,12 @@ func ioPositionalPath(o *IOObj) (string, bool) {
 
 // pwriteFile writes data at off in the file at path and touches nothing else:
 // no other byte of the file, and nothing of the stream that opened it. A write
-// past the end leaves a hole, as pwrite(2) does.
-func pwriteFile(path string, data []byte, off int64) error {
-	err := writeAtPath(path, data, off)
+// past the end leaves a hole, as pwrite(2) does. ident is the file the stream
+// opened, or nil (io_identity.go).
+func pwriteFile(path string, ident os.FileInfo, data []byte, off int64) error {
+	err := writeAtPath(path, ident, data, off)
 	if errors.Is(err, fs.ErrPermission) {
-		err = writeAtWithOwnerWrite(path, data, off, err)
+		err = writeAtWithOwnerWrite(path, ident, data, off, err)
 	}
 	return err
 }
@@ -61,12 +65,12 @@ func pwriteFile(path string, data []byte, off int64) error {
 // owner-write bit put back for the length of the write (withOwnerWrite): the
 // stream already holds the descriptor's grant (`File.new(path, "w", 0444)`
 // writes through), and reopening by path must not take it away.
-func writeAtWithOwnerWrite(path string, data []byte, off int64, refused error) error {
-	return withOwnerWrite(path, refused, func() error { return writeAtPath(path, data, off) })
+func writeAtWithOwnerWrite(path string, ident os.FileInfo, data []byte, off int64, refused error) error {
+	return withOwnerWrite(path, ident, refused, func() error { return writeAtPath(path, ident, data, off) })
 }
 
-func writeAtPath(path string, data []byte, off int64) error {
-	f, err := os.OpenFile(path, os.O_WRONLY, 0)
+func writeAtPath(path string, ident os.FileInfo, data []byte, off int64) error {
+	f, err := openOpenedFile(path, ident, os.O_WRONLY)
 	if err != nil {
 		return err
 	}

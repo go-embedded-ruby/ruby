@@ -74,13 +74,11 @@ end
 // file on disk is that size at once, which is what File.size and a second
 // stream opened on the same path see straight afterwards. MRI 4.0.5 prints 3.
 //
-// The second case documents a DIVERGENCE rather than asserting a contract.
-// MRI's rb_io_truncate is ftruncate(2) on the descriptor, so it succeeds after
-// the path is unlinked; rbgo's IOObj is buffer-backed with a synthetic fd, so
-// it truncates by path and answers ENOENT. That is the same root cause as
-// File#stat on an unlinked file, and it is tracked in issue #635 — recorded
-// here so the branch is exercised and the difference is visible at the point
-// where someone would otherwise read rbgo's answer as correct.
+// The second case: MRI's rb_io_truncate is ftruncate(2) on the descriptor, so
+// it succeeds after the path is unlinked. rbgo's IOObj is buffer-backed with a
+// synthetic fd and truncates by path; it answered ENOENT (#635) until it
+// learned the file it opened (#974), and now leaves a path that no longer
+// names that file alone and succeeds, as MRI does.
 func TestWave28TruncateFileOnDisk(t *testing.T) {
 	dir := t.TempDir()
 	src := `p1 = ` + rq(dir+"/sz.txt") + `
@@ -100,8 +98,10 @@ rescue => e
   p e.class.to_s
 end
 `
-	// MRI prints 3 then :ok. rbgo prints 3 then the errno, per #635.
-	if got, want := runFS(t, src), "3\n\"Errno::ENOENT\"\n"; got != want {
+	// MRI prints 3 then :ok: its ftruncate reaches the unlinked inode. rbgo
+	// raised Errno::ENOENT here (#635) until a stream recorded the file it
+	// opened (#974): the path that no longer names it is now left alone.
+	if got, want := runFS(t, src), "3\n:ok\n"; got != want {
 		t.Errorf("truncate on disk: got %q want %q", got, want)
 	}
 }

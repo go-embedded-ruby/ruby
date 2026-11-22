@@ -45,15 +45,23 @@ func chmodMode(m int64) fs.FileMode {
 // darwin keeps sticky through a write and loses setuid and setgid, which is
 // the kernel clearing them on a write, and restoring the mode read BEFORE the
 // write would put a setuid bit back on content that was just changed.
-func withOwnerWrite(path string, refused error, write func() error) error {
+//
+// ident is the file the stream opened (io_identity.go), or nil. The mode is
+// changed only while path still names it: a chmod follows a symlink, and one
+// put in the file's place must not lend its target the owner-write bit. When
+// path names another file, nothing is done and errNotTheOpenedFile returned.
+func withOwnerWrite(path string, ident os.FileInfo, refused error, write func() error) error {
 	st, err := os.Stat(path)
 	if err != nil {
 		return refused
 	}
+	if ident != nil && !os.SameFile(ident, st) {
+		return errNotTheOpenedFile
+	}
 	ownerWrite := st.Mode() & 0o200
 	_ = os.Chmod(path, st.Mode()&chmodBits|0o200)
 	werr := write()
-	if after, err := os.Stat(path); err == nil {
+	if after, err := os.Stat(path); err == nil && os.SameFile(st, after) {
 		_ = os.Chmod(path, after.Mode()&chmodBits&^0o200|ownerWrite)
 	}
 	return werr

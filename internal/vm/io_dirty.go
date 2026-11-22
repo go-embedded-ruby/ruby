@@ -69,16 +69,20 @@ func (o *IOObj) clipDirty(n int) {
 }
 
 // writeDirty puts the pending spans of content on disk, at their offsets, or
-// appended for an append-mode stream. The file is created if it is missing,
-// which is what os.WriteFile did here before: the stream holds no descriptor
-// to the unlinked inode MRI would still write to, and dropping the bytes would
-// be worse than putting them back under the path.
+// appended for an append-mode stream. They are written only into the file the
+// stream opened (io_identity.go): when the path no longer names it, MRI's
+// bytes go to the orphaned inode and nothing at the path changes, so nothing
+// is written and the bytes stay in the buffer. Only a stream that recorded no
+// file creates one at a missing path, as it did before.
 func (o *IOObj) writeDirty(content []byte) error {
-	flags := os.O_WRONLY | os.O_CREATE
+	flags := os.O_WRONLY
+	if o.ident == nil {
+		flags |= os.O_CREATE
+	}
 	if o.appendMode {
 		flags |= os.O_APPEND
 	}
-	f, err := os.OpenFile(o.path, flags, 0o644)
+	f, err := openOpenedFile(o.path, o.ident, flags) // errNotTheOpenedFile: ioFlush writes nothing
 	if err != nil {
 		return err
 	}

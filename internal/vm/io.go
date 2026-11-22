@@ -152,6 +152,9 @@ type IOObj struct {
 	// fdAt is where MRI's descriptor is while its read buffer holds no file
 	// bytes; a failed io_unread leaves the cursor there (io_pushback.go).
 	fdAt int
+	// ident is the regular file this stream opened, which a write back by
+	// path must still find there (io_identity.go). Nil when there is none.
+	ident os.FileInfo
 }
 
 // pipeBuf is the shared byte channel behind an IO.pipe reader/writer pair. Each
@@ -680,7 +683,9 @@ func (vm *VM) registerIO() {
 			// stream keeps it, and its buffer answers without it below.
 			o.unreadPushback(true)
 		}
-		if st, err := os.Stat(o.path); err == nil {
+		// fstat(2) of the file the stream opened: the path's answer only while
+		// it still names that file (io_identity.go), the buffer's otherwise.
+		if st, err := os.Stat(o.path); err == nil && o.namesOpenedFile(st) {
 			return object.IntValue(st.Size())
 		}
 		return object.IntValue(int64(len(o.diskBytes())))
@@ -1030,6 +1035,7 @@ func openFileSpec(cls *RClass, p string, ms *ioModeSpec, perm int64, permGiven b
 	o.rdClosed = !ms.readable
 	o.wrClosed = !ms.writable
 	o.appendMode = ms.appendMode
+	o.rememberFile()
 	return o
 }
 
@@ -1266,6 +1272,7 @@ func openFileIO(cls *RClass, p, mode string) *IOObj {
 	case 'r':
 		o.wrClosed = !plus
 	}
+	o.rememberFile()
 	return o
 }
 
@@ -1310,9 +1317,11 @@ func ioFlush(o *IOObj) {
 		return
 	}
 	if errors.Is(err, fs.ErrPermission) {
-		err = withOwnerWrite(o.path, err, func() error { return o.writeDirty(content) })
+		err = withOwnerWrite(o.path, o.ident, err, func() error { return o.writeDirty(content) })
 	}
-	if err != nil {
+	// A path that no longer names the opened file is left alone, and the bytes
+	// stay in the buffer: MRI's go to the orphaned inode (io_identity.go).
+	if err != nil && !errors.Is(err, errNotTheOpenedFile) {
 		raiseFlushErr(err, o.path)
 	}
 }
@@ -2174,7 +2183,7 @@ func defStringIORead(cls *RClass) {
 		// that size at once, not at the next flush, which is what File.size and a
 		// second stream opened on the same path see straight afterwards.
 		if o.path != "" && !ioIsStringIO(o) {
-			if err := os.Truncate(o.path, int64(n)); err != nil {
+			if err := o.truncateOpenedFile(int64(n)); err != nil {
 				raiseOpenErrno(err, o.path)
 			}
 		}

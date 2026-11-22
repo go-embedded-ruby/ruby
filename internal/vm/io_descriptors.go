@@ -379,7 +379,7 @@ func defIOSeekable(cls *RClass) {
 		// writes stay pending. pwriteFile does exactly that, so on success
 		// nothing new is waiting and the pending ranges are left as they were.
 		if p, ok := ioPositionalPath(o); ok {
-			err := pwriteFile(p, data, off)
+			err := pwriteFile(p, o.ident, data, off)
 			if err == nil {
 				o.mirrorPwrite(data, off) // best effort: the file has the bytes
 				return object.IntValue(int64(len(data)))
@@ -388,8 +388,9 @@ func defIOSeekable(cls *RClass) {
 			// the largest offset, ENOSPC, EIO. MRI raises that errno; it used to
 			// be swallowed here and the bytes put in the buffer instead. A
 			// refusal for permission is the one kept as before: the owner-write
-			// retry failed, so the buffer below is the stream's grant.
-			if !errors.Is(err, fs.ErrPermission) {
+			// retry failed, so the buffer below is the stream's grant. A path
+			// replaced since the check above goes to the buffer too (#974).
+			if !errors.Is(err, fs.ErrPermission) && !errors.Is(err, errNotTheOpenedFile) {
 				raisePwriteErr(err, o.path)
 			}
 		}
@@ -726,7 +727,7 @@ func ioReopenIO(vm *VM, o, other *IOObj) object.Value {
 	o.isStr, o.w, o.pipe, o.isWriteEnd = other.isStr, other.w, other.pipe, other.isWriteEnd
 	o.pipeSynced, o.reopened = other.pipeSynced, other.reopened
 	// "if (RTEST(orig->pathv)) fptr->pathv = orig->pathv; else … fptr->pathv = Qnil"
-	o.path = other.path
+	o.path, o.ident = other.path, other.ident
 	o.cls = other.cls // RBASIC_SET_CLASS(io, rb_obj_class(nfile))
 	return o
 }
@@ -777,7 +778,7 @@ func ioReopenPath(vm *VM, o *IOObj, pos []object.Value, opts *object.Hash) objec
 		ioFlush(o)
 	}
 	fresh := openFileIO(o.cls, name, modeBase(mode))
-	o.buf, o.pos, o.path = fresh.buf, fresh.pos, fresh.path
+	o.buf, o.pos, o.path, o.ident = fresh.buf, fresh.pos, fresh.path, fresh.ident
 	o.ungetLo, o.ungetHi = 0, 0 // the read buffer, pushback included, is dropped (#974)
 	if keepHalves {
 		o.writable, o.appendMode, o.openMode = !o.wrClosed, false, ""
