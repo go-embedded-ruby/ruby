@@ -140,6 +140,11 @@ func defIOReadExtra(cls *RClass) {
 			}
 			return ioReadResult(nil, nil)
 		}
+		// rb_io_sysread: READ_DATA_BUFFERED. Pushed-back bytes are buffered data
+		// the descriptor never had (#974).
+		if o.pushbackUnread() > 0 {
+			raise("IOError", "sysread for buffered IO")
+		}
 		if o.pos >= len(o.buf) {
 			// MRI empties the output buffer (io_set_read_length to 0) before
 			// signalling end-of-file.
@@ -345,12 +350,13 @@ func defIOSeekable(cls *RClass) {
 			// Unreadable by path (removed between the two calls, permission):
 			// the buffer below is what this stream last saw.
 		}
-		if off >= int64(len(o.buf)) {
+		content := o.diskBytes() // pread reads the file, never the pushback (#974)
+		if off >= int64(len(content)) {
 			raise("EOFError", "end of file reached")
 		}
 		// off+n is never formed: with n near MaxInt it overflowed into a slice
 		// bounds panic (#973). What is left past off bounds the read instead.
-		rest := o.buf[off:]
+		rest := content[off:]
 		return ioReadResult(rest[:min(n, len(rest))], buf)
 	})
 	cls.define("pwrite", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
@@ -365,7 +371,8 @@ func defIOSeekable(cls *RClass) {
 		if off < 0 {
 			raise("Errno::EINVAL", "Invalid argument - pwrite")
 		}
-		o.writable = true // a written File flushes its buffer back on flush/close
+		o.unreadPushback(true) // rb_io_check_writable → io_unread (#974)
+		o.writable = true      // a written File flushes its buffer back on flush/close
 		vm.trackOpenFile(o)
 		// #949: MRI's rb_io_pwrite is pwrite(2), so the bytes are on disk the
 		// moment it returns, and ONLY those bytes: the stream's other pending
@@ -406,6 +413,11 @@ func defIOSeekable(cls *RClass) {
 		whence := 0
 		if len(args) > 1 {
 			whence = vm.seekWhence(args[1]) // accepts :SET/:CUR/:END symbols
+		}
+		// rb_io_sysseek: READ_DATA_BUFFERED on a readable stream. Pushed-back
+		// bytes are buffered data the descriptor never had (#974).
+		if !o.rdClosed && o.pushbackUnread() > 0 {
+			raise("IOError", "sysseek for buffered IO")
 		}
 		switch whence {
 		case 1: // SEEK_CUR
@@ -471,6 +483,7 @@ func defIOSeekable(cls *RClass) {
 		if o.path != "" && !o.writable {
 			if b, err := os.ReadFile(o.path); err == nil {
 				o.buf = b
+				o.ungetLo, o.ungetHi = 0, 0 // fresh content: no pushback in it (#974)
 			}
 		}
 		enc := ioStripBOM(o)
@@ -517,16 +530,7 @@ func detectBOM(p []byte) (int, string) {
 // ioUnget inserts p immediately before the cursor (leaving the cursor on the
 // re-inserted bytes) so a following read returns them first — the pushback model
 // shared by ungetbyte and ungetc.
-func ioUnget(o *IOObj, p []byte) {
-	if len(p) == 0 {
-		return
-	}
-	out := make([]byte, 0, len(o.buf)+len(p))
-	out = append(out, o.buf[:o.pos]...)
-	out = append(out, p...)
-	out = append(out, o.buf[o.pos:]...)
-	o.buf = out
-}
+func ioUnget(o *IOObj, p []byte) { o.unget(p) }
 
 // ioReadResult returns data as a fresh String, or fills the caller's output
 // buffer String and returns it — the shared return convention of the length-taking
@@ -710,7 +714,12 @@ func ioReopenIO(vm *VM, o, other *IOObj) object.Value {
 		o.reopened = other
 		return o
 	}
-	o.buf, o.pos, o.lineno = other.buf, other.pos, other.lineno
+	// io_reopen reads the position with io_tell(orig), which drops orig's
+	// pushback when the position is valid; what is left of it is orig's read
+	// buffer, not file content, so the adopted copy is the file's (#974).
+	other.unreadPushback(false)
+	o.buf, o.pos, o.lineno = other.diskBytes(), other.pos, other.lineno
+	o.ungetLo, o.ungetHi = 0, 0
 	o.rdClosed, o.wrClosed, o.writable = other.rdClosed, other.wrClosed, other.writable
 	o.appendMode, o.openMode, o.binmode = other.appendMode, other.openMode, other.binmode
 	o.extEnc, o.intEnc = other.extEnc, other.intEnc
@@ -769,6 +778,7 @@ func ioReopenPath(vm *VM, o *IOObj, pos []object.Value, opts *object.Hash) objec
 	}
 	fresh := openFileIO(o.cls, name, modeBase(mode))
 	o.buf, o.pos, o.path = fresh.buf, fresh.pos, fresh.path
+	o.ungetLo, o.ungetHi = 0, 0 // the read buffer, pushback included, is dropped (#974)
 	if keepHalves {
 		o.writable, o.appendMode, o.openMode = !o.wrClosed, false, ""
 	} else {
