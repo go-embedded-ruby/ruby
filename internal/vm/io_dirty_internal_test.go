@@ -7,6 +7,7 @@ package vm
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -31,6 +32,34 @@ func TestAFlushThatCannotWriteRaises(t *testing.T) {
 	o := &IOObj{isStr: true, writable: true, dirty: []ioSpan{{0, 4}}, path: "/dev/full", buf: []byte("data")}
 	if got := catchRaise(func() { ioFlush(o) }); got != "Errno::ENOSPC" {
 		t.Errorf("ioFlush to /dev/full raised %q, want Errno::ENOSPC", got)
+	}
+}
+
+// TestIOFlushWritesOnlyAWritableFileWithPendingBytes: ioFlush's gate. A
+// read-only stream, a stream with no path, and one with nothing pending put
+// nothing on disk and raise nothing, whatever its buffer holds: a read-only
+// stream's buffer is a snapshot that another writer may have overtaken. Each
+// row would otherwise write "XXXX" over the file, or raise on the empty path.
+func TestIOFlushWritesOnlyAWritableFileWithPendingBytes(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "f")
+	cases := []struct {
+		name string
+		o    *IOObj
+	}{
+		{"read-only", &IOObj{isStr: true, dirty: []ioSpan{{0, 4}}, path: path, buf: []byte("XXXX")}},
+		{"no path", &IOObj{isStr: true, writable: true, dirty: []ioSpan{{0, 4}}, buf: []byte("XXXX")}},
+		{"nothing pending", &IOObj{isStr: true, writable: true, path: path, buf: []byte("XXXX")}},
+	}
+	for _, c := range cases {
+		if err := os.WriteFile(path, []byte("data"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if got := catchRaise(func() { ioFlush(c.o) }); got != "" {
+			t.Errorf("%s: ioFlush raised %q", c.name, got)
+		}
+		if got, _ := os.ReadFile(path); string(got) != "data" {
+			t.Errorf("%s: the file holds %q, want \"data\"", c.name, got)
+		}
 	}
 }
 
