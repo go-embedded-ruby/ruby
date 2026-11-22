@@ -11,6 +11,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"golang.org/x/sys/unix"
 )
 
 // TestRememberFilePinsTheOpenedInode: a regular file is pinned and its
@@ -81,6 +83,18 @@ func TestRememberFileOutsideARegularFile(t *testing.T) {
 	if n.pin != nil || n.ident == nil {
 		t.Errorf("a file no open accepts: pin=%v ident=%v, want the stat identity alone", n.pin, n.ident)
 	}
+	// A directory no open accepts reaches the stat fallback, which must not
+	// record it either.
+	shut := filepath.Join(dir, "shut")
+	if err := os.Mkdir(shut, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chmod(shut, 0o700) }()
+	s := &IOObj{path: shut}
+	s.rememberFile()
+	if s.pin != nil || s.ident != nil {
+		t.Errorf("a directory no open accepts: pin=%v ident=%v, want neither", s.pin, s.ident)
+	}
 }
 
 // TestDupPinGivesItsOwnDescriptor: the dup survives the original's close and
@@ -117,5 +131,18 @@ func TestDupPinGivesItsOwnDescriptor(t *testing.T) {
 	defer func() { dupFd = saved }()
 	if dupPin(again) != nil {
 		t.Error("a failed dup gave a pin")
+	}
+	// The error decides, not the number: a dup that reports a failure along
+	// with a valid descriptor number gives no pin.
+	spare, err := unix.Dup(int(again.Fd()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = unix.Close(spare) }()
+	dupFd = func(int) (int, error) { return spare, errors.New("dup refused") }
+	if got := dupPin(again); got != nil {
+		t.Error("a dup that reported an error gave a pin")
+		spare = -1 // the pin owns it now
+		_ = got.Close()
 	}
 }

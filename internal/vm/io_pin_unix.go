@@ -33,10 +33,8 @@ var dupFd = func(fd int) (int, error) { return unix.FcntlInt(uintptr(fd), unix.F
 // closing one stream leaves the other's pin in place. nil when f is nil, closed,
 // or the dup fails, which leaves that stream with an unpinned identity.
 func dupPin(f *os.File) *os.File {
-	if f == nil {
-		return nil
-	}
-	rc, err := f.SyscallConn()
+	rc, err := f.SyscallConn() // os.ErrInvalid for a nil f
+
 	if err != nil {
 		return nil
 	}
