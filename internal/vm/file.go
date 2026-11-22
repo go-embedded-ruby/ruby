@@ -301,7 +301,7 @@ func (vm *VM) registerFile() {
 	// a leading mode/owner/time argument followed by one or more paths, returning
 	// the count of paths affected (MRI semantics).
 	def("chmod", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		mode := os.FileMode(vm.num2mode(args[0]) & 0o7777)
+		mode := chmodMode(int64(vm.num2mode(args[0])))
 		paths := args[1:]
 		for _, a := range paths {
 			p := pathArg(vm, a)

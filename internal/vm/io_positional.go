@@ -49,7 +49,7 @@ func ioPositionalPath(o *IOObj) (string, bool) {
 // pwriteFile writes data at off in the file at path and touches nothing else:
 // no other byte of the file, and nothing of the stream that opened it. A write
 // past the end leaves a hole, as pwrite(2) does.
-func pwriteFile(path string, data []byte, off int) error {
+func pwriteFile(path string, data []byte, off int64) error {
 	err := writeAtPath(path, data, off)
 	if errors.Is(err, fs.ErrPermission) {
 		err = writeAtWithOwnerWrite(path, data, off, err)
@@ -58,36 +58,68 @@ func pwriteFile(path string, data []byte, off int) error {
 }
 
 // writeAtWithOwnerWrite retries a write refused for permission with the
-// owner-write bit put back for the length of the write, for the reason ioFlush
-// gives: the stream already holds the descriptor's grant
-// (`File.new(path, "w", 0444)` writes through), and reopening by path must not
-// take it away. It never widens the file's mode beyond the write. When the
-// mode cannot be read, the original refusal stands; when it cannot be changed
-// (a file this process does not own), the retry is refused for permission
-// again and that refusal is returned, so no separate branch is needed for it.
-func writeAtWithOwnerWrite(path string, data []byte, off int, refused error) error {
-	st, err := os.Stat(path)
-	if err != nil {
-		return refused
-	}
-	mode := st.Mode().Perm()
-	_ = os.Chmod(path, mode|0o200)
-	err = writeAtPath(path, data, off)
-	_ = os.Chmod(path, mode)
-	return err
+// owner-write bit put back for the length of the write (withOwnerWrite): the
+// stream already holds the descriptor's grant (`File.new(path, "w", 0444)`
+// writes through), and reopening by path must not take it away.
+func writeAtWithOwnerWrite(path string, data []byte, off int64, refused error) error {
+	return withOwnerWrite(path, refused, func() error { return writeAtPath(path, data, off) })
 }
 
-func writeAtPath(path string, data []byte, off int) error {
+func writeAtPath(path string, data []byte, off int64) error {
 	f, err := os.OpenFile(path, os.O_WRONLY, 0)
 	if err != nil {
 		return err
 	}
-	_, werr := f.WriteAt(data, int64(off))
+	_, werr := f.WriteAt(data, off)
 	cerr := f.Close()
 	if werr != nil {
 		return werr
 	}
 	return cerr
+}
+
+// ioHoleMax bounds the hole one #pwrite may open past the end of a stream's
+// buffer (#973). The buffer is a byte slice, so a hole in it is memory:
+// `f.pwrite("AB", 2**40)` asked for a terabyte, and 2**62 reached the
+// allocator. pwrite(2) leaves a sparse hole on disk instead, and this model
+// cannot. When the file was reached, the bytes are on disk and only this
+// stream's in-memory copy stops short of them, the same staleness another
+// writer's bytes already have. When it was not, the buffer is the only copy,
+// and #pwrite raises EFBIG — the errno pwrite(2) gives for a write past the
+// largest size the file may have, which this bound is for a buffer.
+const ioHoleMax = 1 << 26
+
+// mirrorPwrite copies data into the stream's buffer at off, so this stream's
+// own later reads see it, growing the buffer to hold it. It reports false and
+// changes nothing when that would open a hole larger than ioHoleMax.
+//
+// Only the hole is bounded: the bytes of data are already in memory, and the
+// buffer's length is what earlier writes made it. On a 32-bit target, a
+// buffer and data that together come within ioHoleMax of 2**31 could still
+// overflow end; both would then have to be resident in a 4 GiB address space.
+func (o *IOObj) mirrorPwrite(data []byte, off int64) bool {
+	if off-int64(len(o.buf)) > ioHoleMax {
+		return false
+	}
+	if end := int(off) + len(data); end > len(o.buf) {
+		o.buf = append(o.buf, make([]byte, end-len(o.buf))...)
+	}
+	copy(o.buf[off:], data)
+	return true
+}
+
+// raisePwriteErr reports a pwrite(2) that reached the file and was refused,
+// the way rb_io_pwrite's rb_sys_fail_path does: the real errno, labelled
+// with the C function. MRI 4.0.7 on darwin: `f.pwrite("AB", 2**63-1)` is
+// `Errno::EFBIG: File too large @ rb_io_pwrite - <path>`.
+func raisePwriteErr(err error, path string) {
+	if eno, ok := errnoOfError(err); ok {
+		if name, ok := errnoClasses[eno]; ok {
+			raise("Errno::"+name, "%s @ rb_io_pwrite - %s", errnoStrerror(eno), path)
+		}
+		raise("SystemCallError", "%s @ rb_io_pwrite - %s", errnoStrerror(eno), path)
+	}
+	raise("Errno::EIO", "Input/output error @ rb_io_pwrite - %s", path)
 }
 
 // preadFile reads up to n bytes at off from the file at path. It returns io.EOF
@@ -97,13 +129,13 @@ func writeAtPath(path string, data []byte, off int) error {
 // comes from Ruby, and `f.pread(2**40, 0)` must not be an allocation of 2**40
 // bytes. io.ReadAll grows with what is actually read, and the section reader
 // caps that at n (it clamps off+n itself when the sum would overflow).
-func preadFile(path string, n, off int) ([]byte, error) {
+func preadFile(path string, n int, off int64) ([]byte, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
-	data, err := io.ReadAll(io.NewSectionReader(f, int64(off), int64(n)))
+	data, err := io.ReadAll(io.NewSectionReader(f, off, int64(n)))
 	if err != nil {
 		return nil, err
 	}

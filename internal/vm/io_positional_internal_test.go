@@ -81,6 +81,27 @@ func TestWriteAtPathReportsAFailedWrite(t *testing.T) {
 	}
 }
 
+// TestChmodModeKeepsTheSpecialBits: Ruby's 0o4000, 0o2000 and 0o1000 are not
+// Go's; each must map to its own fs.FileMode bit and to nothing else (#972).
+func TestChmodModeKeepsTheSpecialBits(t *testing.T) {
+	cases := []struct {
+		in   int64
+		want fs.FileMode
+	}{
+		{0o755, 0o755},
+		{0o4755, fs.ModeSetuid | 0o755},
+		{0o2755, fs.ModeSetgid | 0o755},
+		{0o1777, fs.ModeSticky | 0o777},
+		{0o7000, fs.ModeSetuid | fs.ModeSetgid | fs.ModeSticky},
+		{0o170644, 0o644}, // file-type bits from a stat mode are not chmod's
+	}
+	for _, c := range cases {
+		if got := chmodMode(c.in); got != c.want {
+			t.Errorf("chmodMode(%#o) = %v, want %v", c.in, got, c.want)
+		}
+	}
+}
+
 // TestPreadFileErrors separates the three answers IO#pread acts on: EOF (raised
 // as EOFError), a real error (the caller falls back to the buffer), and data.
 func TestPreadFileErrors(t *testing.T) {

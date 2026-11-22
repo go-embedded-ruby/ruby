@@ -7,6 +7,7 @@ package vm
 import (
 	"errors"
 	"io"
+	"io/fs"
 	"math/big"
 	"os"
 	"strings"
@@ -308,7 +309,7 @@ func defIOSeekable(cls *RClass) {
 		// all before the maxlen==0 early return, so a non-String buffer still
 		// raises and a zero-length read leaves the buffer's bytes untouched.
 		n := clampInt(vm.toIntCoerce(args[0]))
-		off := clampInt(vm.toIntCoerce(args[1]))
+		off := vm.ioOfftArg64(args[1]) // NUM2OFFT: a Bignum is RangeError (#973)
 		var buf *object.String
 		if len(args) > 2 {
 			buf = vm.ioBufferArg(args[2])
@@ -344,11 +345,13 @@ func defIOSeekable(cls *RClass) {
 			// Unreadable by path (removed between the two calls, permission):
 			// the buffer below is what this stream last saw.
 		}
-		if off >= len(o.buf) {
+		if off >= int64(len(o.buf)) {
 			raise("EOFError", "end of file reached")
 		}
-		data := o.buf[off:min(off+n, len(o.buf))]
-		return ioReadResult(data, buf)
+		// off+n is never formed: with n near MaxInt it overflowed into a slice
+		// bounds panic (#973). What is left past off bounds the read instead.
+		rest := o.buf[off:]
+		return ioReadResult(rest[:min(n, len(rest))], buf)
 	})
 	cls.define("pwrite", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
@@ -357,27 +360,39 @@ func defIOSeekable(cls *RClass) {
 		// stream is checked, so a missing #to_s surfaces as NoMethodError and a
 		// non-Integer offset as the "into Integer" TypeError.
 		data := []byte(vm.objAsString(args[0]))
-		off := clampInt(vm.toIntCoerce(args[1]))
+		off := vm.ioOfftArg64(args[1]) // NUM2OFFT: a Bignum is RangeError (#973)
 		ioCheckOpen(o)
 		if off < 0 {
 			raise("Errno::EINVAL", "Invalid argument - pwrite")
 		}
-		if end := off + len(data); end > len(o.buf) {
-			o.buf = append(o.buf, make([]byte, end-len(o.buf))...)
-		}
-		copy(o.buf[off:], data) // so this stream's own later reads see them
-		o.writable = true       // a written File flushes its buffer back on flush/close
+		o.writable = true // a written File flushes its buffer back on flush/close
+		vm.trackOpenFile(o)
 		// #949: MRI's rb_io_pwrite is pwrite(2), so the bytes are on disk the
 		// moment it returns, and ONLY those bytes: the stream's other pending
 		// writes stay pending. pwriteFile does exactly that, so on success
 		// nothing new is waiting and wbufDirty is left as it was.
-		if p, ok := ioPositionalPath(o); !ok || pwriteFile(p, data, off) != nil {
-			// Door 4 of 5. No file reachable by path: the bytes are in the buffer
-			// only, losable like a buffered #write until a flush. Marking them
-			// dirty and tracking the stream is what keeps them (#643).
-			o.wbufDirty = true
+		if p, ok := ioPositionalPath(o); ok {
+			err := pwriteFile(p, data, off)
+			if err == nil {
+				o.mirrorPwrite(data, off) // best effort: the file has the bytes
+				return object.IntValue(int64(len(data)))
+			}
+			// #973: the file was reached and refused the write — EFBIG past
+			// the largest offset, ENOSPC, EIO. MRI raises that errno; it used to
+			// be swallowed here and the bytes put in the buffer instead. A
+			// refusal for permission is the one kept as before: the owner-write
+			// retry failed, so the buffer below is the stream's grant.
+			if !errors.Is(err, fs.ErrPermission) {
+				raisePwriteErr(err, o.path)
+			}
 		}
-		vm.trackOpenFile(o)
+		// Door 4 of 5. No file reachable by path: the bytes are in the buffer
+		// only, losable like a buffered #write until a flush. Marking them
+		// dirty and tracking the stream is what keeps them (#643).
+		if !o.mirrorPwrite(data, off) {
+			raise("Errno::EFBIG", "File too large @ rb_io_pwrite - %s", o.path)
+		}
+		o.wbufDirty = true
 		return object.IntValue(int64(len(data)))
 	})
 	cls.define("sysseek", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
