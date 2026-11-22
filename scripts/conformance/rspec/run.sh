@@ -12,6 +12,7 @@
 #
 # Env:
 #   RBGO      path to rbgo binary       (default: built from ./cmd/rbgo EVERY run)
+#   PARSESWEEP path to parsesweep       (default: built EVERY run, beside rbgo)
 #   RUBY      path to MRI ruby          (default: first `ruby` on PATH)
 #   CLONES    dir holding rspec-* repos (default: /tmp/rspec-clones)
 set -u
@@ -21,19 +22,27 @@ REPO_ROOT="$(cd "$HERE/../../.." && pwd)"
 RBGO="${RBGO:-}"
 RUBY="${RUBY:-$(command -v ruby || true)}"
 CLONES="${CLONES:-/tmp/rspec-clones}"
-PARSESWEEP="${PARSESWEEP:-/tmp/parsesweep}"
+PARSESWEEP="${PARSESWEEP:-}"
 
 echo "== build rbgo =="
-# #964: built EVERY run, into a directory this run owns and deletes. The old
-# default reused any /tmp/rbgo already there, built by whichever checkout ran
-# first; scripts/oracle.sh and apps/run.sh then picked that same file up.
+# #964, #974: every binary this run builds goes into ONE directory it owns and
+# deletes. The old defaults were /tmp/rbgo and /tmp/parsesweep, shared by every
+# checkout on the machine, so a sweep could run another checkout's helper. A
+# failed mktemp stops the run: an empty directory name would put the binaries
+# at /rbgo. INT and TERM exit through the EXIT trap, so an interrupted run
+# cleans up too.
+BUILD_DIR="$(mktemp -d)" || { echo "mktemp -d failed" >&2; exit 1; }
+trap 'rm -rf "$BUILD_DIR"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 if [ -z "$RBGO" ]; then
-  RBGO_DIR="$(mktemp -d)"
-  trap 'rm -rf "$RBGO_DIR"' EXIT
-  RBGO="$RBGO_DIR/rbgo"
+  RBGO="$BUILD_DIR/rbgo"
   (cd "$REPO_ROOT" && GOWORK=off go build -o "$RBGO" ./cmd/rbgo) || exit 1
 fi
-(cd "$REPO_ROOT" && GOWORK=off go build -o "$PARSESWEEP" ./scripts/conformance/rspec/parsesweep) || exit 1
+if [ -z "$PARSESWEEP" ]; then
+  PARSESWEEP="$BUILD_DIR/parsesweep"
+  (cd "$REPO_ROOT" && GOWORK=off go build -o "$PARSESWEEP" ./scripts/conformance/rspec/parsesweep) || exit 1
+fi
 echo "rbgo: $RBGO"
 go version -m "$RBGO" | grep -E 'vcs\.(revision|modified)' ||
   echo "  (no vcs stamp in $RBGO: built outside a git tree, or with -buildvcs=false)"
