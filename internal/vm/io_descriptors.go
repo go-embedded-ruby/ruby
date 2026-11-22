@@ -224,12 +224,14 @@ func defIOReadExtra(cls *RClass) {
 			o.rdClosed, o.closed = true, true
 			o.pipeEndClosed()
 			o.unpin()
+			o.releaseLockFd() // close(2) drops any flock this stream still holds (#979)
 			return object.NilV
 		}
 		o.rdClosed = true
 		if o.wrClosed { // both halves shut ⇒ the stream is fully closed
 			o.closed = true
 			o.unpin()
+			o.releaseLockFd()
 		}
 		return object.NilV
 	})
@@ -249,6 +251,7 @@ func defIOReadExtra(cls *RClass) {
 			o.wrClosed, o.closed = true, true
 			o.pipeEndClosed()
 			o.unpin()
+			o.releaseLockFd() // close(2) drops any flock this stream still holds (#979)
 			return object.NilV
 		}
 		ioFlush(o)
@@ -256,6 +259,7 @@ func defIOReadExtra(cls *RClass) {
 		if o.rdClosed {
 			o.closed = true
 			o.unpin()
+			o.releaseLockFd()
 		}
 		return object.NilV
 	})
