@@ -64,7 +64,9 @@ func TestRaiseFlushErrKeepsWhatTheErrorSays(t *testing.T) {
 		want string
 	}{
 		{syscall.Errno(errnoNumbers["ENOSPC"]), "Errno::ENOSPC"},
-		{syscall.Errno(4093), "SystemCallError"},
+		// No class anywhere: on Windows it is past WSABASEERR, so mapHostErrno
+		// keeps it, where a smaller unknown code would become EINVAL.
+		{syscall.Errno(9999999), "SystemCallError"},
 		{errors.New("no errno here"), "Errno::EIO"},
 	}
 	for _, c := range cases {
