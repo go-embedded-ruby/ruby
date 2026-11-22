@@ -223,11 +223,13 @@ func defIOReadExtra(cls *RClass) {
 			}
 			o.rdClosed, o.closed = true, true
 			o.pipeEndClosed()
+			o.unpin()
 			return object.NilV
 		}
 		o.rdClosed = true
 		if o.wrClosed { // both halves shut ⇒ the stream is fully closed
 			o.closed = true
+			o.unpin()
 		}
 		return object.NilV
 	})
@@ -246,12 +248,14 @@ func defIOReadExtra(cls *RClass) {
 			ioFlush(o)
 			o.wrClosed, o.closed = true, true
 			o.pipeEndClosed()
+			o.unpin()
 			return object.NilV
 		}
 		ioFlush(o)
 		o.wrClosed = true
 		if o.rdClosed {
 			o.closed = true
+			o.unpin()
 		}
 		return object.NilV
 	})
@@ -728,6 +732,10 @@ func ioReopenIO(vm *VM, o, other *IOObj) object.Value {
 	o.pipeSynced, o.reopened = other.pipeSynced, other.reopened
 	// "if (RTEST(orig->pathv)) fptr->pathv = orig->pathv; else … fptr->pathv = Qnil"
 	o.path, o.ident = other.path, other.ident
+	o.unpin()
+	// Its own pin, so either stream may close first.
+	o.pin = dupPin(other.pin)
+
 	o.cls = other.cls // RBASIC_SET_CLASS(io, rb_obj_class(nfile))
 	return o
 }
@@ -779,6 +787,10 @@ func ioReopenPath(vm *VM, o *IOObj, pos []object.Value, opts *object.Hash) objec
 	}
 	fresh := openFileIO(o.cls, name, modeBase(mode))
 	o.buf, o.pos, o.path, o.ident = fresh.buf, fresh.pos, fresh.path, fresh.ident
+	o.unpin()
+	// The stream takes the new file's pin over.
+	o.pin, fresh.pin = fresh.pin, nil
+
 	o.ungetLo, o.ungetHi = 0, 0 // the read buffer, pushback included, is dropped (#974)
 	if keepHalves {
 		o.writable, o.appendMode, o.openMode = !o.wrClosed, false, ""

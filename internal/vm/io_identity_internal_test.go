@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -164,6 +165,29 @@ func TestTruncateOpenedFile(t *testing.T) {
 	d.rememberFile()
 	if d.ident != nil {
 		t.Error("rememberFile recorded a directory")
+	}
+}
+
+// TestTruncateOnDiskRaisesARefusal: a truncate the file refuses is raised with
+// its errno. A directory under a stream that recorded no file is the case: the
+// open for writing is refused before any truncate.
+func TestTruncateOnDiskRaisesARefusal(t *testing.T) {
+	o := &IOObj{path: t.TempDir()}
+	if got := catchRaise(func() { o.truncateOnDisk(0) }); !strings.HasPrefix(got, "Errno::") {
+		t.Errorf("truncating a directory raised %q, want an Errno", got)
+	}
+	// A replaced path is left alone, and nothing is raised.
+	path := filepath.Join(t.TempDir(), "f")
+	writeFile(t, path, "abcdef", 0o644)
+	r := &IOObj{path: path}
+	r.rememberFile()
+	defer r.unpin()
+	replaceFile(t, path, "other", 0o644)
+	if got := catchRaise(func() { r.truncateOnDisk(1) }); got != "" {
+		t.Errorf("a replaced path raised %q", got)
+	}
+	if got, _ := os.ReadFile(path); string(got) != "other" {
+		t.Errorf("the replacement holds %q, want \"other\"", got)
 	}
 }
 

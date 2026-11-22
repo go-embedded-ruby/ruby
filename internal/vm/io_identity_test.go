@@ -62,6 +62,9 @@ func TestAWriteByPathReachesOnlyTheOpenedFile(t *testing.T) {
 		{name: "guard: a read-only file written by the open's grant", unixMode: true,
 			src:  `f = File.new(path, "w", 0o444); f.write("ro"); f.close; p [File.read(path), File.stat(path).mode & 0o777]`,
 			want: "[\"ro\", 292]\n"},
+		{name: "guard: truncate a file made read-only after the open", unixMode: true,
+			src: `File.write(path, "abcdef"); f = File.open(path, "r+"); File.chmod(0o444, path); f.truncate(2); f.close
+			p [File.size(path), File.stat(path).mode & 0o777]`, want: "[2, 292]\n"},
 		{name: "guard: plain integer flags", src: `File.write(path, "abc"); f = File.open(path, File::RDWR); f.write("Z"); f.close
 			p File.read(path)`, want: "\"Zbc\"\n"},
 	}

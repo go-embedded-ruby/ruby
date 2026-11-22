@@ -6,6 +6,7 @@ package vm
 
 import (
 	"errors"
+	"io/fs"
 	"os"
 )
 
@@ -33,6 +34,18 @@ import (
 // A stream with no regular file behind it (StringIO, a device, a fifo, IO.new
 // on a descriptor) records nothing, and keeps the behaviour it had.
 //
+// An identity is a device and an inode number, and an inode number is reused
+// once its file is gone: on ext4, a file deleted and created again at once at
+// the same path often gets the old number back, and compared equal to the file
+// the stream opened (the Linux runner showed it, writing the stream's byte into
+// the new file). MRI's open descriptor keeps the inode alive, so its number
+// cannot be reused. On Unix a stream therefore holds a descriptor too (pin,
+// io_pin_unix.go), only to keep the inode alive, and takes its identity from
+// that descriptor; the pin is released when the stream closes, and a stream that
+// adopts another's file gets its own dup. A file whose mode refuses both a read
+// and a write open gets no pin and keeps the plain stat identity, and with it
+// the reuse window.
+//
 // The check on the path and the open are two system calls, so a fifo swapped
 // in between them can still make the open block. Closing that window needs a
 // non-blocking open, which is a per-platform flag; the descriptor check after
@@ -48,16 +61,39 @@ var errNotTheOpenedFile = errors.New("the path no longer names the file this str
 var betweenCheckAndOpen func(path string)
 
 // rememberFile records the identity of the regular file at o.path, which has
-// just been opened.
+// just been opened, and pins its inode where the platform allows it.
 func (o *IOObj) rememberFile() {
-	if st, err := os.Stat(o.path); err == nil && st.Mode().IsRegular() {
-		// On Windows a FileInfo from os.Stat fetches its file ID lazily, BY
-		// PATH, at its first os.SameFile; fetched later it would be the ID of
-		// whatever the path names then, and every replacement would compare
-		// equal. Comparing it with itself now fetches and caches it while the
-		// path still names the opened file. Elsewhere the ID is already there.
-		_ = os.SameFile(st, st)
-		o.ident = st
+	o.unpin()
+	o.ident = nil
+	// The identity is the pinned descriptor's own, so the two cannot name
+	// different files.
+	if pin := pinFile(o.path); pin != nil {
+		if pst, err := pin.Stat(); err == nil && pst.Mode().IsRegular() {
+			o.pin, o.ident = pin, pst
+			return
+		}
+		_ = pin.Close() // a directory, a device, a fifo: nothing to remember
+		return
+	}
+	st, err := os.Stat(o.path)
+	if err != nil || !st.Mode().IsRegular() {
+		return
+	}
+	// On Windows a FileInfo from os.Stat fetches its file ID lazily, BY PATH,
+	// at its first os.SameFile; fetched later it would be the ID of whatever
+	// the path names then, and every replacement would compare equal.
+	// Comparing it with itself now fetches and caches it while the path still
+	// names the opened file. Elsewhere the ID is already there.
+	_ = os.SameFile(st, st)
+	o.ident = st
+}
+
+// unpin releases the descriptor holding the opened file's inode, when the
+// stream closes or moves to another file.
+func (o *IOObj) unpin() {
+	if o.pin != nil {
+		_ = o.pin.Close()
+		o.pin = nil
 	}
 }
 
@@ -85,6 +121,21 @@ func (o *IOObj) truncateOpenedFile(n int64) error {
 		return terr
 	}
 	return cerr
+}
+
+// truncateOnDisk is the disk half of IO#truncate. MRI's ftruncate goes through
+// the descriptor the open granted, so a file made read-only since is still
+// truncated; reaching it by path, the open's grant is lent for the call, as a
+// flush does (withOwnerWrite). A path that no longer names the opened file is
+// left alone; any other refusal is raised with its errno.
+func (o *IOObj) truncateOnDisk(n int64) {
+	err := o.truncateOpenedFile(n)
+	if errors.Is(err, fs.ErrPermission) {
+		err = withOwnerWrite(o.path, o.ident, err, func() error { return o.truncateOpenedFile(n) })
+	}
+	if err != nil && !errors.Is(err, errNotTheOpenedFile) {
+		raiseOpenErrno(err, o.path)
+	}
 }
 
 // openOpenedFile opens path with flag only while it still names ident, the

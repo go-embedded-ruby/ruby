@@ -155,6 +155,10 @@ type IOObj struct {
 	// ident is the regular file this stream opened, which a write back by
 	// path must still find there (io_identity.go). Nil when there is none.
 	ident os.FileInfo
+	// pin is a descriptor held on that file, only to keep its inode number
+	// from being reused while the stream is open (io_identity.go). Nil where
+	// the platform needs none or the file refused it.
+	pin *os.File
 }
 
 // pipeBuf is the shared byte channel behind an IO.pipe reader/writer pair. Each
@@ -1788,6 +1792,7 @@ func defIOWrite(cls *RClass) {
 		ioFlush(o)
 		o.pipeEndClosed()
 		o.releaseLockFd() // close(2) drops any flock this stream still holds
+		o.unpin()
 		o.closed = true
 		return object.NilV
 	})
@@ -2183,9 +2188,7 @@ func defStringIORead(cls *RClass) {
 		// that size at once, not at the next flush, which is what File.size and a
 		// second stream opened on the same path see straight afterwards.
 		if o.path != "" && !ioIsStringIO(o) {
-			if err := o.truncateOpenedFile(int64(n)); err != nil {
-				raiseOpenErrno(err, o.path)
-			}
+			o.truncateOnDisk(int64(n))
 		}
 		return object.IntValue(0)
 	})

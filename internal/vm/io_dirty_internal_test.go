@@ -5,9 +5,11 @@
 package vm
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 )
 
@@ -32,6 +34,43 @@ func TestAFlushThatCannotWriteRaises(t *testing.T) {
 	o := &IOObj{isStr: true, writable: true, dirty: []ioSpan{{0, 4}}, path: "/dev/full", buf: []byte("data")}
 	if got := catchRaise(func() { ioFlush(o) }); got != "Errno::ENOSPC" {
 		t.Errorf("ioFlush to /dev/full raised %q, want Errno::ENOSPC", got)
+	}
+}
+
+// TestWriteDirtySkipsASpanPastTheContent: a span that starts at or past the
+// end of what is to be written puts nothing on disk, rather than a slice
+// bound panic or a write of bytes that are not there.
+func TestWriteDirtySkipsASpanPastTheContent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "f")
+	if err := os.WriteFile(path, []byte("data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	o := &IOObj{path: path, dirty: []ioSpan{{6, 8}, {0, 2}}}
+	if err := o.writeDirty([]byte("XY")); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(path); string(got) != "XYta" {
+		t.Errorf("the file holds %q, want \"XYta\"", got)
+	}
+}
+
+// TestRaiseFlushErrKeepsWhatTheErrorSays: an errno with an Errno class raises
+// that class; an errno with none raises SystemCallError, as MRI's
+// rb_syserr_fail does for an unknown errno; an error carrying no errno at all
+// is an I/O error.
+func TestRaiseFlushErrKeepsWhatTheErrorSays(t *testing.T) {
+	cases := []struct {
+		err  error
+		want string
+	}{
+		{syscall.Errno(errnoNumbers["ENOSPC"]), "Errno::ENOSPC"},
+		{syscall.Errno(4093), "SystemCallError"},
+		{errors.New("no errno here"), "Errno::EIO"},
+	}
+	for _, c := range cases {
+		if got := catchRaise(func() { raiseFlushErr(c.err, "f") }); got != c.want {
+			t.Errorf("raiseFlushErr(%v) raised %q, want %q", c.err, got, c.want)
+		}
 	}
 }
 
