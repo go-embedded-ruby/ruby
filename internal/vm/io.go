@@ -78,13 +78,9 @@ type IOObj struct {
 	// write converter applies, translating every "\n" the stream is asked to
 	// write. Only the stream path carries it — #syswrite and #write_nonblock go
 	// to the descriptor and are not decorated.
-	newline string
-	// wbufDirty stands in for MRI's fptr->wbuf.len: bytes a buffered #write has
-	// accepted but not yet put on disk. Only #syswrite reads it, to reproduce
-	// rb_io_syswrite's "syswrite for buffered IO" warning; every flush clears it.
-	wbufDirty bool
-	openMode  string // the fopen-style access mode a file stream was opened with ("r", "w+", "ab"…)
-	nonblock  bool   // O_NONBLOCK is set (io/nonblock): false for a file, true for a pipe end
+	newline  string
+	openMode string // the fopen-style access mode a file stream was opened with ("r", "w+", "ab"…)
+	nonblock bool   // O_NONBLOCK is set (io/nonblock): false for a file, true for a pipe end
 	// encSet records that #set_encoding has resolved this stream's encodings
 	// against the defaults in force at that moment (io.c io_encoding_set →
 	// rb_io_ext_int_to_enc). An empty extEnc then means "no encoding" — MRI's
@@ -143,6 +139,12 @@ type IOObj struct {
 	// holds its whole output; bytes written to the stream are kept in popen.stdin,
 	// out of the buffer being read, and cannot reach a child that is already gone.
 	popen *popenProc
+
+	// dirty holds the file ranges written but not yet flushed (io_dirty.go):
+	// a flush writes these, never the whole buffer. It is MRI's fptr->wbuf, and
+	// the ONLY record that something is pending (pending()): a separate flag
+	// beside it could say "pending" with no range to write, and did (#974).
+	dirty []ioSpan
 
 	// ungetLo/ungetHi bound the bytes #ungetc/#ungetbyte spliced into buf on a
 	// file stream, which are not the file's (io_pushback.go). Empty when equal.
@@ -224,12 +226,12 @@ func (o *IOObj) writeBytes(p []byte) int {
 			o.buf = append(o.buf, make([]byte, end-len(o.buf))...)
 		}
 		copy(o.buf[o.pos:], p)
+		if o.path != "" { // bytes accepted but not on disk: MRI's fptr->wbuf
+			o.markDirty(o.pos, o.pos+len(p))
+		}
 		o.pos += len(p)
 		o.fdAt = o.pos // a write leaves rbuf empty and the descriptor past it
 		o.syncStr()
-		if o.path != "" {
-			o.wbufDirty = true // bytes accepted but not on disk: MRI's fptr->wbuf.len
-		}
 		if o.sync { // sync=true: a File's writes reach disk immediately (no buffering)
 			ioFlush(o)
 		}
@@ -1291,25 +1293,27 @@ func notRegular(p string) bool {
 // disk: MRI's io_fflush with an empty write buffer writes nothing. Before this
 // gate, a stream opened "r+" or "a" and closed untouched put its open-time
 // snapshot back over another writer's bytes, and re-created a file unlinked
-// while it was open. wbufDirty stands in for fptr->wbuf.len, and every write
-// into the buffer that must reach the disk sets it (writeBytes, and #pwrite's
-// buffer fallback); opens that truncate do so on disk at once and need no
-// flush.
+// while it was open. The pending ranges (o.dirty) stand in for fptr->wbuf, and
+// every write into the buffer that must reach the disk records one
+// (writeBytes, and #pwrite's buffer fallback); opens that truncate do so on
+// disk at once and need no flush.
 func ioFlush(o *IOObj) {
-	if !o.writable || o.path == "" || !o.wbufDirty {
+	if !o.writable || o.path == "" || !o.pending() {
 		return
 	}
-	o.wbufDirty = false
 	content := o.diskBytes() // never the bytes #ungetc pushed back (#974)
-	err := os.WriteFile(o.path, content, 0o644)
+	// Only the ranges this stream wrote, at their offsets (io_dirty.go): the
+	// rest of the file may be another writer's by now (#974).
+	defer func() { o.dirty = o.dirty[:0] }()
+	err := o.writeDirty(content)
 	if err == nil {
 		return
 	}
 	if errors.Is(err, fs.ErrPermission) {
-		err = withOwnerWrite(o.path, err, func() error { return os.WriteFile(o.path, content, 0o644) })
+		err = withOwnerWrite(o.path, err, func() error { return o.writeDirty(content) })
 	}
 	if err != nil {
-		raiseOpenErrno(err, o.path)
+		raiseFlushErr(err, o.path)
 	}
 }
 
@@ -1381,7 +1385,7 @@ func (vm *VM) flushOpenFiles() {
 	files := vm.openFiles
 	vm.openFiles = nil
 	for _, o := range files {
-		if o.closed || !o.writable || !o.wbufDirty {
+		if o.closed || !o.writable || !o.pending() {
 			continue
 		}
 		vm.flushOneAtTeardown(o)
@@ -2159,6 +2163,7 @@ func defStringIORead(cls *RClass) {
 			raise("Errno::EINVAL", "Invalid argument")
 		}
 		o.unreadPushback(true) // rb_io_check_writable → io_unread (#974)
+		o.clipDirty(n)         // io_fflush then ftruncate: nothing pending survives past n
 		if n < len(o.buf) {
 			o.buf = o.buf[:n]
 		} else if n > len(o.buf) {

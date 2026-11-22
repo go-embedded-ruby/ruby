@@ -179,7 +179,7 @@ func defIOReadExtra(cls *RClass) {
 		}
 		str := vm.asWriteString(args[0])
 		ioCheckOpen(o)
-		if o.wbufDirty {
+		if o.pending() {
 			vm.rbWarn("syswrite for buffered IO")
 		}
 		n := o.writeBytes(ioShortWrite(o, str.Bytes()))
@@ -337,7 +337,7 @@ func defIOSeekable(cls *RClass) {
 		// there since this stream was opened. rb_io_pread flushes this stream's
 		// own pending writes first, and so does this, so they are seen too.
 		if p, ok := ioPositionalPath(o); ok {
-			if o.wbufDirty {
+			if o.pending() {
 				ioFlush(o)
 			}
 			data, err := preadFile(p, n, off)
@@ -377,7 +377,7 @@ func defIOSeekable(cls *RClass) {
 		// #949: MRI's rb_io_pwrite is pwrite(2), so the bytes are on disk the
 		// moment it returns, and ONLY those bytes: the stream's other pending
 		// writes stay pending. pwriteFile does exactly that, so on success
-		// nothing new is waiting and wbufDirty is left as it was.
+		// nothing new is waiting and the pending ranges are left as they were.
 		if p, ok := ioPositionalPath(o); ok {
 			err := pwriteFile(p, data, off)
 			if err == nil {
@@ -399,7 +399,7 @@ func defIOSeekable(cls *RClass) {
 		if !o.mirrorPwrite(data, off) {
 			raise("Errno::EFBIG", "File too large @ rb_io_pwrite - %s", o.path)
 		}
-		o.wbufDirty = true
+		o.markDirty(int(off), int(off)+len(data))
 		return object.IntValue(int64(len(data)))
 	})
 	cls.define("sysseek", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {

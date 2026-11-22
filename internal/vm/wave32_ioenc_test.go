@@ -306,8 +306,8 @@ func TestIOSysWriteGoesToTheDescriptor(t *testing.T) {
 
 // TestIOSysWriteWarnsAfterBufferedWrite covers rb_io_syswrite's
 // `if (fptr->wbuf.len) rb_warn("syswrite for buffered IO")` — bytes a buffered
-// #write accepted but has not put on disk, which is what wbufDirty stands in
-// for. A #read leaves nothing buffered, so it must NOT warn.
+// #write accepted but has not put on disk, which is what the pending ranges
+// (IOObj.dirty) stand in for. A #read leaves nothing buffered, so it must NOT warn.
 func TestIOSysWriteWarnsAfterBufferedWrite(t *testing.T) {
 	dir := ioScratchDir(t)
 	q := func(name string) string {
