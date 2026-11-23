@@ -107,10 +107,9 @@ func (o *IOObj) writeDirty(content []byte) error {
 // raiseFlushErr raises a failed flush as MRI's rb_io_flush_raw does, through
 // rb_sys_fail_on_write: the errno the system answered, not one guessed from
 // the path. ENOSPC from a full disk, EISDIR, EROFS all keep their class. On
-// Windows the Win32 code is first mapped as rb_w32_map_errno does.
+// Windows errnoOfError has mapped the Win32 code as rb_w32_map_errno does.
 func raiseFlushErr(err error, path string) {
 	if eno, ok := errnoOfError(err); ok {
-		eno = mapHostErrno(eno)
 		if name, ok := errnoClasses[eno]; ok {
 			raise("Errno::"+name, "%s @ rb_io_flush_raw - %s", errnoStrerror(eno), path)
 		}

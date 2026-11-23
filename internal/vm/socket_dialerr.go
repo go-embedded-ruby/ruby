@@ -7,7 +7,6 @@ package vm
 import (
 	"errors"
 	"net"
-	"syscall"
 )
 
 // raiseDialErr reports a failed connect the way MRI's socket layer does, which
@@ -46,12 +45,9 @@ func raiseDialErr(err error, addr string) {
 	}
 	if eno, ok := errnoOfError(err); ok {
 		// Windows fails socket calls with WSAE* codes in the 10000 range, which
-		// errnoClasses does not name -- so a refused connection arrived as a bare
-		// SystemCallError there while darwin and linux were green, and `rescue
-		// Errno::ECONNREFUSED` matched nothing on the one platform nobody tested
-		// it on. MRI translates the same way (rb_w32_map_errno); posixErrno is
-		// the identity everywhere else.
-		eno = int64(posixErrno(syscall.Errno(eno)))
+		// errnoClasses does not name; errnoOfError has already mapped them as
+		// rb_w32_map_errno does, so `rescue Errno::ECONNREFUSED` matches there.
+		//
 		// An empty addr means the caller has no single peer to name -- the
 		// Net::HTTP transport, where the phase may be a read rather than a
 		// connect and Go's own text already carries the address. Naming

@@ -8,7 +8,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 	"unicode/utf8"
 
@@ -1166,7 +1165,7 @@ func raiseFlockErrno(err error, p string) {
 	switch {
 	case errIsErrno(err, "EBADF"):
 		raise("Errno::EBADF", "Bad file descriptor @ rb_file_flock - %s", p)
-	case errors.Is(err, syscall.EINVAL):
+	case errIsErrno(err, "EINVAL"):
 		raise("Errno::EINVAL", "Invalid argument @ rb_file_flock - %s", p)
 	}
 	raise("Errno::ENOTSUP", "Operation not supported @ rb_file_flock - %s", p)

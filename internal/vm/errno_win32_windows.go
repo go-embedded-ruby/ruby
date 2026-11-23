@@ -20,9 +20,7 @@ import (
 //
 // ERROR_INVALID_HANDLE appears twice in errmap, as EBADF and then EINVAL; the
 // first row is the one rb_w32_map_errno's loop returns, so it alone is here.
-// The WSA rows are left out: their codes are at or above WSABASEERR, which
-// mapHostErrno keeps as they are, as rb_w32_map_errno does for a WSA code
-// absent from the table.
+// The WSA rows are wsaErrnos.
 var win32Errnos = map[syscall.Errno]string{
 	windows.ERROR_INVALID_FUNCTION:          "EINVAL",
 	windows.ERROR_FILE_NOT_FOUND:            "ENOENT",
@@ -111,19 +109,102 @@ var win32Errnos = map[syscall.Errno]string{
 	windows.ERROR_CANT_RESOLVE_FILENAME:     "ELOOP",
 }
 
-// wsaBaseErr is WSABASEERR: from there up a code is a socket error, or one of
-// the numbers Go invented for the POSIX names, and is kept as it is.
+// wsaErrnos is the rest of MRI's errmap (win32/win32.c:235-277, v4.0.9): the
+// Winsock rows, all 43 of them, in errmap's order. A socket call fails with
+// one of these, so without them a refused connection is a bare
+// SystemCallError where MRI raises Errno::ECONNREFUSED.
+//
+// Eight targets (EHOSTDOWN, EPFNOSUPPORT, EPROCLIM, EREMOTE, ESHUTDOWN,
+// ESOCKTNOSUPPORT, ETOOMANYREFS, EUSERS) have no number in rbgo on any
+// target (errnoUndefinedEverywhere), so no class to land in: mapHostErrno
+// keeps the WSA code for them, which raises SystemCallError, until the
+// per-platform errno tables define them. TestWSARowsWithoutAClass pins that
+// list, so defining one shows up there.
+var wsaErrnos = map[syscall.Errno]string{
+	windows.WSAEINTR:           "EINTR",
+	windows.WSAEBADF:           "EBADF",
+	windows.WSAEACCES:          "EACCES",
+	windows.WSAEFAULT:          "EFAULT",
+	windows.WSAEINVAL:          "EINVAL",
+	windows.WSAEMFILE:          "EMFILE",
+	windows.WSAEWOULDBLOCK:     "EWOULDBLOCK",
+	windows.WSAEINPROGRESS:     "EINPROGRESS",
+	windows.WSAEALREADY:        "EALREADY",
+	windows.WSAENOTSOCK:        "ENOTSOCK",
+	windows.WSAEDESTADDRREQ:    "EDESTADDRREQ",
+	windows.WSAEMSGSIZE:        "EMSGSIZE",
+	windows.WSAEPROTOTYPE:      "EPROTOTYPE",
+	windows.WSAENOPROTOOPT:     "ENOPROTOOPT",
+	windows.WSAEPROTONOSUPPORT: "EPROTONOSUPPORT",
+	windows.WSAESOCKTNOSUPPORT: "ESOCKTNOSUPPORT",
+	windows.WSAEOPNOTSUPP:      "EOPNOTSUPP",
+	windows.WSAEPFNOSUPPORT:    "EPFNOSUPPORT",
+	windows.WSAEAFNOSUPPORT:    "EAFNOSUPPORT",
+	windows.WSAEADDRINUSE:      "EADDRINUSE",
+	windows.WSAEADDRNOTAVAIL:   "EADDRNOTAVAIL",
+	windows.WSAENETDOWN:        "ENETDOWN",
+	windows.WSAENETUNREACH:     "ENETUNREACH",
+	windows.WSAENETRESET:       "ENETRESET",
+	windows.WSAECONNABORTED:    "ECONNABORTED",
+	windows.WSAECONNRESET:      "ECONNRESET",
+	windows.WSAENOBUFS:         "ENOBUFS",
+	windows.WSAEISCONN:         "EISCONN",
+	windows.WSAENOTCONN:        "ENOTCONN",
+	windows.WSAESHUTDOWN:       "ESHUTDOWN",
+	windows.WSAETOOMANYREFS:    "ETOOMANYREFS",
+	windows.WSAETIMEDOUT:       "ETIMEDOUT",
+	windows.WSAECONNREFUSED:    "ECONNREFUSED",
+	windows.WSAELOOP:           "ELOOP",
+	windows.WSAENAMETOOLONG:    "ENAMETOOLONG",
+	windows.WSAEHOSTDOWN:       "EHOSTDOWN",
+	windows.WSAEHOSTUNREACH:    "EHOSTUNREACH",
+	windows.WSAEPROCLIM:        "EPROCLIM",
+	windows.WSAENOTEMPTY:       "ENOTEMPTY",
+	windows.WSAEUSERS:          "EUSERS",
+	windows.WSAEDQUOT:          "EDQUOT",
+	windows.WSAESTALE:          "ESTALE",
+	windows.WSAEREMOTE:         "EREMOTE",
+}
+
+// wsaBaseErr is WSABASEERR: from there up a code absent from errmap is a
+// socket error MRI has no class for, or one of the numbers Go invented for the
+// POSIX names, and is kept as it is.
 const wsaBaseErr = 10000
 
 // mapHostErrno is rb_w32_map_errno: the errno number of the class MRI raises
 // for the Win32 code eno. A code in errmap gets its class; a code at or above
-// WSABASEERR is kept; any other code is EINVAL.
+// WSABASEERR is kept; any other code is EINVAL. A row whose class rbgo has no
+// number for keeps the code too (see wsaErrnos).
 func mapHostErrno(eno int64) int64 {
-	if eno == 0 || eno >= wsaBaseErr {
+	if eno == 0 {
+		return 0
+	}
+	name, ok := win32Errnos[syscall.Errno(eno)]
+	if !ok {
+		name, ok = wsaErrnos[syscall.Errno(eno)]
+	}
+	if ok {
+		if n, ok := errnoNumberOf(name); ok {
+			return n
+		}
 		return eno
 	}
-	if name, ok := win32Errnos[syscall.Errno(eno)]; ok {
-		return errnoNumbers[name]
+	if eno >= wsaBaseErr {
+		return eno
 	}
 	return errnoNumbers["EINVAL"]
+}
+
+// errnoNumberOf is the number of the Errno class `name` names on this target:
+// its own, or the one an alias (EWOULDBLOCK) shares. ok is false for a name
+// with no number here.
+func errnoNumberOf(name string) (int64, bool) {
+	if n, ok := errnoNumbers[name]; ok {
+		return n, true
+	}
+	if a, ok := errnoAliases[name]; ok {
+		n, ok := errnoNumbers[a]
+		return n, ok
+	}
+	return 0, false
 }

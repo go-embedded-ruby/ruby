@@ -16,20 +16,37 @@ import (
 // *os.SyscallError, *net.OpError …). ok is false for an error with no errno
 // behind it. The Plan 9 counterpart (errno_plan9.go) has no numbers to dig out and
 // derives one from the error string instead.
+//
+// The number is the one of the class MRI raises, which on Windows is not the
+// code the call failed with: a Windows syscall.Errno is the Win32 code itself,
+// and MRI maps it through rb_w32_map_errno before anything raises it, so
+// ERROR_PATH_NOT_FOUND (3) is Errno::ENOENT. mapHostErrno does that mapping
+// there and is the identity elsewhere. Doing it here, once, means no raiser can
+// look a raw Win32 code up in errnoClasses (go-embedded-ruby/ruby#980).
+//
+// ⚠ Windows: Go defines syscall.ENOENT as ERROR_FILE_NOT_FOUND (2) and
+// syscall.ENOTDIR as ERROR_PATH_NOT_FOUND (3), so an ENOTDIR that Go builds
+// itself (os.MkdirAll through a file, os.ReadDir on one, filepath.EvalSymlinks)
+// is the very number Windows uses for a missing path, and is mapped to ENOENT
+// as MRI maps that code. No raiser here takes its error from those three
+// today; one that does must decide the class itself.
 func errnoOfError(err error) (int64, bool) {
 	var eno syscall.Errno
 	if errors.As(err, &eno) {
-		return int64(eno), true
+		return mapHostErrno(int64(eno)), true
 	}
 	return 0, false
 }
 
 // errIsErrno reports whether err is the Errno class `name` (an errnoNumbers key):
-// errors.Is against the host's syscall.Errno of that number, so it answers exactly
-// what errors.Is(err, syscall.<name>) would. It exists so the call sites compile
-// on Plan 9, whose syscall package lacks most of those constants.
+// whether errnoOfError maps it to that class's number. Off Windows that is
+// errors.Is(err, syscall.<name>) for the first errno in the chain; on Windows
+// it also sees that ERROR_DIR_NOT_EMPTY is ENOTEMPTY, which errors.Is cannot.
+// It exists so the call sites compile on Plan 9, whose syscall package lacks
+// most of those constants.
 func errIsErrno(err error, name string) bool {
-	return errors.Is(err, syscall.Errno(errnoNumbers[name]))
+	eno, ok := errnoOfError(err)
+	return ok && eno == errnoNumbers[name]
 }
 
 // errnoText is the message sysFail embeds for an errno: errnoMessage of the host's

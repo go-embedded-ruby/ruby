@@ -1,14 +1,12 @@
 package vm
 
 import (
-	"errors"
 	"os"
 	"os/user"
 	"path"          // always '/'-separated, as Ruby's File is — not path/filepath
 	"path/filepath" // OS-native, only for symlink resolution (File.realpath)
 	"sort"
 	"strings"
-	"syscall"
 	stdtime "time"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
@@ -583,7 +581,7 @@ func (vm *VM) registerFile() {
 		if err := os.Truncate(p, intArg(args[1])); err != nil {
 			// A negative (invalid) length is Errno::EINVAL; a missing path is
 			// Errno::ENOENT — matching truncate(2) and MRI's rb_file_s_truncate.
-			if errors.Is(err, syscall.EINVAL) {
+			if errIsErrno(err, "EINVAL") {
 				raise("Errno::EINVAL", "Invalid argument @ rb_file_s_truncate - %s", p)
 			}
 			raise("Errno::ENOENT", "No such file or directory @ rb_file_s_truncate - %s", p)
